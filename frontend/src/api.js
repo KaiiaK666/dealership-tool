@@ -1,4 +1,34 @@
-const API_BASE = import.meta.env.VITE_API_BASE || (import.meta.env.DEV ? "http://localhost:8108" : "");
+function inferApiBase() {
+  if (typeof window === "undefined") {
+    return import.meta.env.VITE_API_BASE || "";
+  }
+
+  const { hostname, protocol } = window.location;
+
+  if (hostname === "localhost" || hostname === "127.0.0.1") {
+    return import.meta.env.VITE_API_BASE || "http://localhost:8108";
+  }
+
+  if (hostname === "app.bertogden123.com") {
+    return "https://api.bertogden123.com";
+  }
+
+  if (hostname === "dealership-tool-web.onrender.com") {
+    return "https://dealership-tool-api.onrender.com";
+  }
+
+  if (import.meta.env.VITE_API_BASE) {
+    return import.meta.env.VITE_API_BASE;
+  }
+
+  if (hostname.startsWith("app.")) {
+    return `${protocol}//api.${hostname.slice(4)}`;
+  }
+
+  return "";
+}
+
+const API_BASE = inferApiBase();
 
 function buildUrl(path) {
   return `${API_BASE}${path}`;

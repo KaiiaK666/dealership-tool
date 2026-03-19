@@ -70,6 +70,11 @@ Frontend:
 - `VITE_API_BASE=https://your-api-service.onrender.com`
 - `DEALER_CORS_ORIGINS=https://your-frontend-service.onrender.com,https://yourdomain.com,https://www.yourdomain.com`
 
+The frontend also auto-detects these common production hosts without another code change:
+
+- `dealership-tool-web.onrender.com` -> `dealership-tool-api.onrender.com`
+- `app.bertogden123.com` -> `api.bertogden123.com`
+
 ### Custom domain setup
 
 Typical production setup:

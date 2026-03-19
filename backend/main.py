@@ -28,6 +28,10 @@ DEFAULT_CORS_ORIGINS = [
     "http://127.0.0.1:4183",
     "http://localhost:5173",
     "http://127.0.0.1:5173",
+    "https://dealership-tool-web.onrender.com",
+    "https://app.bertogden123.com",
+    "https://bertogden123.com",
+    "https://www.bertogden123.com",
 ]
 EXTRA_CORS_ORIGINS = [
     origin.strip()

@@ -63,6 +63,11 @@ Frontend env vars:
 
 - `VITE_API_BASE=https://api.yourdomain.com`
 
+The frontend can also auto-detect the API host for these production URLs:
+
+- `https://dealership-tool-web.onrender.com` -> `https://dealership-tool-api.onrender.com`
+- `https://app.bertogden123.com` -> `https://api.bertogden123.com`
+
 ## 4. First deploy before custom domains
 
 After the first deploy, Render will give you two temporary URLs like:
