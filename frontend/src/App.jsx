@@ -41,6 +41,11 @@ function currentMonth() {
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}`;
 }
 
+function todayDateValue() {
+  const now = new Date();
+  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+}
+
 function monthLabel(value) {
   if (!value) return "";
   const [year, month] = value.split("-").map(Number);
@@ -169,6 +174,7 @@ export default function App() {
   const activeBdc = bdcAgents.filter((agent) => agent.active);
   const serviceCalendarCells = buildCalendarCells(serviceMonth?.days || []);
   const daysOffMonthCells = buildMonthDateCells(daysOffMonth);
+  const today = todayDateValue();
   const daysOffEntriesBySalesperson = new Map(daysOffData.entries.map((entry) => [entry.salesperson_id, entry.off_dates]));
   const selectedDaysOffSalesperson =
     salespeople.find((person) => String(person.id) === String(selectedDaysOffSalesId)) || salespeople[0] || null;
@@ -455,8 +461,8 @@ export default function App() {
       <main className="app">
         <header className="hero">
           <div>
-            <span className="eyebrow">Dealership Tool</span>
-            <h1>Service drive scheduling and BDC lead distribution.</h1>
+            <span className="eyebrow">Service drive and BDC</span>
+            <h1>Dealership BDC Tool</h1>
           </div>
           <div className="hero-card">
             <span>Admin</span>
@@ -536,10 +542,13 @@ export default function App() {
                   return (
                     <article
                       key={day.date}
-                      className={`calendar-day ${parts.weekdayIndex === 0 || parts.weekdayIndex === 6 ? "is-weekend" : ""}`}
+                      className={`calendar-day ${parts.weekdayIndex === 0 || parts.weekdayIndex === 6 ? "is-weekend" : ""} ${day.date === today ? "is-today" : ""}`}
                     >
                       <div className="calendar-day__header">
-                        <span className="calendar-day__weekday">{day.day_label}</span>
+                        <div className="calendar-day__lead">
+                          <span className="calendar-day__weekday">{day.day_label}</span>
+                          {day.date === today ? <span className="calendar-day__today">Today</span> : null}
+                        </div>
                         <div className="calendar-day__stamp">
                           <strong>{parts.dayNumber}</strong>
                           <small>{parts.monthShort}</small>
