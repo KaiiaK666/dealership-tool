@@ -5,6 +5,7 @@ import {
   createBdcAgent,
   createSalesperson,
   generateServiceDrive,
+  getAdminDaysOff,
   getAdminSession,
   getBdcAgents,
   getBdcLog,
@@ -12,6 +13,7 @@ import {
   getBdcState,
   getSalespeople,
   getServiceDrive,
+  updateAdminDaysOff,
   updateBdcAgent,
   updateSalesperson,
   updateServiceDriveAssignment,
@@ -31,16 +33,6 @@ const ADMIN_SECTIONS = [
   { id: "daysOff", label: "Days Off" },
 ];
 
-const WEEKDAYS = [
-  { value: 0, label: "Mon" },
-  { value: 1, label: "Tue" },
-  { value: 2, label: "Wed" },
-  { value: 3, label: "Thu" },
-  { value: 4, label: "Fri" },
-  { value: 5, label: "Sat" },
-  { value: 6, label: "Sun" },
-];
-
 const TRAFFIC_URL = "https://bokbbui-production.up.railway.app/";
 const CALENDAR_WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
@@ -57,12 +49,6 @@ function monthLabel(value) {
   );
 }
 
-function dateLabel(value) {
-  return new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" }).format(
-    new Date(`${value}T00:00:00`)
-  );
-}
-
 function dateParts(value) {
   const parsed = new Date(`${value}T00:00:00`);
   return {
@@ -70,16 +56,6 @@ function dateParts(value) {
     monthShort: new Intl.DateTimeFormat("en-US", { month: "short" }).format(parsed),
     weekdayIndex: parsed.getDay(),
   };
-}
-
-function scheduleWeekdayIndex(value) {
-  const parsed = new Date(`${value}T00:00:00`);
-  const weekday = parsed.getDay();
-  return weekday === 0 ? 6 : weekday - 1;
-}
-
-function isPersonOffOnDate(person, value) {
-  return person.weekly_days_off.includes(scheduleWeekdayIndex(value));
 }
 
 function dateTimeLabel(value) {
@@ -100,33 +76,30 @@ function errText(error) {
   return "Request failed";
 }
 
-function toggleDay(list, day) {
-  return list.includes(day)
-    ? list.filter((item) => item !== day)
-    : [...list, day].sort((a, b) => a - b);
-}
-
 function buildCalendarCells(days) {
   if (!days.length) return [];
   const firstOffset = dateParts(days[0].date).weekdayIndex;
   return [...Array.from({ length: firstOffset }, () => null), ...days];
 }
 
-function DayOffPicker({ value, onChange }) {
-  return (
-    <div className="dayoff-picker">
-      {WEEKDAYS.map((day) => (
-        <button
-          key={day.value}
-          type="button"
-          className={`day-chip ${value.includes(day.value) ? "is-active" : ""}`}
-          onClick={() => onChange(toggleDay(value, day.value))}
-        >
-          {day.label}
-        </button>
-      ))}
-    </div>
-  );
+function toggleDate(list, value) {
+  return list.includes(value) ? list.filter((item) => item !== value) : [...list, value].sort();
+}
+
+function monthDateValues(monthKey) {
+  if (!monthKey) return [];
+  const [yearText, monthText] = monthKey.split("-");
+  const year = Number(yearText);
+  const monthNumber = Number(monthText);
+  const count = new Date(year, monthNumber, 0).getDate();
+  return Array.from({ length: count }, (_, index) => `${monthKey}-${String(index + 1).padStart(2, "0")}`);
+}
+
+function buildMonthDateCells(monthKey) {
+  const dates = monthDateValues(monthKey);
+  if (!dates.length) return [];
+  const firstOffset = dateParts(dates[0]).weekdayIndex;
+  return [...Array.from({ length: firstOffset }, () => null), ...dates];
 }
 
 function LogTable({ entries, empty }) {
@@ -170,12 +143,15 @@ export default function App() {
   const [tab, setTab] = useState("service");
   const [adminSection, setAdminSection] = useState("staff");
   const [month, setMonth] = useState(currentMonth());
+  const [daysOffMonth, setDaysOffMonth] = useState(currentMonth());
   const [salespeople, setSalespeople] = useState([]);
   const [bdcAgents, setBdcAgents] = useState([]);
   const [serviceMonth, setServiceMonth] = useState(null);
   const [bdcState, setBdcState] = useState(null);
   const [bdcLog, setBdcLog] = useState({ total: 0, entries: [] });
   const [bdcReport, setBdcReport] = useState(null);
+  const [daysOffData, setDaysOffData] = useState({ month: currentMonth(), entries: [] });
+  const [selectedDaysOffSalesId, setSelectedDaysOffSalesId] = useState("");
   const [filters, setFilters] = useState({ salespersonId: "", startDate: "", endDate: "" });
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
@@ -192,9 +168,16 @@ export default function App() {
   const serviceEligible = activeSales.filter((person) => person.dealership !== "Outlet");
   const activeBdc = bdcAgents.filter((agent) => agent.active);
   const serviceCalendarCells = buildCalendarCells(serviceMonth?.days || []);
-  const daysOffSchedule = WEEKDAYS.map((day) => ({
-    ...day,
-    people: activeSales.filter((person) => person.weekly_days_off.includes(day.value)),
+  const daysOffMonthCells = buildMonthDateCells(daysOffMonth);
+  const daysOffEntriesBySalesperson = new Map(daysOffData.entries.map((entry) => [entry.salesperson_id, entry.off_dates]));
+  const selectedDaysOffSalesperson =
+    salespeople.find((person) => String(person.id) === String(selectedDaysOffSalesId)) || salespeople[0] || null;
+  const selectedDaysOffDates = selectedDaysOffSalesperson
+    ? daysOffEntriesBySalesperson.get(selectedDaysOffSalesperson.id) || []
+    : [];
+  const monthDaysOffSummary = monthDateValues(daysOffMonth).map((value) => ({
+    date: value,
+    people: activeSales.filter((person) => (daysOffEntriesBySalesperson.get(person.id) || []).includes(value)),
   }));
 
   async function loadAll(nextMonth = month, nextFilters = filters) {
@@ -249,6 +232,16 @@ export default function App() {
   }, [assignBdcId, activeBdc]);
 
   useEffect(() => {
+    if (!selectedDaysOffSalesId && salespeople.length) {
+      setSelectedDaysOffSalesId(String(salespeople[0].id));
+      return;
+    }
+    if (selectedDaysOffSalesId && !salespeople.some((person) => String(person.id) === String(selectedDaysOffSalesId))) {
+      setSelectedDaysOffSalesId(salespeople.length ? String(salespeople[0].id) : "");
+    }
+  }, [selectedDaysOffSalesId, salespeople]);
+
+  useEffect(() => {
     let active = true;
     const check = async () => {
       if (!adminToken) {
@@ -270,6 +263,26 @@ export default function App() {
       active = false;
     };
   }, [adminToken]);
+
+  useEffect(() => {
+    let active = true;
+    const run = async () => {
+      if (!adminSession) {
+        setDaysOffData({ month: daysOffMonth, entries: [] });
+        return;
+      }
+      try {
+        const data = await getAdminDaysOff(adminToken, { month: daysOffMonth });
+        if (active) setDaysOffData(data);
+      } catch (errorValue) {
+        if (active) setError(errText(errorValue));
+      }
+    };
+    run();
+    return () => {
+      active = false;
+    };
+  }, [adminSession, adminToken, daysOffMonth]);
 
   async function refresh() {
     try {
@@ -307,6 +320,37 @@ export default function App() {
     try {
       await updateSalesperson(adminToken, person.id, person);
       await refresh();
+    } catch (errorValue) {
+      setError(errText(errorValue));
+    } finally {
+      setBusy("");
+    }
+  }
+
+  function setDaysOffEntry(personId, offDates) {
+    setDaysOffData((current) => {
+      const nextEntries = current.entries.filter((entry) => entry.salesperson_id !== personId);
+      if (offDates.length) {
+        nextEntries.push({
+          salesperson_id: personId,
+          off_dates: [...offDates].sort(),
+        });
+      }
+      nextEntries.sort((left, right) => left.salesperson_id - right.salesperson_id);
+      return { ...current, month: daysOffMonth, entries: nextEntries };
+    });
+  }
+
+  async function saveDaysOff(personId, offDates) {
+    setBusy(`days-off-${personId}`);
+    setError("");
+    try {
+      const data = await updateAdminDaysOff(adminToken, {
+        salesperson_id: personId,
+        month: daysOffMonth,
+        off_dates: offDates,
+      });
+      setDaysOffData(data);
     } catch (errorValue) {
       setError(errText(errorValue));
     } finally {
@@ -521,13 +565,11 @@ export default function App() {
                                 disabled={busy === `${day.date}-${brand}`}
                               >
                                 <option value="">Open</option>
-                                {serviceEligible
-                                  .filter((person) => !isPersonOffOnDate(person, day.date))
-                                  .map((person) => (
-                                    <option key={`${brand}-${person.id}`} value={person.id}>
-                                      {person.name} - {person.dealership}
-                                    </option>
-                                  ))}
+                                {serviceEligible.map((person) => (
+                                  <option key={`${brand}-${person.id}`} value={person.id}>
+                                    {person.name} - {person.dealership}
+                                  </option>
+                                ))}
                               </select>
                             ) : null}
                           </div>
@@ -943,63 +985,149 @@ export default function App() {
 
                 {adminSection === "daysOff" ? (
                   <>
-                    <div className="panel">
-                      <span className="eyebrow">Sales days off</span>
-                      <h2>Weekly days-off schedule</h2>
-                      <p className="admin-note">
-                        Anyone marked off on a weekday is skipped for service-drive assignment and BDC round-robin lead
-                        assignment on that weekday.
-                      </p>
+                    <div className="panel row">
+                      <div>
+                        <span className="eyebrow">Sales days off</span>
+                        <h2>{monthLabel(daysOffMonth)}</h2>
+                        <p className="admin-note">
+                          Pick one salesperson, mark their exact dates off for the month, then save. Those dates block
+                          both service-drive assignments and BDC round-robin leads.
+                        </p>
+                      </div>
+                      <div className="controls">
+                        <input type="month" value={daysOffMonth} onChange={(event) => setDaysOffMonth(event.target.value)} />
+                        <select
+                          value={selectedDaysOffSalesId}
+                          onChange={(event) => setSelectedDaysOffSalesId(event.target.value)}
+                        >
+                          <option value="">Choose salesperson</option>
+                          {salespeople.map((person) => (
+                            <option key={`days-off-select-${person.id}`} value={person.id}>
+                              {person.name} - {person.dealership}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
                     </div>
 
-                    <div className="weekday-board">
-                      {daysOffSchedule.map((day) => (
-                        <div key={day.value} className="weekday-card">
-                          <span>{day.label}</span>
-                          <strong>{day.people.length} off</strong>
-                          <div className="weekday-list">
-                            {day.people.length ? (
-                              day.people.map((person) => <small key={`${day.value}-${person.id}`}>{person.name}</small>)
-                            ) : (
-                              <small>No one off</small>
-                            )}
-                          </div>
+                    <div className="stats">
+                      <div className="stat">
+                        <span>Active salespeople</span>
+                        <strong>{activeSales.length}</strong>
+                      </div>
+                      <div className="stat">
+                        <span>{selectedDaysOffSalesperson ? `${selectedDaysOffSalesperson.name} days off` : "Selected days off"}</span>
+                        <strong>{selectedDaysOffDates.length}</strong>
+                      </div>
+                      <div className="stat">
+                        <span>Total blocked dates</span>
+                        <strong>{daysOffData.entries.reduce((sum, entry) => sum + entry.off_dates.length, 0)}</strong>
+                      </div>
+                    </div>
+
+                    <div className="days-off-layout">
+                      <div className="panel">
+                        <span className="eyebrow">Salespeople</span>
+                        <h3>Schedule in order</h3>
+                        <div className="days-off-people">
+                          {salespeople.map((person) => {
+                            const total = (daysOffEntriesBySalesperson.get(person.id) || []).length;
+                            return (
+                              <button
+                                key={`days-off-person-${person.id}`}
+                                type="button"
+                                className={`person-row ${selectedDaysOffSalesperson?.id === person.id ? "is-active" : ""}`}
+                                onClick={() => setSelectedDaysOffSalesId(String(person.id))}
+                              >
+                                <div>
+                                  <strong>{person.name}</strong>
+                                  <small>
+                                    {person.dealership}
+                                    {person.active ? "" : " - Inactive"}
+                                  </small>
+                                </div>
+                                <b>{total}</b>
+                              </button>
+                            );
+                          })}
                         </div>
-                      ))}
-                    </div>
+                      </div>
 
-                    <div className="panel">
-                      <span className="eyebrow">Schedule one by one</span>
-                      <div className="editor-list">
-                        {salespeople.map((person) => (
-                          <EditorCard
-                            key={`days-off-${person.id}`}
-                            title={`${person.name} - ${person.dealership}${person.active ? "" : " (Inactive)"}`}
-                          >
-                            <div className="form compact">
-                              <div>
-                                <span>Weekly days off</span>
-                                <DayOffPicker
-                                  value={person.weekly_days_off}
-                                  onChange={(days) =>
-                                    setSalespeople((current) =>
-                                      current.map((item) =>
-                                        item.id === person.id ? { ...item, weekly_days_off: days } : item
-                                      )
-                                    )
-                                  }
-                                />
-                              </div>
+                      <div className="panel">
+                        <div className="row">
+                          <div>
+                            <span className="eyebrow">Month at a glance</span>
+                            <h3>{selectedDaysOffSalesperson ? selectedDaysOffSalesperson.name : "Choose a salesperson"}</h3>
+                          </div>
+                          {selectedDaysOffSalesperson ? (
+                            <div className="controls">
                               <button
                                 type="button"
-                                onClick={() => saveSalesperson(person)}
-                                disabled={busy === `sales-${person.id}`}
+                                className="secondary"
+                                onClick={() => setDaysOffEntry(selectedDaysOffSalesperson.id, [])}
                               >
-                                {busy === `sales-${person.id}` ? "Saving..." : "Save Days Off"}
+                                Clear Month
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => saveDaysOff(selectedDaysOffSalesperson.id, selectedDaysOffDates)}
+                                disabled={busy === `days-off-${selectedDaysOffSalesperson.id}`}
+                              >
+                                {busy === `days-off-${selectedDaysOffSalesperson.id}` ? "Saving..." : "Save Month"}
                               </button>
                             </div>
-                          </EditorCard>
-                        ))}
+                          ) : null}
+                        </div>
+
+                        {selectedDaysOffSalesperson ? (
+                          <>
+                            <p className="admin-note">
+                              Click a date to toggle it off for {selectedDaysOffSalesperson.name}. Each square also
+                              shows how many total people are off that day.
+                            </p>
+                            <div className="days-off-board">
+                              <div className="calendar-board__weekdays">
+                                {CALENDAR_WEEKDAYS.map((label) => (
+                                  <span key={`days-off-${label}`}>{label}</span>
+                                ))}
+                              </div>
+                              <div className="days-off-grid">
+                                {daysOffMonthCells.map((value, index) => {
+                                  if (!value) {
+                                    return <div key={`days-off-blank-${index}`} className="calendar-blank" aria-hidden="true" />;
+                                  }
+
+                                  const parts = dateParts(value);
+                                  const isOff = selectedDaysOffDates.includes(value);
+                                  const summary = monthDaysOffSummary.find((item) => item.date === value);
+                                  const offNames = summary?.people.map((person) => person.name).join(", ") || "No one off";
+
+                                  return (
+                                    <button
+                                      key={value}
+                                      type="button"
+                                      className={`days-off-day ${isOff ? "is-off" : ""}`}
+                                      title={offNames}
+                                      onClick={() =>
+                                        setDaysOffEntry(
+                                          selectedDaysOffSalesperson.id,
+                                          toggleDate(selectedDaysOffDates, value)
+                                        )
+                                      }
+                                    >
+                                      <span>{parts.monthShort}</span>
+                                      <strong>{parts.dayNumber}</strong>
+                                      <small>{isOff ? "Off" : "Working"}</small>
+                                      <b>{summary?.people.length || 0} off</b>
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </div>
+                          </>
+                        ) : (
+                          <div className="empty">Choose a salesperson to build the month schedule.</div>
+                        )}
                       </div>
                     </div>
                   </>

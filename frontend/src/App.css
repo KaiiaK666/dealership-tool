@@ -540,6 +540,99 @@ th {
   margin-bottom: 12px;
 }
 
+.days-off-layout {
+  display: grid;
+  grid-template-columns: minmax(280px, 340px) minmax(0, 1fr);
+  gap: 18px;
+}
+
+.days-off-people {
+  display: grid;
+  gap: 10px;
+}
+
+.person-row {
+  padding: 14px 16px;
+  border-radius: 18px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.76);
+  color: var(--ink);
+  box-shadow: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  text-align: left;
+}
+
+.person-row small {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+}
+
+.person-row b {
+  font-size: 1.3rem;
+}
+
+.person-row.is-active {
+  border-color: rgba(196, 102, 52, 0.28);
+  background: rgba(196, 102, 52, 0.1);
+}
+
+.days-off-board {
+  display: grid;
+  gap: 12px;
+  overflow-x: auto;
+}
+
+.days-off-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.days-off-day {
+  min-height: 118px;
+  padding: 12px;
+  border-radius: 18px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.82);
+  color: var(--ink);
+  box-shadow: none;
+  display: grid;
+  gap: 6px;
+  align-content: start;
+  text-align: left;
+}
+
+.days-off-day span {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.days-off-day strong {
+  font-size: 1.8rem;
+  line-height: 1;
+}
+
+.days-off-day small {
+  color: var(--muted);
+}
+
+.days-off-day b {
+  color: var(--accent-deep);
+}
+
+.days-off-day.is-off {
+  border-color: rgba(196, 102, 52, 0.28);
+  background: linear-gradient(180deg, rgba(196, 102, 52, 0.18), rgba(255, 255, 255, 0.92));
+}
+
 .weekday-board {
   display: grid;
   grid-template-columns: repeat(7, minmax(0, 1fr));
@@ -641,6 +734,7 @@ th {
   .hero,
   .lead-grid,
   .admin-grid,
+  .days-off-layout,
   .weekday-board,
   .filters,
   .stats {
@@ -657,6 +751,7 @@ th {
   .hero,
   .lead-grid,
   .admin-grid,
+  .days-off-layout,
   .weekday-board,
   .filters,
   .stats {
@@ -685,7 +780,8 @@ th {
   }
 
   .calendar-board__weekdays,
-  .calendar-grid {
+  .calendar-grid,
+  .days-off-grid {
     min-width: 840px;
     gap: 10px;
   }

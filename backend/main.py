@@ -100,6 +100,22 @@ class BdcAgentOut(BaseModel):
     updated_ts: float
 
 
+class DaysOffEntryOut(BaseModel):
+    salesperson_id: int
+    off_dates: List[str]
+
+
+class DaysOffMonthOut(BaseModel):
+    month: str
+    entries: List[DaysOffEntryOut]
+
+
+class DaysOffMonthIn(BaseModel):
+    salesperson_id: int
+    month: str
+    off_dates: List[str] = []
+
+
 class ServiceSlotOut(BaseModel):
     brand: str
     salesperson_id: Optional[int] = None
@@ -220,10 +236,6 @@ def normalize_brand(value: str) -> str:
     return normalized
 
 
-def salesperson_is_off(person: SalespersonOut, on_day: date) -> bool:
-    return on_day.weekday() in person.weekly_days_off
-
-
 def normalize_days_off(value: Any) -> List[int]:
     items = value if isinstance(value, list) else str(value or "").split(",")
     days: List[int] = []
@@ -278,6 +290,47 @@ def month_dates(month_key: str) -> List[date]:
     month_num = int(month_text)
     count = calendar.monthrange(year, month_num)[1]
     return [date(year, month_num, day) for day in range(1, count + 1)]
+
+
+def month_date_bounds(month_key: str) -> Tuple[str, str]:
+    dates = month_dates(month_key)
+    start_day = dates[0]
+    end_day = dates[-1] + timedelta(days=1)
+    return start_day.isoformat(), end_day.isoformat()
+
+
+def fetch_days_off_lookup(start_day: date, end_day: date) -> set[Tuple[int, str]]:
+    end_exclusive = end_day + timedelta(days=1)
+    rows = db_query_all(
+        """
+        SELECT salesperson_id, off_date
+        FROM salesperson_days_off
+        WHERE off_date >= ? AND off_date < ?
+        """,
+        (start_day.isoformat(), end_exclusive.isoformat()),
+    )
+    return {
+        (int(row.get("salesperson_id") or 0), str(row.get("off_date") or ""))
+        for row in rows
+        if row.get("salesperson_id") is not None and row.get("off_date")
+    }
+
+
+def salesperson_is_off(
+    person: SalespersonOut,
+    on_day: date,
+    off_lookup: Optional[set[Tuple[int, str]]] = None,
+) -> bool:
+    key = (person.id, on_day.isoformat())
+    if off_lookup is not None:
+        return key in off_lookup
+    return (
+        db_query_one(
+            "SELECT 1 AS found FROM salesperson_days_off WHERE salesperson_id = ? AND off_date = ?",
+            (person.id, on_day.isoformat()),
+        )
+        is not None
+    )
 
 
 def get_db() -> sqlite3.Connection:
@@ -360,6 +413,17 @@ def init_db() -> None:
             active INTEGER NOT NULL DEFAULT 1,
             created_ts REAL NOT NULL,
             updated_ts REAL NOT NULL
+        )
+        """
+    )
+    db_execute(
+        """
+        CREATE TABLE IF NOT EXISTS salesperson_days_off (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            salesperson_id INTEGER NOT NULL,
+            off_date TEXT NOT NULL,
+            created_ts REAL NOT NULL,
+            UNIQUE(salesperson_id, off_date)
         )
         """
     )
@@ -490,6 +554,62 @@ def fetch_bdc_agents(include_inactive: bool = False) -> List[BdcAgentOut]:
     return [bdc_agent_out(row) for row in db_query_all(query)]
 
 
+def fetch_days_off_month(month_key: str) -> DaysOffMonthOut:
+    start_date, end_date = month_date_bounds(month_key)
+    rows = db_query_all(
+        """
+        SELECT salesperson_id, off_date
+        FROM salesperson_days_off
+        WHERE off_date >= ? AND off_date < ?
+        ORDER BY salesperson_id ASC, off_date ASC
+        """,
+        (start_date, end_date),
+    )
+    grouped: Dict[int, List[str]] = {}
+    for row in rows:
+        sid = int(row.get("salesperson_id") or 0)
+        grouped.setdefault(sid, []).append(str(row.get("off_date") or ""))
+    entries = [DaysOffEntryOut(salesperson_id=sid, off_dates=dates) for sid, dates in grouped.items()]
+    return DaysOffMonthOut(month=month_key, entries=entries)
+
+
+def update_days_off_month(payload: DaysOffMonthIn) -> DaysOffMonthOut:
+    month_key = parse_month_key(payload.month)
+    person = get_salesperson_row(int(payload.salesperson_id))
+    if not person:
+        raise HTTPException(status_code=404, detail="salesperson not found")
+
+    valid_dates = {item.isoformat() for item in month_dates(month_key)}
+    normalized_dates: List[str] = []
+    for value in payload.off_dates:
+        off_day = parse_iso_date(value, "off_dates")
+        off_date = off_day.isoformat()
+        if off_date not in valid_dates:
+            raise HTTPException(status_code=400, detail="off_dates must stay within the selected month")
+        if off_date not in normalized_dates:
+            normalized_dates.append(off_date)
+    normalized_dates.sort()
+
+    start_date, end_date = month_date_bounds(month_key)
+    db_execute(
+        "DELETE FROM salesperson_days_off WHERE salesperson_id = ? AND off_date >= ? AND off_date < ?",
+        (int(payload.salesperson_id), start_date, end_date),
+    )
+
+    now_ts = time.time()
+    for off_date in normalized_dates:
+        db_execute(
+            """
+            INSERT INTO salesperson_days_off (salesperson_id, off_date, created_ts)
+            VALUES (?, ?, ?)
+            ON CONFLICT(salesperson_id, off_date) DO NOTHING
+            """,
+            (int(payload.salesperson_id), off_date, now_ts),
+        )
+
+    return fetch_days_off_month(month_key)
+
+
 def create_salesperson(payload: SalespersonIn) -> SalespersonOut:
     name = normalize_name(payload.name, "name")
     dealership = normalize_dealership(payload.dealership)
@@ -583,14 +703,19 @@ def service_pointer_key(brand: str) -> str:
     return f"service:pointer:{brand.lower()}"
 
 
-def pick_service_person(pool: List[SalespersonOut], service_day: date, cursor: int) -> Tuple[Optional[SalespersonOut], int]:
+def pick_service_person(
+    pool: List[SalespersonOut],
+    service_day: date,
+    cursor: int,
+    off_lookup: Optional[set[Tuple[int, str]]] = None,
+) -> Tuple[Optional[SalespersonOut], int]:
     if not pool:
         return None, 0
     start = cursor % len(pool)
     for offset in range(len(pool)):
         idx = (start + offset) % len(pool)
         candidate = pool[idx]
-        if salesperson_is_off(candidate, service_day):
+        if salesperson_is_off(candidate, service_day, off_lookup):
             continue
         return candidate, (idx + 1) % len(pool)
     return None, start
@@ -627,11 +752,13 @@ def pick_round_robin_person(
 
 def generate_service_schedule(month_key: str, overwrite: bool = False) -> None:
     ensure_month_slots(month_key)
+    month_days = month_dates(month_key)
     people = fetch_salespeople(include_inactive=False)
     pools = {
         "Kia": [person for person in people if person.dealership == "Kia"],
         "Mazda": [person for person in people if person.dealership == "Mazda"],
     }
+    off_lookup = fetch_days_off_lookup(month_days[0], month_days[-1]) if month_days else set()
     existing_rows = db_query_all(
         "SELECT schedule_date, brand, salesperson_id FROM service_drive_assignments WHERE month_key = ?",
         (month_key,),
@@ -644,12 +771,12 @@ def generate_service_schedule(month_key: str, overwrite: bool = False) -> None:
         except Exception:
             pointers[brand] = 0
 
-    for service_day in month_dates(month_key):
+    for service_day in month_days:
         for brand in SERVICE_BRANDS:
             row = existing_map.get((service_day.isoformat(), brand)) or {}
             if not overwrite and row.get("salesperson_id") is not None:
                 continue
-            picked, next_pointer = pick_service_person(pools.get(brand, []), service_day, pointers[brand])
+            picked, next_pointer = pick_service_person(pools.get(brand, []), service_day, pointers[brand], off_lookup)
             pointers[brand] = next_pointer
             db_execute(
                 """
@@ -1009,6 +1136,21 @@ def put_salesperson(
 ) -> SalespersonOut:
     require_admin(x_admin_token)
     return update_salesperson(salesperson_id, payload)
+
+
+@app.get("/api/admin/days-off", response_model=DaysOffMonthOut)
+def get_admin_days_off(month: str, x_admin_token: Optional[str] = Header(default=None)) -> DaysOffMonthOut:
+    require_admin(x_admin_token)
+    return fetch_days_off_month(parse_month_key(month))
+
+
+@app.put("/api/admin/days-off", response_model=DaysOffMonthOut)
+def put_admin_days_off(
+    payload: DaysOffMonthIn,
+    x_admin_token: Optional[str] = Header(default=None),
+) -> DaysOffMonthOut:
+    require_admin(x_admin_token)
+    return update_days_off_month(payload)
 
 
 @app.get("/api/bdc/agents", response_model=List[BdcAgentOut])
