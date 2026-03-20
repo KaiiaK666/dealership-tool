@@ -26,6 +26,11 @@ const TABS = [
   { id: "admin", label: "Admin" },
 ];
 
+const ADMIN_SECTIONS = [
+  { id: "staff", label: "Staff Setup" },
+  { id: "daysOff", label: "Days Off" },
+];
+
 const WEEKDAYS = [
   { value: 0, label: "Mon" },
   { value: 1, label: "Tue" },
@@ -65,6 +70,16 @@ function dateParts(value) {
     monthShort: new Intl.DateTimeFormat("en-US", { month: "short" }).format(parsed),
     weekdayIndex: parsed.getDay(),
   };
+}
+
+function scheduleWeekdayIndex(value) {
+  const parsed = new Date(`${value}T00:00:00`);
+  const weekday = parsed.getDay();
+  return weekday === 0 ? 6 : weekday - 1;
+}
+
+function isPersonOffOnDate(person, value) {
+  return person.weekly_days_off.includes(scheduleWeekdayIndex(value));
 }
 
 function dateTimeLabel(value) {
@@ -153,6 +168,7 @@ function EditorCard({ title, children }) {
 
 export default function App() {
   const [tab, setTab] = useState("service");
+  const [adminSection, setAdminSection] = useState("staff");
   const [month, setMonth] = useState(currentMonth());
   const [salespeople, setSalespeople] = useState([]);
   const [bdcAgents, setBdcAgents] = useState([]);
@@ -176,6 +192,10 @@ export default function App() {
   const serviceEligible = activeSales.filter((person) => person.dealership !== "Outlet");
   const activeBdc = bdcAgents.filter((agent) => agent.active);
   const serviceCalendarCells = buildCalendarCells(serviceMonth?.days || []);
+  const daysOffSchedule = WEEKDAYS.map((day) => ({
+    ...day,
+    people: activeSales.filter((person) => person.weekly_days_off.includes(day.value)),
+  }));
 
   async function loadAll(nextMonth = month, nextFilters = filters) {
     const [sales, bdc, service, state, log, report] = await Promise.all([
@@ -501,11 +521,13 @@ export default function App() {
                                 disabled={busy === `${day.date}-${brand}`}
                               >
                                 <option value="">Open</option>
-                                {serviceEligible.map((person) => (
-                                  <option key={`${brand}-${person.id}`} value={person.id}>
-                                    {person.name} - {person.dealership}
-                                  </option>
-                                ))}
+                                {serviceEligible
+                                  .filter((person) => !isPersonOffOnDate(person, day.date))
+                                  .map((person) => (
+                                    <option key={`${brand}-${person.id}`} value={person.id}>
+                                      {person.name} - {person.dealership}
+                                    </option>
+                                  ))}
                               </select>
                             ) : null}
                           </div>
@@ -542,9 +564,16 @@ export default function App() {
                 <div className="next-up">
                   <span>Next up</span>
                   <strong>{bdcState?.next_salesperson?.name || "No active salesperson"}</strong>
-                  <small>{bdcState?.next_salesperson?.dealership || "Round robin is empty"}</small>
+                  <small>
+                    {bdcState?.next_salesperson?.dealership ||
+                      (activeSales.length ? "Everyone scheduled today is off" : "Round robin is empty")}
+                  </small>
                 </div>
-                <button type="button" onClick={assignLead} disabled={busy === "assign" || !activeBdc.length}>
+                <button
+                  type="button"
+                  onClick={assignLead}
+                  disabled={busy === "assign" || !activeBdc.length || !bdcState?.next_salesperson}
+                >
                   {busy === "assign" ? "Assigning..." : "Assign Next Lead"}
                 </button>
               </div>
@@ -554,6 +583,12 @@ export default function App() {
               <div className="notice success">
                 {lastAssignment.bdc_agent_name} assigned {lastAssignment.salesperson_name} at{" "}
                 {dateTimeLabel(lastAssignment.assigned_at)}
+              </div>
+            ) : null}
+
+            {activeSales.length && !bdcState?.next_salesperson ? (
+              <div className="notice">
+                Nobody is eligible in the round robin today because every active salesperson is scheduled off.
               </div>
             ) : null}
 
@@ -715,185 +750,260 @@ export default function App() {
                   </button>
                 </div>
 
-                <div className="admin-grid">
-                  <div className="panel">
-                    <span className="eyebrow">Add salesperson</span>
-                    <form className="form" onSubmit={addSalesperson}>
-                      <label>
-                        <span>Name</span>
-                        <input
-                          value={salesForm.name}
-                          onChange={(event) => setSalesForm((current) => ({ ...current, name: event.target.value }))}
-                        />
-                      </label>
-                      <label>
-                        <span>Dealership</span>
-                        <select
-                          value={salesForm.dealership}
-                          onChange={(event) => setSalesForm((current) => ({ ...current, dealership: event.target.value }))}
-                        >
-                          <option value="Kia">Kia</option>
-                          <option value="Mazda">Mazda</option>
-                          <option value="Outlet">Outlet</option>
-                        </select>
-                      </label>
-                      <label className="checkbox">
-                        <input
-                          type="checkbox"
-                          checked={salesForm.active}
-                          onChange={(event) => setSalesForm((current) => ({ ...current, active: event.target.checked }))}
-                        />
-                        <span>Active</span>
-                      </label>
-                      <div>
-                        <span>Weekly days off</span>
-                        <DayOffPicker
-                          value={salesForm.weekly_days_off}
-                          onChange={(days) => setSalesForm((current) => ({ ...current, weekly_days_off: days }))}
-                        />
+                <div className="subtabs">
+                  {ADMIN_SECTIONS.map((item) => (
+                    <button
+                      key={item.id}
+                      type="button"
+                      className={`subtab ${adminSection === item.id ? "is-active" : ""}`}
+                      onClick={() => setAdminSection(item.id)}
+                    >
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
+
+                {adminSection === "staff" ? (
+                  <>
+                    <div className="admin-grid">
+                      <div className="panel">
+                        <span className="eyebrow">Add salesperson</span>
+                        <form className="form" onSubmit={addSalesperson}>
+                          <label>
+                            <span>Name</span>
+                            <input
+                              value={salesForm.name}
+                              onChange={(event) => setSalesForm((current) => ({ ...current, name: event.target.value }))}
+                            />
+                          </label>
+                          <label>
+                            <span>Dealership</span>
+                            <select
+                              value={salesForm.dealership}
+                              onChange={(event) =>
+                                setSalesForm((current) => ({ ...current, dealership: event.target.value }))
+                              }
+                            >
+                              <option value="Kia">Kia</option>
+                              <option value="Mazda">Mazda</option>
+                              <option value="Outlet">Outlet</option>
+                            </select>
+                          </label>
+                          <label className="checkbox">
+                            <input
+                              type="checkbox"
+                              checked={salesForm.active}
+                              onChange={(event) => setSalesForm((current) => ({ ...current, active: event.target.checked }))}
+                            />
+                            <span>Active</span>
+                          </label>
+                          <button type="submit" disabled={busy === "add-sales"}>
+                            {busy === "add-sales" ? "Adding..." : "Add Salesperson"}
+                          </button>
+                        </form>
                       </div>
-                      <button type="submit" disabled={busy === "add-sales"}>
-                        {busy === "add-sales" ? "Adding..." : "Add Salesperson"}
-                      </button>
-                    </form>
-                  </div>
 
-                  <div className="panel">
-                    <span className="eyebrow">Add BDC agent</span>
-                    <form className="form" onSubmit={addBdcAgent}>
-                      <label>
-                        <span>Name</span>
-                        <input
-                          value={bdcForm.name}
-                          onChange={(event) => setBdcForm((current) => ({ ...current, name: event.target.value }))}
-                        />
-                      </label>
-                      <label className="checkbox">
-                        <input
-                          type="checkbox"
-                          checked={bdcForm.active}
-                          onChange={(event) => setBdcForm((current) => ({ ...current, active: event.target.checked }))}
-                        />
-                        <span>Active</span>
-                      </label>
-                      <button type="submit" disabled={busy === "add-bdc"}>
-                        {busy === "add-bdc" ? "Adding..." : "Add BDC Agent"}
-                      </button>
-                    </form>
-                  </div>
-                </div>
+                      <div className="panel">
+                        <span className="eyebrow">Add BDC agent</span>
+                        <form className="form" onSubmit={addBdcAgent}>
+                          <label>
+                            <span>Name</span>
+                            <input
+                              value={bdcForm.name}
+                              onChange={(event) => setBdcForm((current) => ({ ...current, name: event.target.value }))}
+                            />
+                          </label>
+                          <label className="checkbox">
+                            <input
+                              type="checkbox"
+                              checked={bdcForm.active}
+                              onChange={(event) => setBdcForm((current) => ({ ...current, active: event.target.checked }))}
+                            />
+                            <span>Active</span>
+                          </label>
+                          <button type="submit" disabled={busy === "add-bdc"}>
+                            {busy === "add-bdc" ? "Adding..." : "Add BDC Agent"}
+                          </button>
+                        </form>
+                      </div>
+                    </div>
 
-                <div className="admin-grid">
-                  <div className="panel">
-                    <span className="eyebrow">Edit salespeople</span>
-                    <div className="editor-list">
-                      {salespeople.map((person) => (
-                        <EditorCard key={person.id} title={`${person.name} - ${person.dealership}`}>
-                          <div className="form compact">
-                            <label>
-                              <span>Name</span>
-                              <input
-                                value={person.name}
-                                onChange={(event) =>
-                                  setSalespeople((current) =>
-                                    current.map((item) =>
-                                      item.id === person.id ? { ...item, name: event.target.value } : item
+                    <div className="admin-grid">
+                      <div className="panel">
+                        <span className="eyebrow">Edit salespeople</span>
+                        <div className="editor-list">
+                          {salespeople.map((person) => (
+                            <EditorCard key={person.id} title={`${person.name} - ${person.dealership}`}>
+                              <div className="form compact">
+                                <label>
+                                  <span>Name</span>
+                                  <input
+                                    value={person.name}
+                                    onChange={(event) =>
+                                      setSalespeople((current) =>
+                                        current.map((item) =>
+                                          item.id === person.id ? { ...item, name: event.target.value } : item
+                                        )
+                                      )
+                                    }
+                                  />
+                                </label>
+                                <label>
+                                  <span>Dealership</span>
+                                  <select
+                                    value={person.dealership}
+                                    onChange={(event) =>
+                                      setSalespeople((current) =>
+                                        current.map((item) =>
+                                          item.id === person.id ? { ...item, dealership: event.target.value } : item
+                                        )
+                                      )
+                                    }
+                                  >
+                                    <option value="Kia">Kia</option>
+                                    <option value="Mazda">Mazda</option>
+                                    <option value="Outlet">Outlet</option>
+                                  </select>
+                                </label>
+                                <label className="checkbox">
+                                  <input
+                                    type="checkbox"
+                                    checked={person.active}
+                                    onChange={(event) =>
+                                      setSalespeople((current) =>
+                                        current.map((item) =>
+                                          item.id === person.id ? { ...item, active: event.target.checked } : item
+                                        )
+                                      )
+                                    }
+                                  />
+                                  <span>Active</span>
+                                </label>
+                                <button
+                                  type="button"
+                                  onClick={() => saveSalesperson(person)}
+                                  disabled={busy === `sales-${person.id}`}
+                                >
+                                  {busy === `sales-${person.id}` ? "Saving..." : "Save"}
+                                </button>
+                              </div>
+                            </EditorCard>
+                          ))}
+                        </div>
+                      </div>
+
+                      <div className="panel">
+                        <span className="eyebrow">Edit BDC agents</span>
+                        <div className="editor-list">
+                          {bdcAgents.map((agent) => (
+                            <EditorCard key={agent.id} title={agent.name}>
+                              <div className="form compact">
+                                <label>
+                                  <span>Name</span>
+                                  <input
+                                    value={agent.name}
+                                    onChange={(event) =>
+                                      setBdcAgents((current) =>
+                                        current.map((item) =>
+                                          item.id === agent.id ? { ...item, name: event.target.value } : item
+                                        )
+                                      )
+                                    }
+                                  />
+                                </label>
+                                <label className="checkbox">
+                                  <input
+                                    type="checkbox"
+                                    checked={agent.active}
+                                    onChange={(event) =>
+                                      setBdcAgents((current) =>
+                                        current.map((item) =>
+                                          item.id === agent.id ? { ...item, active: event.target.checked } : item
+                                        )
+                                      )
+                                    }
+                                  />
+                                  <span>Active</span>
+                                </label>
+                                <button
+                                  type="button"
+                                  onClick={() => saveBdcAgent(agent)}
+                                  disabled={busy === `bdc-${agent.id}`}
+                                >
+                                  {busy === `bdc-${agent.id}` ? "Saving..." : "Save"}
+                                </button>
+                              </div>
+                            </EditorCard>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  </>
+                ) : null}
+
+                {adminSection === "daysOff" ? (
+                  <>
+                    <div className="panel">
+                      <span className="eyebrow">Sales days off</span>
+                      <h2>Weekly days-off schedule</h2>
+                      <p className="admin-note">
+                        Anyone marked off on a weekday is skipped for service-drive assignment and BDC round-robin lead
+                        assignment on that weekday.
+                      </p>
+                    </div>
+
+                    <div className="weekday-board">
+                      {daysOffSchedule.map((day) => (
+                        <div key={day.value} className="weekday-card">
+                          <span>{day.label}</span>
+                          <strong>{day.people.length} off</strong>
+                          <div className="weekday-list">
+                            {day.people.length ? (
+                              day.people.map((person) => <small key={`${day.value}-${person.id}`}>{person.name}</small>)
+                            ) : (
+                              <small>No one off</small>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="panel">
+                      <span className="eyebrow">Schedule one by one</span>
+                      <div className="editor-list">
+                        {salespeople.map((person) => (
+                          <EditorCard
+                            key={`days-off-${person.id}`}
+                            title={`${person.name} - ${person.dealership}${person.active ? "" : " (Inactive)"}`}
+                          >
+                            <div className="form compact">
+                              <div>
+                                <span>Weekly days off</span>
+                                <DayOffPicker
+                                  value={person.weekly_days_off}
+                                  onChange={(days) =>
+                                    setSalespeople((current) =>
+                                      current.map((item) =>
+                                        item.id === person.id ? { ...item, weekly_days_off: days } : item
+                                      )
                                     )
-                                  )
-                                }
-                              />
-                            </label>
-                            <label>
-                              <span>Dealership</span>
-                              <select
-                                value={person.dealership}
-                                onChange={(event) =>
-                                  setSalespeople((current) =>
-                                    current.map((item) =>
-                                      item.id === person.id ? { ...item, dealership: event.target.value } : item
-                                    )
-                                  )
-                                }
+                                  }
+                                />
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => saveSalesperson(person)}
+                                disabled={busy === `sales-${person.id}`}
                               >
-                                <option value="Kia">Kia</option>
-                                <option value="Mazda">Mazda</option>
-                                <option value="Outlet">Outlet</option>
-                              </select>
-                            </label>
-                            <label className="checkbox">
-                              <input
-                                type="checkbox"
-                                checked={person.active}
-                                onChange={(event) =>
-                                  setSalespeople((current) =>
-                                    current.map((item) =>
-                                      item.id === person.id ? { ...item, active: event.target.checked } : item
-                                    )
-                                  )
-                                }
-                              />
-                              <span>Active</span>
-                            </label>
-                            <div>
-                              <span>Weekly days off</span>
-                              <DayOffPicker
-                                value={person.weekly_days_off}
-                                onChange={(days) =>
-                                  setSalespeople((current) =>
-                                    current.map((item) =>
-                                      item.id === person.id ? { ...item, weekly_days_off: days } : item
-                                    )
-                                  )
-                                }
-                              />
+                                {busy === `sales-${person.id}` ? "Saving..." : "Save Days Off"}
+                              </button>
                             </div>
-                            <button type="button" onClick={() => saveSalesperson(person)} disabled={busy === `sales-${person.id}`}>
-                              {busy === `sales-${person.id}` ? "Saving..." : "Save"}
-                            </button>
-                          </div>
-                        </EditorCard>
-                      ))}
+                          </EditorCard>
+                        ))}
+                      </div>
                     </div>
-                  </div>
-
-                  <div className="panel">
-                    <span className="eyebrow">Edit BDC agents</span>
-                    <div className="editor-list">
-                      {bdcAgents.map((agent) => (
-                        <EditorCard key={agent.id} title={agent.name}>
-                          <div className="form compact">
-                            <label>
-                              <span>Name</span>
-                              <input
-                                value={agent.name}
-                                onChange={(event) =>
-                                  setBdcAgents((current) =>
-                                    current.map((item) => (item.id === agent.id ? { ...item, name: event.target.value } : item))
-                                  )
-                                }
-                              />
-                            </label>
-                            <label className="checkbox">
-                              <input
-                                type="checkbox"
-                                checked={agent.active}
-                                onChange={(event) =>
-                                  setBdcAgents((current) =>
-                                    current.map((item) => (item.id === agent.id ? { ...item, active: event.target.checked } : item))
-                                  )
-                                }
-                              />
-                              <span>Active</span>
-                            </label>
-                            <button type="button" onClick={() => saveBdcAgent(agent)} disabled={busy === `bdc-${agent.id}`}>
-                              {busy === `bdc-${agent.id}` ? "Saving..." : "Save"}
-                            </button>
-                          </div>
-                        </EditorCard>
-                      ))}
-                    </div>
-                  </div>
-                </div>
+                  </>
+                ) : null}
               </>
             )}
           </section>

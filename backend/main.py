@@ -220,6 +220,10 @@ def normalize_brand(value: str) -> str:
     return normalized
 
 
+def salesperson_is_off(person: SalespersonOut, on_day: date) -> bool:
+    return on_day.weekday() in person.weekly_days_off
+
+
 def normalize_days_off(value: Any) -> List[int]:
     items = value if isinstance(value, list) else str(value or "").split(",")
     days: List[int] = []
@@ -583,14 +587,42 @@ def pick_service_person(pool: List[SalespersonOut], service_day: date, cursor: i
     if not pool:
         return None, 0
     start = cursor % len(pool)
-    weekday = service_day.weekday()
     for offset in range(len(pool)):
         idx = (start + offset) % len(pool)
         candidate = pool[idx]
-        if weekday in candidate.weekly_days_off:
+        if salesperson_is_off(candidate, service_day):
             continue
         return candidate, (idx + 1) % len(pool)
     return None, start
+
+
+def pick_round_robin_person(
+    pool: List[SalespersonOut],
+    working_day: date,
+    cursor: int,
+) -> Tuple[Optional[SalespersonOut], int, List[SalespersonOut]]:
+    if not pool:
+        return None, 0, []
+
+    start = cursor % len(pool)
+    ordered_available: List[SalespersonOut] = []
+    picked: Optional[SalespersonOut] = None
+    next_pointer = start
+
+    for offset in range(len(pool)):
+        idx = (start + offset) % len(pool)
+        candidate = pool[idx]
+        if salesperson_is_off(candidate, working_day):
+            continue
+        if picked is None:
+            picked = candidate
+            next_pointer = (idx + 1) % len(pool)
+        ordered_available.append(candidate)
+
+    if picked is None:
+        return None, start, []
+
+    return picked, next_pointer, ordered_available
 
 
 def generate_service_schedule(month_key: str, overwrite: bool = False) -> None:
@@ -727,6 +759,9 @@ def update_service_assignment(schedule_date: str, brand: str, salesperson_id: Op
             raise HTTPException(status_code=400, detail="salesperson must be active")
         if str(person.get("dealership") or "") == "Outlet":
             raise HTTPException(status_code=400, detail="Outlet salespeople cannot be assigned to service drive")
+        person_out = salesperson_out(person)
+        if salesperson_is_off(person_out, service_day):
+            raise HTTPException(status_code=400, detail="salesperson is off on that day")
         resolved_id = int(person.get("id") or 0)
     db_execute(
         """
@@ -766,8 +801,8 @@ def build_bdc_state() -> BdcStateOut:
     except Exception:
         pointer = 0
     next_index = pointer % len(queue)
-    rotated = queue[next_index:] + queue[:next_index]
-    return BdcStateOut(next_index=next_index, next_salesperson=rotated[0], queue=rotated)
+    picked, _, available_queue = pick_round_robin_person(queue, now_local().date(), pointer)
+    return BdcStateOut(next_index=next_index, next_salesperson=picked, queue=available_queue)
 
 
 def assign_next_lead(payload: BdcLeadAssignIn) -> BdcAssignmentOut:
@@ -778,8 +813,9 @@ def assign_next_lead(payload: BdcLeadAssignIn) -> BdcAssignmentOut:
         pointer = int(get_meta("bdc:pointer") or 0)
     except Exception:
         pointer = 0
-    idx = pointer % len(salespeople)
-    salesperson = salespeople[idx]
+    salesperson, next_pointer, _ = pick_round_robin_person(salespeople, now_local().date(), pointer)
+    if not salesperson:
+        raise HTTPException(status_code=400, detail="no active salespeople available for today's rotation")
     bdc_agent_id, bdc_agent_name = resolve_bdc_agent(payload.bdc_agent_id, payload.bdc_agent_name)
     created_id = db_insert(
         """
@@ -797,7 +833,7 @@ def assign_next_lead(payload: BdcLeadAssignIn) -> BdcAssignmentOut:
             salesperson.dealership,
         ),
     )
-    set_meta("bdc:pointer", str((idx + 1) % len(salespeople)))
+    set_meta("bdc:pointer", str(next_pointer))
     row = db_query_one("SELECT * FROM bdc_assignment_log WHERE id = ?", (created_id,))
     if not row:
         raise HTTPException(status_code=500, detail="failed to create assignment log")
