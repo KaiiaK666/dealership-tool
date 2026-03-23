@@ -152,6 +152,8 @@ class ServiceAssignmentIn(BaseModel):
 class BdcLeadAssignIn(BaseModel):
     bdc_agent_id: Optional[int] = None
     bdc_agent_name: Optional[str] = None
+    customer_name: str = ""
+    customer_phone: str = ""
 
 
 class BdcAssignmentOut(BaseModel):
@@ -163,6 +165,8 @@ class BdcAssignmentOut(BaseModel):
     salesperson_id: int
     salesperson_name: str
     salesperson_dealership: str
+    customer_name: str = ""
+    customer_phone: str = ""
 
 
 class BdcStateOut(BaseModel):
@@ -196,6 +200,40 @@ class BdcReportOut(BaseModel):
     rows: List[BdcReportRowOut]
 
 
+class ServiceDriveNoteIn(BaseModel):
+    appointment_at: str
+    brand: str
+    customer_name: str
+    customer_phone: str = ""
+    admin_notes: str = ""
+
+
+class ServiceDriveSalesNoteIn(BaseModel):
+    salesperson_id: Optional[int] = None
+    sales_notes: str = ""
+
+
+class ServiceDriveNoteOut(BaseModel):
+    id: int
+    appointment_at: str
+    appointment_date: str
+    brand: str
+    customer_name: str
+    customer_phone: str
+    admin_notes: str
+    sales_notes: str
+    salesperson_id: Optional[int] = None
+    salesperson_name: Optional[str] = None
+    salesperson_dealership: Optional[str] = None
+    created_ts: float
+    updated_ts: float
+
+
+class ServiceDriveNotesOut(BaseModel):
+    total: int
+    entries: List[ServiceDriveNoteOut]
+
+
 def now_local() -> datetime:
     return datetime.now(ZoneInfo(RULES_TIMEZONE))
 
@@ -216,6 +254,20 @@ def normalize_name(value: str, field_name: str) -> str:
     if not text:
         raise HTTPException(status_code=400, detail=f"{field_name} is required")
     if len(text) > 120:
+        raise HTTPException(status_code=400, detail=f"{field_name} is too long")
+    return text
+
+
+def normalize_short_text(value: str, field_name: str, max_len: int = 160) -> str:
+    text = " ".join(str(value or "").strip().split())
+    if len(text) > max_len:
+        raise HTTPException(status_code=400, detail=f"{field_name} is too long")
+    return text
+
+
+def normalize_notes(value: str, field_name: str, max_len: int = 4000) -> str:
+    text = str(value or "").replace("\r\n", "\n").strip()
+    if len(text) > max_len:
         raise HTTPException(status_code=400, detail=f"{field_name} is too long")
     return text
 
@@ -282,6 +334,26 @@ def parse_iso_date(value: str, field_name: str) -> date:
         return datetime.strptime(text, "%Y-%m-%d").date()
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=f"{field_name} must be YYYY-MM-DD") from exc
+
+
+def parse_local_datetime(value: str, field_name: str) -> Tuple[str, str, float]:
+    text = str(value or "").strip()
+    if not text:
+        raise HTTPException(status_code=400, detail=f"{field_name} is required")
+
+    parsed: Optional[datetime] = None
+    for fmt in ("%Y-%m-%dT%H:%M", "%Y-%m-%dT%H:%M:%S"):
+        try:
+            parsed = datetime.strptime(text, fmt)
+            break
+        except ValueError:
+            continue
+
+    if parsed is None:
+        raise HTTPException(status_code=400, detail=f"{field_name} must be YYYY-MM-DDTHH:MM")
+
+    local_dt = parsed.replace(second=0, microsecond=0, tzinfo=ZoneInfo(RULES_TIMEZONE))
+    return local_dt.strftime("%Y-%m-%dT%H:%M"), local_dt.date().isoformat(), local_dt.timestamp()
 
 
 def month_dates(month_key: str) -> List[date]:
@@ -371,6 +443,17 @@ def db_query_one(query: str, params: Tuple[Any, ...] = ()) -> Optional[Dict[str,
     return dict(row) if row else None
 
 
+def table_columns(table_name: str) -> set[str]:
+    rows = db_query_all(f"PRAGMA table_info({table_name})")
+    return {str(row.get("name") or "") for row in rows}
+
+
+def ensure_column(table_name: str, column_name: str, definition: str) -> None:
+    if column_name in table_columns(table_name):
+        return
+    db_execute(f"ALTER TABLE {table_name} ADD COLUMN {column_name} {definition}")
+
+
 def get_meta(key: str) -> Optional[str]:
     row = db_query_one("SELECT value FROM meta WHERE key = ?", (key,))
     return str(row.get("value")) if row else None
@@ -455,6 +538,25 @@ def init_db() -> None:
         )
         """
     )
+    ensure_column("bdc_assignment_log", "customer_name", "TEXT NOT NULL DEFAULT ''")
+    ensure_column("bdc_assignment_log", "customer_phone", "TEXT NOT NULL DEFAULT ''")
+    db_execute(
+        """
+        CREATE TABLE IF NOT EXISTS service_drive_notes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            appointment_at TEXT NOT NULL,
+            appointment_date TEXT NOT NULL,
+            appointment_ts REAL NOT NULL,
+            brand TEXT NOT NULL,
+            customer_name TEXT NOT NULL,
+            customer_phone TEXT NOT NULL DEFAULT '',
+            admin_notes TEXT NOT NULL DEFAULT '',
+            sales_notes TEXT NOT NULL DEFAULT '',
+            created_ts REAL NOT NULL,
+            updated_ts REAL NOT NULL
+        )
+        """
+    )
 
 
 def prune_sessions() -> None:
@@ -512,6 +614,8 @@ def bdc_log_out(row: Dict[str, Any]) -> BdcAssignmentOut:
         salesperson_id=int(row.get("salesperson_id") or 0),
         salesperson_name=str(row.get("salesperson_name") or ""),
         salesperson_dealership=str(row.get("salesperson_dealership") or ""),
+        customer_name=str(row.get("customer_name") or ""),
+        customer_phone=str(row.get("customer_phone") or ""),
     )
 
 
@@ -521,6 +625,42 @@ def get_salesperson_row(salesperson_id: int) -> Optional[Dict[str, Any]]:
 
 def get_bdc_agent_row(agent_id: int) -> Optional[Dict[str, Any]]:
     return db_query_one("SELECT * FROM bdc_agents WHERE id = ?", (int(agent_id),))
+
+
+def get_service_note_row(note_id: int) -> Optional[Dict[str, Any]]:
+    return db_query_one(
+        """
+        SELECT
+            n.*,
+            s.salesperson_id,
+            p.name AS salesperson_name,
+            p.dealership AS salesperson_dealership
+        FROM service_drive_notes n
+        LEFT JOIN service_drive_assignments s
+            ON s.schedule_date = n.appointment_date AND s.brand = n.brand
+        LEFT JOIN salespeople p ON p.id = s.salesperson_id
+        WHERE n.id = ?
+        """,
+        (int(note_id),),
+    )
+
+
+def service_note_out(row: Dict[str, Any]) -> ServiceDriveNoteOut:
+    return ServiceDriveNoteOut(
+        id=int(row.get("id") or 0),
+        appointment_at=str(row.get("appointment_at") or ""),
+        appointment_date=str(row.get("appointment_date") or ""),
+        brand=str(row.get("brand") or ""),
+        customer_name=str(row.get("customer_name") or ""),
+        customer_phone=str(row.get("customer_phone") or ""),
+        admin_notes=str(row.get("admin_notes") or ""),
+        sales_notes=str(row.get("sales_notes") or ""),
+        salesperson_id=int(row["salesperson_id"]) if row.get("salesperson_id") is not None else None,
+        salesperson_name=str(row.get("salesperson_name") or "") or None,
+        salesperson_dealership=str(row.get("salesperson_dealership") or "") or None,
+        created_ts=float(row.get("created_ts") or 0.0),
+        updated_ts=float(row.get("updated_ts") or 0.0),
+    )
 
 
 def assert_unique_name(table: str, name: str, exclude_id: Optional[int] = None) -> None:
@@ -944,11 +1084,14 @@ def assign_next_lead(payload: BdcLeadAssignIn) -> BdcAssignmentOut:
     if not salesperson:
         raise HTTPException(status_code=400, detail="no active salespeople available for today's rotation")
     bdc_agent_id, bdc_agent_name = resolve_bdc_agent(payload.bdc_agent_id, payload.bdc_agent_name)
+    customer_name = normalize_short_text(payload.customer_name, "customer_name")
+    customer_phone = normalize_short_text(payload.customer_phone, "customer_phone", max_len=40)
     created_id = db_insert(
         """
         INSERT INTO bdc_assignment_log (
-            assigned_ts, assigned_at, bdc_agent_id, bdc_agent_name, salesperson_id, salesperson_name, salesperson_dealership
-        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            assigned_ts, assigned_at, bdc_agent_id, bdc_agent_name, salesperson_id, salesperson_name,
+            salesperson_dealership, customer_name, customer_phone
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             time.time(),
@@ -958,6 +1101,8 @@ def assign_next_lead(payload: BdcLeadAssignIn) -> BdcAssignmentOut:
             salesperson.id,
             salesperson.name,
             salesperson.dealership,
+            customer_name,
+            customer_phone,
         ),
     )
     set_meta("bdc:pointer", str(next_pointer))
@@ -1091,6 +1236,143 @@ def fetch_bdc_report(
     )
 
 
+def build_service_notes_filter(
+    salesperson_id: Optional[int] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    brand: Optional[str] = None,
+) -> Tuple[str, Tuple[Any, ...]]:
+    clauses: List[str] = []
+    params: List[Any] = []
+
+    if start_date:
+        clauses.append("n.appointment_date >= ?")
+        params.append(parse_iso_date(start_date, "start_date").isoformat())
+
+    if end_date:
+        clauses.append("n.appointment_date <= ?")
+        params.append(parse_iso_date(end_date, "end_date").isoformat())
+
+    if start_date and end_date and str(params[0]) > str(params[1]):
+        raise HTTPException(status_code=400, detail="start_date must be on or before end_date")
+
+    if brand:
+        clauses.append("n.brand = ?")
+        params.append(normalize_brand(brand))
+
+    if salesperson_id is not None:
+        clauses.append("s.salesperson_id = ?")
+        params.append(int(salesperson_id))
+
+    where_sql = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+    return where_sql, tuple(params)
+
+
+def fetch_service_notes(
+    salesperson_id: Optional[int] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    brand: Optional[str] = None,
+    limit: int = 300,
+) -> ServiceDriveNotesOut:
+    where_sql, params = build_service_notes_filter(
+        salesperson_id=salesperson_id,
+        start_date=start_date,
+        end_date=end_date,
+        brand=brand,
+    )
+    safe_limit = max(1, min(int(limit or 300), 500))
+    join_sql = """
+        FROM service_drive_notes n
+        LEFT JOIN service_drive_assignments s
+            ON s.schedule_date = n.appointment_date AND s.brand = n.brand
+        LEFT JOIN salespeople p ON p.id = s.salesperson_id
+    """
+    count_row = db_query_one(f"SELECT COUNT(*) AS count {join_sql}{where_sql}", params) or {}
+    rows = db_query_all(
+        f"""
+        SELECT
+            n.*,
+            s.salesperson_id,
+            p.name AS salesperson_name,
+            p.dealership AS salesperson_dealership
+        {join_sql}
+        {where_sql}
+        ORDER BY n.appointment_ts ASC, n.id ASC
+        LIMIT ?
+        """,
+        params + (safe_limit,),
+    )
+    return ServiceDriveNotesOut(total=int(count_row.get("count") or 0), entries=[service_note_out(row) for row in rows])
+
+
+def create_service_note(payload: ServiceDriveNoteIn) -> ServiceDriveNoteOut:
+    appointment_at, appointment_date, appointment_ts = parse_local_datetime(payload.appointment_at, "appointment_at")
+    brand = normalize_brand(payload.brand)
+    customer_name = normalize_name(payload.customer_name, "customer_name")
+    customer_phone = normalize_short_text(payload.customer_phone, "customer_phone", max_len=40)
+    admin_notes = normalize_notes(payload.admin_notes, "admin_notes")
+    now_ts = time.time()
+    created_id = db_insert(
+        """
+        INSERT INTO service_drive_notes (
+            appointment_at, appointment_date, appointment_ts, brand, customer_name, customer_phone, admin_notes,
+            sales_notes, created_ts, updated_ts
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (appointment_at, appointment_date, appointment_ts, brand, customer_name, customer_phone, admin_notes, "", now_ts, now_ts),
+    )
+    row = get_service_note_row(created_id)
+    if not row:
+        raise HTTPException(status_code=500, detail="failed to create service note")
+    return service_note_out(row)
+
+
+def update_service_note_admin(note_id: int, payload: ServiceDriveNoteIn) -> ServiceDriveNoteOut:
+    existing = get_service_note_row(note_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="service note not found")
+    appointment_at, appointment_date, appointment_ts = parse_local_datetime(payload.appointment_at, "appointment_at")
+    brand = normalize_brand(payload.brand)
+    customer_name = normalize_name(payload.customer_name, "customer_name")
+    customer_phone = normalize_short_text(payload.customer_phone, "customer_phone", max_len=40)
+    admin_notes = normalize_notes(payload.admin_notes, "admin_notes")
+    db_execute(
+        """
+        UPDATE service_drive_notes
+        SET appointment_at = ?, appointment_date = ?, appointment_ts = ?, brand = ?, customer_name = ?,
+            customer_phone = ?, admin_notes = ?, updated_ts = ?
+        WHERE id = ?
+        """,
+        (appointment_at, appointment_date, appointment_ts, brand, customer_name, customer_phone, admin_notes, time.time(), note_id),
+    )
+    row = get_service_note_row(note_id)
+    if not row:
+        raise HTTPException(status_code=500, detail="failed to update service note")
+    return service_note_out(row)
+
+
+def update_service_note_sales(note_id: int, payload: ServiceDriveSalesNoteIn) -> ServiceDriveNoteOut:
+    row = get_service_note_row(note_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="service note not found")
+    assigned_salesperson_id = int(row["salesperson_id"]) if row.get("salesperson_id") is not None else None
+    if assigned_salesperson_id is None:
+        raise HTTPException(status_code=400, detail="no salesperson is currently assigned to that service appointment")
+    if payload.salesperson_id is not None and int(payload.salesperson_id) != assigned_salesperson_id:
+        raise HTTPException(status_code=403, detail="that note belongs to a different salesperson today")
+
+    sales_notes = normalize_notes(payload.sales_notes, "sales_notes")
+    db_execute(
+        "UPDATE service_drive_notes SET sales_notes = ?, updated_ts = ? WHERE id = ?",
+        (sales_notes, time.time(), note_id),
+    )
+    saved = get_service_note_row(note_id)
+    if not saved:
+        raise HTTPException(status_code=500, detail="failed to update service note")
+    return service_note_out(saved)
+
+
 @app.on_event("startup")
 def on_startup() -> None:
     init_db()
@@ -1175,12 +1457,48 @@ def get_service_drive(month: Optional[str] = None) -> ServiceMonthOut:
     return fetch_service_month(parse_month_key(month or now_local().strftime("%Y-%m")))
 
 
+@app.get("/api/service-drive/notes", response_model=ServiceDriveNotesOut)
+def get_service_drive_notes(
+    salesperson_id: Optional[int] = None,
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    brand: Optional[str] = None,
+    limit: int = 300,
+) -> ServiceDriveNotesOut:
+    return fetch_service_notes(
+        salesperson_id=salesperson_id,
+        start_date=start_date,
+        end_date=end_date,
+        brand=brand,
+        limit=limit,
+    )
+
+
 @app.post("/api/admin/service-drive/generate", response_model=ServiceMonthOut)
 def post_service_generate(payload: ServiceGenerateIn, x_admin_token: Optional[str] = Header(default=None)) -> ServiceMonthOut:
     require_admin(x_admin_token)
     month_key = parse_month_key(payload.month)
     generate_service_schedule(month_key, overwrite=payload.overwrite)
     return fetch_service_month(month_key)
+
+
+@app.post("/api/admin/service-drive/notes", response_model=ServiceDriveNoteOut)
+def post_service_note(
+    payload: ServiceDriveNoteIn,
+    x_admin_token: Optional[str] = Header(default=None),
+) -> ServiceDriveNoteOut:
+    require_admin(x_admin_token)
+    return create_service_note(payload)
+
+
+@app.put("/api/admin/service-drive/notes/{note_id}", response_model=ServiceDriveNoteOut)
+def put_service_note(
+    note_id: int,
+    payload: ServiceDriveNoteIn,
+    x_admin_token: Optional[str] = Header(default=None),
+) -> ServiceDriveNoteOut:
+    require_admin(x_admin_token)
+    return update_service_note_admin(note_id, payload)
 
 
 @app.put("/api/admin/service-drive/assignment", response_model=ServiceMonthOut)
@@ -1190,6 +1508,11 @@ def put_service_assignment(
 ) -> ServiceMonthOut:
     require_admin(x_admin_token)
     return update_service_assignment(payload.schedule_date, payload.brand, payload.salesperson_id)
+
+
+@app.put("/api/service-drive/notes/{note_id}/sales", response_model=ServiceDriveNoteOut)
+def put_service_note_sales(note_id: int, payload: ServiceDriveSalesNoteIn) -> ServiceDriveNoteOut:
+    return update_service_note_sales(note_id, payload)
 
 
 @app.get("/api/bdc/state", response_model=BdcStateOut)
@@ -1219,55 +1542,3 @@ def get_bdc_report(
     end_date: Optional[str] = None,
 ) -> BdcReportOut:
     return fetch_bdc_report(salesperson_id=salesperson_id, start_date=start_date, end_date=end_date)
-    db_execute(
-        """
-        CREATE TABLE IF NOT EXISTS salespeople (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            dealership TEXT NOT NULL,
-            weekly_days_off TEXT NOT NULL DEFAULT '',
-            active INTEGER NOT NULL DEFAULT 1,
-            created_ts REAL NOT NULL,
-            updated_ts REAL NOT NULL
-        )
-        """
-    )
-    db_execute(
-        """
-        CREATE TABLE IF NOT EXISTS bdc_agents (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL,
-            active INTEGER NOT NULL DEFAULT 1,
-            created_ts REAL NOT NULL,
-            updated_ts REAL NOT NULL
-        )
-        """
-    )
-    db_execute(
-        """
-        CREATE TABLE IF NOT EXISTS service_drive_assignments (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            schedule_date TEXT NOT NULL,
-            month_key TEXT NOT NULL,
-            brand TEXT NOT NULL,
-            salesperson_id INTEGER,
-            created_ts REAL NOT NULL,
-            updated_ts REAL NOT NULL,
-            UNIQUE(schedule_date, brand)
-        )
-        """
-    )
-    db_execute(
-        """
-        CREATE TABLE IF NOT EXISTS bdc_assignment_log (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            assigned_ts REAL NOT NULL,
-            assigned_at TEXT NOT NULL,
-            bdc_agent_id INTEGER,
-            bdc_agent_name TEXT NOT NULL,
-            salesperson_id INTEGER NOT NULL,
-            salesperson_name TEXT NOT NULL,
-            salesperson_dealership TEXT NOT NULL
-        )
-        """
-    )

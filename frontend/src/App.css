@@ -43,7 +43,8 @@ body {
 
 button,
 input,
-select {
+select,
+textarea {
   font: inherit;
 }
 
@@ -79,7 +80,8 @@ button.secondary {
 }
 
 input,
-select {
+select,
+textarea {
   width: 100%;
   padding: 12px 14px;
   border-radius: 14px;
@@ -89,8 +91,14 @@ select {
   outline: none;
 }
 
+textarea {
+  min-height: 120px;
+  resize: vertical;
+}
+
 input:focus,
-select:focus {
+select:focus,
+textarea:focus {
   border-color: rgba(196, 102, 52, 0.45);
   box-shadow: 0 0 0 4px rgba(196, 102, 52, 0.12);
 }
@@ -505,6 +513,10 @@ label span,
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
+.filters--notes {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
 .form.compact {
   gap: 12px;
 }
@@ -577,6 +589,164 @@ th {
 
 .editor-card h4 {
   margin-bottom: 12px;
+}
+
+.store-roster-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.store-column {
+  padding: 16px;
+  border-radius: 22px;
+  border: 1px solid var(--line);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(247, 241, 232, 0.76));
+  box-shadow: var(--card-shadow);
+  display: grid;
+  gap: 14px;
+}
+
+.store-column__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.store-column__header b {
+  min-width: 48px;
+  padding: 10px 12px;
+  border-radius: 16px;
+  text-align: center;
+  color: var(--accent-deep);
+  background: rgba(196, 102, 52, 0.12);
+}
+
+.editor-list--two-up {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.notes-list {
+  display: grid;
+  gap: 16px;
+}
+
+.note-card {
+  padding: 18px;
+  border-radius: 24px;
+  border: 1px solid var(--line);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.92), rgba(247, 241, 232, 0.82));
+  box-shadow: var(--card-shadow);
+  display: grid;
+  gap: 16px;
+}
+
+.note-card.is-admin {
+  background:
+    linear-gradient(180deg, rgba(255, 252, 247, 0.94), rgba(245, 239, 230, 0.84)),
+    rgba(255, 255, 255, 0.9);
+}
+
+.note-card__top,
+.note-actions,
+.store-column__header,
+.note-meta {
+  display: flex;
+  gap: 14px;
+}
+
+.note-card__top,
+.note-actions,
+.store-column__header {
+  align-items: center;
+  justify-content: space-between;
+}
+
+.note-card__subtitle {
+  margin: 8px 0 0;
+  color: var(--muted);
+}
+
+.brand-pill {
+  flex: 0 0 auto;
+  padding: 9px 12px;
+  border-radius: 999px;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.brand-pill--kia {
+  color: #8b3f15;
+  background: rgba(196, 102, 52, 0.14);
+}
+
+.brand-pill--mazda {
+  color: #0e6662;
+  background: rgba(28, 128, 121, 0.14);
+}
+
+.note-meta,
+.note-copy,
+.note-admin-grid {
+  display: grid;
+  gap: 14px;
+}
+
+.note-meta {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.meta-item,
+.note-copy__block {
+  padding: 14px;
+  border-radius: 18px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.8);
+  display: grid;
+  gap: 8px;
+}
+
+.meta-item span,
+.note-copy__block span {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.meta-item strong {
+  font-size: 1rem;
+  line-height: 1.25;
+}
+
+.note-copy {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.1fr);
+}
+
+.note-copy__block p {
+  margin: 0;
+  white-space: pre-wrap;
+  color: var(--ink);
+  line-height: 1.55;
+}
+
+.note-copy__block.is-readonly {
+  background: linear-gradient(180deg, rgba(37, 48, 59, 0.05), rgba(255, 255, 255, 0.84));
+}
+
+.note-actions small {
+  color: var(--muted);
+  max-width: 60ch;
+}
+
+.note-admin-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .days-off-layout {
@@ -804,7 +974,12 @@ button.days-off-day:hover:not(:disabled) {
   .days-off-layout,
   .weekday-board,
   .filters,
-  .stats {
+  .stats,
+  .store-roster-grid,
+  .note-meta,
+  .note-copy,
+  .note-admin-grid,
+  .editor-list--two-up {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
@@ -821,7 +996,12 @@ button.days-off-day:hover:not(:disabled) {
   .days-off-layout,
   .weekday-board,
   .filters,
-  .stats {
+  .stats,
+  .store-roster-grid,
+  .note-meta,
+  .note-copy,
+  .note-admin-grid,
+  .editor-list--two-up {
     grid-template-columns: 1fr;
   }
 
@@ -837,7 +1017,10 @@ button.days-off-day:hover:not(:disabled) {
   .row,
   .controls,
   .report-item,
-  .calendar-day__header {
+  .calendar-day__header,
+  .note-card__top,
+  .note-actions,
+  .store-column__header {
     flex-direction: column;
     align-items: flex-start;
   }

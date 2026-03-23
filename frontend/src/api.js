@@ -89,10 +89,24 @@ export const createBdcAgent = (token, payload) =>
 export const updateBdcAgent = (token, id, payload) =>
   request(`/api/admin/bdc/agents/${id}`, { method: "PUT", body: payload, headers: adminHeaders(token) });
 export const getServiceDrive = ({ month } = {}) => request(`/api/service-drive${qs({ month })}`);
+export const getServiceDriveNotes = (params = {}) =>
+  request(`/api/service-drive/notes${qs({
+    salesperson_id: params.salespersonId,
+    start_date: params.startDate,
+    end_date: params.endDate,
+    brand: params.brand,
+    limit: params.limit,
+  })}`);
 export const generateServiceDrive = (token, payload) =>
   request("/api/admin/service-drive/generate", { method: "POST", body: payload, headers: adminHeaders(token) });
+export const createServiceDriveNote = (token, payload) =>
+  request("/api/admin/service-drive/notes", { method: "POST", body: payload, headers: adminHeaders(token) });
+export const updateServiceDriveNote = (token, id, payload) =>
+  request(`/api/admin/service-drive/notes/${id}`, { method: "PUT", body: payload, headers: adminHeaders(token) });
 export const updateServiceDriveAssignment = (token, payload) =>
   request("/api/admin/service-drive/assignment", { method: "PUT", body: payload, headers: adminHeaders(token) });
+export const updateServiceDriveSalesNote = (id, payload) =>
+  request(`/api/service-drive/notes/${id}/sales`, { method: "PUT", body: payload });
 export const getBdcState = () => request("/api/bdc/state");
 export const assignBdcLead = (payload) => request("/api/bdc/assign", { method: "POST", body: payload });
 export const getBdcLog = (params = {}) =>

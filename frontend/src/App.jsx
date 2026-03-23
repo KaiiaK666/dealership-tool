@@ -4,6 +4,7 @@ import {
   assignBdcLead,
   createBdcAgent,
   createSalesperson,
+  createServiceDriveNote,
   generateServiceDrive,
   getAdminDaysOff,
   getAdminSession,
@@ -13,15 +14,19 @@ import {
   getBdcState,
   getSalespeople,
   getServiceDrive,
+  getServiceDriveNotes,
   updateAdminDaysOff,
   updateBdcAgent,
   updateSalesperson,
   updateServiceDriveAssignment,
+  updateServiceDriveNote,
+  updateServiceDriveSalesNote,
 } from "./api.js";
 import "./App.css";
 
 const TABS = [
-  { id: "service", label: "Service Drive" },
+  { id: "serviceCalendar", label: "Service Drive Calendar" },
+  { id: "serviceNotes", label: "Service Drive Notes" },
   { id: "bdc", label: "BDC Assign" },
   { id: "reports", label: "BDC Reports" },
   { id: "traffic", label: "Service Drive Traffic" },
@@ -31,8 +36,10 @@ const TABS = [
 const ADMIN_SECTIONS = [
   { id: "staff", label: "Staff Setup" },
   { id: "daysOff", label: "Days Off" },
+  { id: "serviceNotes", label: "Service Notes" },
 ];
 
+const DEALERSHIP_ORDER = ["Kia", "Mazda", "Outlet"];
 const TRAFFIC_URL = "https://bokbbui-production.up.railway.app/";
 const CALENDAR_WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
@@ -44,6 +51,26 @@ function currentMonth() {
 function todayDateValue() {
   const now = new Date();
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+}
+
+function currentDateTimeInput() {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  const hours = String(now.getHours()).padStart(2, "0");
+  const minutes = String(now.getMinutes()).padStart(2, "0");
+  return `${year}-${month}-${day}T${hours}:${minutes}`;
+}
+
+function defaultServiceNoteForm() {
+  return {
+    appointmentAt: currentDateTimeInput(),
+    brand: "Kia",
+    customerName: "",
+    customerPhone: "",
+    adminNotes: "",
+  };
 }
 
 function monthLabel(value) {
@@ -116,6 +143,8 @@ function LogTable({ entries, empty }) {
           <tr>
             <th>Date / Time</th>
             <th>BDC Agent</th>
+            <th>Customer</th>
+            <th>Phone</th>
             <th>Salesperson</th>
             <th>Store</th>
           </tr>
@@ -125,6 +154,8 @@ function LogTable({ entries, empty }) {
             <tr key={entry.id}>
               <td>{dateTimeLabel(entry.assigned_at)}</td>
               <td>{entry.bdc_agent_name}</td>
+              <td>{entry.customer_name || "No name"}</td>
+              <td>{entry.customer_phone || "No phone"}</td>
               <td>{entry.salesperson_name}</td>
               <td>{entry.salesperson_dealership}</td>
             </tr>
@@ -145,13 +176,20 @@ function EditorCard({ title, children }) {
 }
 
 export default function App() {
-  const [tab, setTab] = useState("service");
+  const [tab, setTab] = useState("serviceCalendar");
   const [adminSection, setAdminSection] = useState("staff");
   const [month, setMonth] = useState(currentMonth());
   const [daysOffMonth, setDaysOffMonth] = useState(currentMonth());
+  const [serviceNotesFilters, setServiceNotesFilters] = useState({
+    salespersonId: "",
+    startDate: todayDateValue(),
+    endDate: "",
+    brand: "",
+  });
   const [salespeople, setSalespeople] = useState([]);
   const [bdcAgents, setBdcAgents] = useState([]);
   const [serviceMonth, setServiceMonth] = useState(null);
+  const [serviceNotesData, setServiceNotesData] = useState({ total: 0, entries: [] });
   const [bdcState, setBdcState] = useState(null);
   const [bdcLog, setBdcLog] = useState({ total: 0, entries: [] });
   const [bdcReport, setBdcReport] = useState(null);
@@ -167,7 +205,8 @@ export default function App() {
   const [login, setLogin] = useState({ username: "admin", password: "admin123" });
   const [salesForm, setSalesForm] = useState({ name: "", dealership: "Kia", weekly_days_off: [], active: true });
   const [bdcForm, setBdcForm] = useState({ name: "", active: true });
-  const [assignBdcId, setAssignBdcId] = useState("");
+  const [leadForm, setLeadForm] = useState({ bdcAgentId: "", customerName: "", customerPhone: "" });
+  const [serviceNoteForm, setServiceNoteForm] = useState(defaultServiceNoteForm());
 
   const activeSales = salespeople.filter((person) => person.active);
   const serviceEligible = activeSales.filter((person) => person.dealership !== "Outlet");
@@ -175,12 +214,20 @@ export default function App() {
   const serviceCalendarCells = buildCalendarCells(serviceMonth?.days || []);
   const daysOffMonthCells = buildMonthDateCells(daysOffMonth);
   const today = todayDateValue();
+  const dealershipColumns = DEALERSHIP_ORDER.map((dealership) => ({
+    dealership,
+    people: salespeople.filter((person) => person.dealership === dealership),
+  }));
   const daysOffEntriesBySalesperson = new Map(daysOffData.entries.map((entry) => [entry.salesperson_id, entry.off_dates]));
   const selectedDaysOffSalesperson =
     salespeople.find((person) => String(person.id) === String(selectedDaysOffSalesId)) || salespeople[0] || null;
   const selectedDaysOffDates = selectedDaysOffSalesperson
     ? daysOffEntriesBySalesperson.get(selectedDaysOffSalesperson.id) || []
     : [];
+  const selectedServiceNotesSalesId = serviceNotesFilters.salespersonId ? Number(serviceNotesFilters.salespersonId) : null;
+  const selectedServiceNotesSalesperson =
+    serviceEligible.find((person) => person.id === selectedServiceNotesSalesId) || null;
+  const serviceNotesMissingCount = serviceNotesData.entries.filter((entry) => !entry.sales_notes?.trim()).length;
   const monthDaysOffSummary = monthDateValues(daysOffMonth).map((value) => ({
     date: value,
     people: activeSales.filter((person) => (daysOffEntriesBySalesperson.get(person.id) || []).includes(value)),
@@ -212,6 +259,17 @@ export default function App() {
     setBdcReport(report);
   }
 
+  async function refreshServiceNotes(nextFilters = serviceNotesFilters) {
+    const data = await getServiceDriveNotes({
+      salespersonId: nextFilters.salespersonId || undefined,
+      startDate: nextFilters.startDate || undefined,
+      endDate: nextFilters.endDate || undefined,
+      brand: nextFilters.brand || undefined,
+      limit: 300,
+    });
+    setServiceNotesData(data);
+  }
+
   useEffect(() => {
     let active = true;
     const run = async () => {
@@ -232,10 +290,32 @@ export default function App() {
   }, [month, filters.salespersonId, filters.startDate, filters.endDate]);
 
   useEffect(() => {
-    if (!assignBdcId && activeBdc.length) {
-      setAssignBdcId(String(activeBdc[0].id));
+    let active = true;
+    const run = async () => {
+      try {
+        const data = await getServiceDriveNotes({
+          salespersonId: serviceNotesFilters.salespersonId || undefined,
+          startDate: serviceNotesFilters.startDate || undefined,
+          endDate: serviceNotesFilters.endDate || undefined,
+          brand: serviceNotesFilters.brand || undefined,
+          limit: 300,
+        });
+        if (active) setServiceNotesData(data);
+      } catch (errorValue) {
+        if (active) setError(errText(errorValue));
+      }
+    };
+    run();
+    return () => {
+      active = false;
+    };
+  }, [serviceNotesFilters.salespersonId, serviceNotesFilters.startDate, serviceNotesFilters.endDate, serviceNotesFilters.brand]);
+
+  useEffect(() => {
+    if (!leadForm.bdcAgentId && activeBdc.length) {
+      setLeadForm((current) => ({ ...current, bdcAgentId: String(activeBdc[0].id) }));
     }
-  }, [assignBdcId, activeBdc]);
+  }, [leadForm.bdcAgentId, activeBdc]);
 
   useEffect(() => {
     if (!selectedDaysOffSalesId && salespeople.length) {
@@ -431,6 +511,75 @@ export default function App() {
         salesperson_id: salespersonId ? Number(salespersonId) : null,
       });
       setServiceMonth(data);
+      await refreshServiceNotes();
+    } catch (errorValue) {
+      setError(errText(errorValue));
+    } finally {
+      setBusy("");
+    }
+  }
+
+  function patchServiceNoteEntry(noteId, patch) {
+    setServiceNotesData((current) => ({
+      ...current,
+      entries: current.entries.map((entry) => (entry.id === noteId ? { ...entry, ...patch } : entry)),
+    }));
+  }
+
+  async function addServiceNote(event) {
+    event.preventDefault();
+    setBusy("add-service-note");
+    setError("");
+    try {
+      await createServiceDriveNote(adminToken, {
+        appointment_at: serviceNoteForm.appointmentAt,
+        brand: serviceNoteForm.brand,
+        customer_name: serviceNoteForm.customerName,
+        customer_phone: serviceNoteForm.customerPhone,
+        admin_notes: serviceNoteForm.adminNotes,
+      });
+      setServiceNoteForm(defaultServiceNoteForm());
+      await refreshServiceNotes();
+    } catch (errorValue) {
+      setError(errText(errorValue));
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function saveServiceNote(entry) {
+    setBusy(`service-note-admin-${entry.id}`);
+    setError("");
+    try {
+      const saved = await updateServiceDriveNote(adminToken, entry.id, {
+        appointment_at: entry.appointment_at,
+        brand: entry.brand,
+        customer_name: entry.customer_name,
+        customer_phone: entry.customer_phone,
+        admin_notes: entry.admin_notes,
+      });
+      patchServiceNoteEntry(entry.id, saved);
+      await refreshServiceNotes();
+    } catch (errorValue) {
+      setError(errText(errorValue));
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function saveSalesNote(entry) {
+    if (!selectedServiceNotesSalesId) {
+      setError("Choose your salesperson name first.");
+      return;
+    }
+    setBusy(`service-note-sales-${entry.id}`);
+    setError("");
+    try {
+      const saved = await updateServiceDriveSalesNote(entry.id, {
+        salesperson_id: selectedServiceNotesSalesId,
+        sales_notes: entry.sales_notes,
+      });
+      patchServiceNoteEntry(entry.id, saved);
     } catch (errorValue) {
       setError(errText(errorValue));
     } finally {
@@ -439,15 +588,20 @@ export default function App() {
   }
 
   async function assignLead() {
-    if (!assignBdcId) {
+    if (!leadForm.bdcAgentId) {
       setError("Choose a BDC agent first.");
       return;
     }
     setBusy("assign");
     setError("");
     try {
-      const result = await assignBdcLead({ bdc_agent_id: Number(assignBdcId) });
+      const result = await assignBdcLead({
+        bdc_agent_id: Number(leadForm.bdcAgentId),
+        customer_name: leadForm.customerName,
+        customer_phone: leadForm.customerPhone,
+      });
       setLastAssignment(result);
+      setLeadForm((current) => ({ ...current, customerName: "", customerPhone: "" }));
       await refresh();
     } catch (errorValue) {
       setError(errText(errorValue));
@@ -487,7 +641,7 @@ export default function App() {
         {error ? <div className="notice error">{error}</div> : null}
         {loading ? <div className="notice">Loading...</div> : null}
 
-        {tab === "service" ? (
+        {tab === "serviceCalendar" ? (
           <section className="stack">
             <div className="panel row">
               <div>
@@ -592,18 +746,171 @@ export default function App() {
           </section>
         ) : null}
 
+        {tab === "serviceNotes" ? (
+          <section className="stack">
+            <div className="panel">
+              <div className="row">
+                <div>
+                  <span className="eyebrow">Service drive notes</span>
+                  <h2>Traffic notes tied to the daily service schedule</h2>
+                  <p className="admin-note">
+                    Choose your salesperson name to unlock note saving for only your assigned appointments. Admin notes stay
+                    read-only on this page.
+                  </p>
+                </div>
+              </div>
+              <div className="filters filters--notes">
+                <label>
+                  <span>Start date</span>
+                  <input
+                    type="date"
+                    value={serviceNotesFilters.startDate}
+                    onChange={(event) => setServiceNotesFilters((current) => ({ ...current, startDate: event.target.value }))}
+                  />
+                </label>
+                <label>
+                  <span>End date</span>
+                  <input
+                    type="date"
+                    value={serviceNotesFilters.endDate}
+                    onChange={(event) => setServiceNotesFilters((current) => ({ ...current, endDate: event.target.value }))}
+                  />
+                </label>
+                <label>
+                  <span>Store</span>
+                  <select
+                    value={serviceNotesFilters.brand}
+                    onChange={(event) => setServiceNotesFilters((current) => ({ ...current, brand: event.target.value }))}
+                  >
+                    <option value="">All stores</option>
+                    <option value="Kia">Kia</option>
+                    <option value="Mazda">Mazda</option>
+                  </select>
+                </label>
+                <label>
+                  <span>Salesperson</span>
+                  <select
+                    value={serviceNotesFilters.salespersonId}
+                    onChange={(event) =>
+                      setServiceNotesFilters((current) => ({ ...current, salespersonId: event.target.value }))
+                    }
+                  >
+                    <option value="">View all appointments</option>
+                    {serviceEligible.map((person) => (
+                      <option key={`note-sales-${person.id}`} value={person.id}>
+                        {person.name} - {person.dealership}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              </div>
+            </div>
+
+            <div className="stats">
+              <div className="stat">
+                <span>Appointments in view</span>
+                <strong>{serviceNotesData.total}</strong>
+              </div>
+              <div className="stat">
+                <span>Still missing salesperson notes</span>
+                <strong>{serviceNotesMissingCount}</strong>
+              </div>
+              <div className="stat">
+                <span>Selected salesperson</span>
+                <strong>{selectedServiceNotesSalesperson?.name || "None"}</strong>
+              </div>
+            </div>
+
+            <div className="notes-list">
+              {serviceNotesData.entries.length ? (
+                serviceNotesData.entries.map((entry) => {
+                  const canEditSales =
+                    selectedServiceNotesSalesId !== null && entry.salesperson_id === selectedServiceNotesSalesId;
+
+                  return (
+                    <article key={entry.id} className="note-card">
+                      <div className="note-card__top">
+                        <div>
+                          <span className="eyebrow">Service appointment</span>
+                          <h3>{entry.customer_name}</h3>
+                          <p className="note-card__subtitle">{dateTimeLabel(entry.appointment_at)}</p>
+                        </div>
+                        <span className={`brand-pill brand-pill--${entry.brand.toLowerCase()}`}>{entry.brand}</span>
+                      </div>
+
+                      <div className="note-meta">
+                        <div className="meta-item">
+                          <span>Phone</span>
+                          <strong>{entry.customer_phone || "No phone"}</strong>
+                        </div>
+                        <div className="meta-item">
+                          <span>Assigned salesperson</span>
+                          <strong>{entry.salesperson_name || "Open service slot"}</strong>
+                        </div>
+                        <div className="meta-item">
+                          <span>Store</span>
+                          <strong>{entry.brand}</strong>
+                        </div>
+                      </div>
+
+                      <div className="note-copy">
+                        <div className="note-copy__block is-readonly">
+                          <span>Admin notes</span>
+                          <p>{entry.admin_notes || "No admin notes yet."}</p>
+                        </div>
+
+                        <label className="note-copy__block">
+                          <span>Salesperson notes</span>
+                          <textarea
+                            rows={5}
+                            value={entry.sales_notes}
+                            disabled={!canEditSales}
+                            onChange={(event) => patchServiceNoteEntry(entry.id, { sales_notes: event.target.value })}
+                          />
+                        </label>
+                      </div>
+
+                      <div className="note-actions">
+                        <small>
+                          {canEditSales
+                            ? "You can only update the salesperson notes field on this appointment."
+                            : selectedServiceNotesSalesId
+                              ? "This appointment is not assigned to your selected salesperson today."
+                              : "Pick your salesperson name above to unlock note saving."}
+                        </small>
+                        <button
+                          type="button"
+                          onClick={() => saveSalesNote(entry)}
+                          disabled={!canEditSales || busy === `service-note-sales-${entry.id}`}
+                        >
+                          {busy === `service-note-sales-${entry.id}` ? "Saving..." : "Save Notes"}
+                        </button>
+                      </div>
+                    </article>
+                  );
+                })
+              ) : (
+                <div className="empty">No service appointments match these filters.</div>
+              )}
+            </div>
+          </section>
+        ) : null}
+
         {tab === "bdc" ? (
           <section className="stack">
             <div className="panel lead-grid">
               <div>
                 <span className="eyebrow">BDC lead assign</span>
                 <h2>Ask for the next salesperson in the round robin.</h2>
-                <p>Choose the BDC agent, click assign, then use the returned name in your CRM.</p>
+                <p>Choose the BDC agent, enter the customer details, then assign the lead and log it for reporting.</p>
               </div>
               <div className="assign-card">
                 <label>
                   <span>BDC agent</span>
-                  <select value={assignBdcId} onChange={(event) => setAssignBdcId(event.target.value)}>
+                  <select
+                    value={leadForm.bdcAgentId}
+                    onChange={(event) => setLeadForm((current) => ({ ...current, bdcAgentId: event.target.value }))}
+                  >
                     <option value="">Choose an agent</option>
                     {activeBdc.map((agent) => (
                       <option key={agent.id} value={agent.id}>
@@ -611,6 +918,22 @@ export default function App() {
                       </option>
                     ))}
                   </select>
+                </label>
+                <label>
+                  <span>Customer name</span>
+                  <input
+                    value={leadForm.customerName}
+                    onChange={(event) => setLeadForm((current) => ({ ...current, customerName: event.target.value }))}
+                    placeholder="Walk-in or lead name"
+                  />
+                </label>
+                <label>
+                  <span>Customer phone</span>
+                  <input
+                    value={leadForm.customerPhone}
+                    onChange={(event) => setLeadForm((current) => ({ ...current, customerPhone: event.target.value }))}
+                    placeholder="Phone number"
+                  />
                 </label>
                 <div className="next-up">
                   <span>Next up</span>
@@ -632,8 +955,8 @@ export default function App() {
 
             {lastAssignment ? (
               <div className="notice success">
-                {lastAssignment.bdc_agent_name} assigned {lastAssignment.salesperson_name} at{" "}
-                {dateTimeLabel(lastAssignment.assigned_at)}
+                {lastAssignment.bdc_agent_name} assigned {lastAssignment.customer_name || "a customer"} to{" "}
+                {lastAssignment.salesperson_name} at {dateTimeLabel(lastAssignment.assigned_at)}
               </div>
             ) : null}
 
@@ -879,114 +1202,134 @@ export default function App() {
                       </div>
                     </div>
 
-                    <div className="admin-grid">
-                      <div className="panel">
-                        <span className="eyebrow">Edit salespeople</span>
-                        <div className="editor-list">
-                          {salespeople.map((person) => (
-                            <EditorCard key={person.id} title={`${person.name} - ${person.dealership}`}>
-                              <div className="form compact">
-                                <label>
-                                  <span>Name</span>
-                                  <input
-                                    value={person.name}
-                                    onChange={(event) =>
-                                      setSalespeople((current) =>
-                                        current.map((item) =>
-                                          item.id === person.id ? { ...item, name: event.target.value } : item
-                                        )
-                                      )
-                                    }
-                                  />
-                                </label>
-                                <label>
-                                  <span>Dealership</span>
-                                  <select
-                                    value={person.dealership}
-                                    onChange={(event) =>
-                                      setSalespeople((current) =>
-                                        current.map((item) =>
-                                          item.id === person.id ? { ...item, dealership: event.target.value } : item
-                                        )
-                                      )
-                                    }
-                                  >
-                                    <option value="Kia">Kia</option>
-                                    <option value="Mazda">Mazda</option>
-                                    <option value="Outlet">Outlet</option>
-                                  </select>
-                                </label>
-                                <label className="checkbox">
-                                  <input
-                                    type="checkbox"
-                                    checked={person.active}
-                                    onChange={(event) =>
-                                      setSalespeople((current) =>
-                                        current.map((item) =>
-                                          item.id === person.id ? { ...item, active: event.target.checked } : item
-                                        )
-                                      )
-                                    }
-                                  />
-                                  <span>Active</span>
-                                </label>
-                                <button
-                                  type="button"
-                                  onClick={() => saveSalesperson(person)}
-                                  disabled={busy === `sales-${person.id}`}
-                                >
-                                  {busy === `sales-${person.id}` ? "Saving..." : "Save"}
-                                </button>
-                              </div>
-                            </EditorCard>
-                          ))}
+                    <div className="panel">
+                      <div className="row">
+                        <div>
+                          <span className="eyebrow">Salespeople by store</span>
+                          <h3>Roster columns</h3>
                         </div>
                       </div>
-
-                      <div className="panel">
-                        <span className="eyebrow">Edit BDC agents</span>
-                        <div className="editor-list">
-                          {bdcAgents.map((agent) => (
-                            <EditorCard key={agent.id} title={agent.name}>
-                              <div className="form compact">
-                                <label>
-                                  <span>Name</span>
-                                  <input
-                                    value={agent.name}
-                                    onChange={(event) =>
-                                      setBdcAgents((current) =>
-                                        current.map((item) =>
-                                          item.id === agent.id ? { ...item, name: event.target.value } : item
-                                        )
-                                      )
-                                    }
-                                  />
-                                </label>
-                                <label className="checkbox">
-                                  <input
-                                    type="checkbox"
-                                    checked={agent.active}
-                                    onChange={(event) =>
-                                      setBdcAgents((current) =>
-                                        current.map((item) =>
-                                          item.id === agent.id ? { ...item, active: event.target.checked } : item
-                                        )
-                                      )
-                                    }
-                                  />
-                                  <span>Active</span>
-                                </label>
-                                <button
-                                  type="button"
-                                  onClick={() => saveBdcAgent(agent)}
-                                  disabled={busy === `bdc-${agent.id}`}
-                                >
-                                  {busy === `bdc-${agent.id}` ? "Saving..." : "Save"}
-                                </button>
+                      <div className="store-roster-grid">
+                        {dealershipColumns.map((group) => (
+                          <section key={group.dealership} className="store-column">
+                            <div className="store-column__header">
+                              <div>
+                                <span className="eyebrow">{group.dealership}</span>
+                                <h4>{group.dealership}</h4>
                               </div>
-                            </EditorCard>
-                          ))}
-                        </div>
+                              <b>{group.people.length}</b>
+                            </div>
+                            <div className="editor-list">
+                              {group.people.length ? (
+                                group.people.map((person) => (
+                                  <EditorCard key={person.id} title={person.name}>
+                                    <div className="form compact">
+                                      <label>
+                                        <span>Name</span>
+                                        <input
+                                          value={person.name}
+                                          onChange={(event) =>
+                                            setSalespeople((current) =>
+                                              current.map((item) =>
+                                                item.id === person.id ? { ...item, name: event.target.value } : item
+                                              )
+                                            )
+                                          }
+                                        />
+                                      </label>
+                                      <label>
+                                        <span>Dealership</span>
+                                        <select
+                                          value={person.dealership}
+                                          onChange={(event) =>
+                                            setSalespeople((current) =>
+                                              current.map((item) =>
+                                                item.id === person.id ? { ...item, dealership: event.target.value } : item
+                                              )
+                                            )
+                                          }
+                                        >
+                                          <option value="Kia">Kia</option>
+                                          <option value="Mazda">Mazda</option>
+                                          <option value="Outlet">Outlet</option>
+                                        </select>
+                                      </label>
+                                      <label className="checkbox">
+                                        <input
+                                          type="checkbox"
+                                          checked={person.active}
+                                          onChange={(event) =>
+                                            setSalespeople((current) =>
+                                              current.map((item) =>
+                                                item.id === person.id ? { ...item, active: event.target.checked } : item
+                                              )
+                                            )
+                                          }
+                                        />
+                                        <span>Active</span>
+                                      </label>
+                                      <button
+                                        type="button"
+                                        onClick={() => saveSalesperson(person)}
+                                        disabled={busy === `sales-${person.id}`}
+                                      >
+                                        {busy === `sales-${person.id}` ? "Saving..." : "Save"}
+                                      </button>
+                                    </div>
+                                  </EditorCard>
+                                ))
+                              ) : (
+                                <div className="empty">No {group.dealership} salespeople yet.</div>
+                              )}
+                            </div>
+                          </section>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="panel">
+                      <span className="eyebrow">Edit BDC agents</span>
+                      <div className="editor-list editor-list--two-up">
+                        {bdcAgents.map((agent) => (
+                          <EditorCard key={agent.id} title={agent.name}>
+                            <div className="form compact">
+                              <label>
+                                <span>Name</span>
+                                <input
+                                  value={agent.name}
+                                  onChange={(event) =>
+                                    setBdcAgents((current) =>
+                                      current.map((item) =>
+                                        item.id === agent.id ? { ...item, name: event.target.value } : item
+                                      )
+                                    )
+                                  }
+                                />
+                              </label>
+                              <label className="checkbox">
+                                <input
+                                  type="checkbox"
+                                  checked={agent.active}
+                                  onChange={(event) =>
+                                    setBdcAgents((current) =>
+                                      current.map((item) =>
+                                        item.id === agent.id ? { ...item, active: event.target.checked } : item
+                                      )
+                                    )
+                                  }
+                                />
+                                <span>Active</span>
+                              </label>
+                              <button
+                                type="button"
+                                onClick={() => saveBdcAgent(agent)}
+                                disabled={busy === `bdc-${agent.id}`}
+                              >
+                                {busy === `bdc-${agent.id}` ? "Saving..." : "Save"}
+                              </button>
+                            </div>
+                          </EditorCard>
+                        ))}
                       </div>
                     </div>
                   </>
@@ -1138,6 +1481,214 @@ export default function App() {
                           <div className="empty">Choose a salesperson to build the month schedule.</div>
                         )}
                       </div>
+                    </div>
+                  </>
+                ) : null}
+
+                {adminSection === "serviceNotes" ? (
+                  <>
+                    <div className="admin-grid">
+                      <div className="panel">
+                        <span className="eyebrow">Add appointment</span>
+                        <h3>+ Service drive note entry</h3>
+                        <form className="form" onSubmit={addServiceNote}>
+                          <label>
+                            <span>Appointment date and time</span>
+                            <input
+                              type="datetime-local"
+                              value={serviceNoteForm.appointmentAt}
+                              onChange={(event) =>
+                                setServiceNoteForm((current) => ({ ...current, appointmentAt: event.target.value }))
+                              }
+                            />
+                          </label>
+                          <label>
+                            <span>Store</span>
+                            <select
+                              value={serviceNoteForm.brand}
+                              onChange={(event) =>
+                                setServiceNoteForm((current) => ({ ...current, brand: event.target.value }))
+                              }
+                            >
+                              <option value="Kia">Kia</option>
+                              <option value="Mazda">Mazda</option>
+                            </select>
+                          </label>
+                          <label>
+                            <span>Customer name</span>
+                            <input
+                              value={serviceNoteForm.customerName}
+                              onChange={(event) =>
+                                setServiceNoteForm((current) => ({ ...current, customerName: event.target.value }))
+                              }
+                            />
+                          </label>
+                          <label>
+                            <span>Phone number</span>
+                            <input
+                              value={serviceNoteForm.customerPhone}
+                              onChange={(event) =>
+                                setServiceNoteForm((current) => ({ ...current, customerPhone: event.target.value }))
+                              }
+                            />
+                          </label>
+                          <label>
+                            <span>Admin notes</span>
+                            <textarea
+                              rows={5}
+                              value={serviceNoteForm.adminNotes}
+                              onChange={(event) =>
+                                setServiceNoteForm((current) => ({ ...current, adminNotes: event.target.value }))
+                              }
+                            />
+                          </label>
+                          <button type="submit" disabled={busy === "add-service-note"}>
+                            {busy === "add-service-note" ? "Adding..." : "+ Add Appointment"}
+                          </button>
+                        </form>
+                      </div>
+
+                      <div className="panel">
+                        <span className="eyebrow">Filter appointments</span>
+                        <h3>Find the right service rows</h3>
+                        <div className="filters filters--notes">
+                          <label>
+                            <span>Start date</span>
+                            <input
+                              type="date"
+                              value={serviceNotesFilters.startDate}
+                              onChange={(event) =>
+                                setServiceNotesFilters((current) => ({ ...current, startDate: event.target.value }))
+                              }
+                            />
+                          </label>
+                          <label>
+                            <span>End date</span>
+                            <input
+                              type="date"
+                              value={serviceNotesFilters.endDate}
+                              onChange={(event) =>
+                                setServiceNotesFilters((current) => ({ ...current, endDate: event.target.value }))
+                              }
+                            />
+                          </label>
+                          <label>
+                            <span>Store</span>
+                            <select
+                              value={serviceNotesFilters.brand}
+                              onChange={(event) =>
+                                setServiceNotesFilters((current) => ({ ...current, brand: event.target.value }))
+                              }
+                            >
+                              <option value="">All stores</option>
+                              <option value="Kia">Kia</option>
+                              <option value="Mazda">Mazda</option>
+                            </select>
+                          </label>
+                          <label>
+                            <span>Assigned salesperson</span>
+                            <select
+                              value={serviceNotesFilters.salespersonId}
+                              onChange={(event) =>
+                                setServiceNotesFilters((current) => ({ ...current, salespersonId: event.target.value }))
+                              }
+                            >
+                              <option value="">All salespeople</option>
+                              {serviceEligible.map((person) => (
+                                <option key={`admin-note-sales-${person.id}`} value={person.id}>
+                                  {person.name} - {person.dealership}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                        </div>
+                        <p className="admin-note">
+                          Admin controls the appointment date, time, customer, phone, and admin notes here. Salespeople only
+                          update the salesperson notes field from the public notes page.
+                        </p>
+                      </div>
+                    </div>
+
+                    <div className="notes-list">
+                      {serviceNotesData.entries.length ? (
+                        serviceNotesData.entries.map((entry) => (
+                          <article key={entry.id} className="note-card is-admin">
+                            <div className="note-card__top">
+                              <div>
+                                <span className="eyebrow">Service drive note</span>
+                                <h3>{entry.customer_name}</h3>
+                                <p className="note-card__subtitle">
+                                  Assigned to {entry.salesperson_name || "Open service slot"}
+                                </p>
+                              </div>
+                              <span className={`brand-pill brand-pill--${entry.brand.toLowerCase()}`}>{entry.brand}</span>
+                            </div>
+
+                            <div className="note-admin-grid">
+                              <label>
+                                <span>Appointment date and time</span>
+                                <input
+                                  type="datetime-local"
+                                  value={entry.appointment_at}
+                                  onChange={(event) => patchServiceNoteEntry(entry.id, { appointment_at: event.target.value })}
+                                />
+                              </label>
+                              <label>
+                                <span>Store</span>
+                                <select
+                                  value={entry.brand}
+                                  onChange={(event) => patchServiceNoteEntry(entry.id, { brand: event.target.value })}
+                                >
+                                  <option value="Kia">Kia</option>
+                                  <option value="Mazda">Mazda</option>
+                                </select>
+                              </label>
+                              <label>
+                                <span>Customer name</span>
+                                <input
+                                  value={entry.customer_name}
+                                  onChange={(event) => patchServiceNoteEntry(entry.id, { customer_name: event.target.value })}
+                                />
+                              </label>
+                              <label>
+                                <span>Phone number</span>
+                                <input
+                                  value={entry.customer_phone}
+                                  onChange={(event) => patchServiceNoteEntry(entry.id, { customer_phone: event.target.value })}
+                                />
+                              </label>
+                            </div>
+
+                            <div className="note-copy note-copy--admin">
+                              <label className="note-copy__block">
+                                <span>Admin notes</span>
+                                <textarea
+                                  rows={4}
+                                  value={entry.admin_notes}
+                                  onChange={(event) => patchServiceNoteEntry(entry.id, { admin_notes: event.target.value })}
+                                />
+                              </label>
+                              <div className="note-copy__block is-readonly">
+                                <span>Salesperson notes</span>
+                                <p>{entry.sales_notes || "No salesperson notes saved yet."}</p>
+                              </div>
+                            </div>
+
+                            <div className="note-actions">
+                              <small>{dateTimeLabel(entry.appointment_at)} · {entry.brand}</small>
+                              <button
+                                type="button"
+                                onClick={() => saveServiceNote(entry)}
+                                disabled={busy === `service-note-admin-${entry.id}`}
+                              >
+                                {busy === `service-note-admin-${entry.id}` ? "Saving..." : "Save Appointment"}
+                              </button>
+                            </div>
+                          </article>
+                        ))
+                      ) : (
+                        <div className="empty">No service appointments match these filters.</div>
+                      )}
                     </div>
                   </>
                 ) : null}
