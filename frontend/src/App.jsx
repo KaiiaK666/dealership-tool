@@ -179,17 +179,19 @@ function LogTable({ entries, empty }) {
         <thead>
           <tr>
             <th>Date / Time</th>
+            <th>Lead Store</th>
             <th>BDC Agent</th>
             <th>Customer</th>
             <th>Phone</th>
             <th>Salesperson</th>
-            <th>Store</th>
+            <th>Sales Store</th>
           </tr>
         </thead>
         <tbody>
           {entries.map((entry) => (
             <tr key={entry.id}>
               <td>{dateTimeLabel(entry.assigned_at)}</td>
+              <td>{entry.lead_store || "Unknown"}</td>
               <td>{entry.bdc_agent_name}</td>
               <td>{entry.customer_name || "No name"}</td>
               <td>{entry.customer_phone || "No phone"}</td>
@@ -283,7 +285,7 @@ export default function App() {
   const [bdcReport, setBdcReport] = useState(null);
   const [daysOffData, setDaysOffData] = useState({ month: currentMonth(), entries: [] });
   const [selectedDaysOffSalesId, setSelectedDaysOffSalesId] = useState("");
-  const [filters, setFilters] = useState({ salespersonId: "", startDate: "", endDate: "" });
+  const [filters, setFilters] = useState({ salespersonId: "", leadStore: "", startDate: "", endDate: "" });
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
@@ -293,7 +295,7 @@ export default function App() {
   const [login, setLogin] = useState({ username: "admin", password: "admin123" });
   const [salesForm, setSalesForm] = useState({ name: "", dealership: "Kia", weekly_days_off: [], active: true });
   const [bdcForm, setBdcForm] = useState({ name: "", active: true });
-  const [leadForm, setLeadForm] = useState({ bdcAgentId: "", customerName: "", customerPhone: "" });
+  const [leadForm, setLeadForm] = useState({ bdcAgentId: "", leadStore: "Kia", customerName: "", customerPhone: "" });
   const [trafficEntryForm, setTrafficEntryForm] = useState({
     customerName: "",
     vehicleYear: "",
@@ -306,6 +308,7 @@ export default function App() {
   const [specialUploadKey, setSpecialUploadKey] = useState(0);
 
   const activeSales = salespeople.filter((person) => person.active);
+  const activeLeadStoreSales = activeSales.filter((person) => person.dealership === leadForm.leadStore);
   const serviceEligible = activeSales.filter((person) => person.dealership !== "Outlet");
   const activeBdc = bdcAgents.filter((agent) => agent.active);
   const serviceCalendarCells = buildCalendarCells(serviceMonth?.days || []);
@@ -350,19 +353,20 @@ export default function App() {
   }));
 
   async function loadAll(nextMonth = month, nextFilters = filters) {
-    const [sales, bdc, service, state, log, report] = await Promise.all([
+    const [sales, bdc, service, log, report] = await Promise.all([
       getSalespeople({ includeInactive: true }),
       getBdcAgents({ includeInactive: true }),
       getServiceDrive({ month: nextMonth }),
-      getBdcState(),
       getBdcLog({
         salespersonId: nextFilters.salespersonId || undefined,
+        leadStore: nextFilters.leadStore || undefined,
         startDate: nextFilters.startDate || undefined,
         endDate: nextFilters.endDate || undefined,
         limit: 150,
       }),
       getBdcReport({
         salespersonId: nextFilters.salespersonId || undefined,
+        leadStore: nextFilters.leadStore || undefined,
         startDate: nextFilters.startDate || undefined,
         endDate: nextFilters.endDate || undefined,
       }),
@@ -370,9 +374,13 @@ export default function App() {
     setSalespeople(sales);
     setBdcAgents(bdc);
     setServiceMonth(service);
-    setBdcState(state);
     setBdcLog(log);
     setBdcReport(report);
+  }
+
+  async function refreshBdcState(nextLeadStore = leadForm.leadStore) {
+    const data = await getBdcState({ dealership: nextLeadStore });
+    setBdcState(data);
   }
 
   async function refreshServiceTraffic(nextMonth = trafficMonth, nextDate = selectedTrafficDate) {
@@ -410,7 +418,23 @@ export default function App() {
     return () => {
       active = false;
     };
-  }, [month, filters.salespersonId, filters.startDate, filters.endDate]);
+  }, [month, filters.salespersonId, filters.leadStore, filters.startDate, filters.endDate]);
+
+  useEffect(() => {
+    let active = true;
+    const run = async () => {
+      try {
+        const data = await getBdcState({ dealership: leadForm.leadStore });
+        if (active) setBdcState(data);
+      } catch (errorValue) {
+        if (active) setError(errText(errorValue));
+      }
+    };
+    run();
+    return () => {
+      active = false;
+    };
+  }, [leadForm.leadStore]);
 
   useEffect(() => {
     let active = true;
@@ -539,7 +563,11 @@ export default function App() {
 
   async function refresh() {
     try {
-      await Promise.all([loadAll(month, filters), refreshServiceTraffic(trafficMonth, selectedTrafficDate)]);
+      await Promise.all([
+        loadAll(month, filters),
+        refreshServiceTraffic(trafficMonth, selectedTrafficDate),
+        refreshBdcState(leadForm.leadStore),
+      ]);
     } catch (errorValue) {
       setError(errText(errorValue));
     }
@@ -821,6 +849,7 @@ export default function App() {
     try {
       const result = await assignBdcLead({
         bdc_agent_id: Number(leadForm.bdcAgentId),
+        lead_store: leadForm.leadStore,
         customer_name: leadForm.customerName,
         customer_phone: leadForm.customerPhone,
       });
@@ -1289,7 +1318,7 @@ export default function App() {
               <div>
                 <span className="eyebrow">BDC lead assign</span>
                 <h2>Ask for the next salesperson in the round robin.</h2>
-                <p>Choose the BDC agent, enter the customer details, then assign the lead and log it for reporting.</p>
+                <p>Choose the source store first, then assign the lead only within that store's salesperson pool.</p>
               </div>
               <div className="assign-card">
                 <label>
@@ -1302,6 +1331,19 @@ export default function App() {
                     {activeBdc.map((agent) => (
                       <option key={agent.id} value={agent.id}>
                         {agent.name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  <span>Lead store</span>
+                  <select
+                    value={leadForm.leadStore}
+                    onChange={(event) => setLeadForm((current) => ({ ...current, leadStore: event.target.value }))}
+                  >
+                    {DEALERSHIP_ORDER.map((dealership) => (
+                      <option key={`lead-store-${dealership}`} value={dealership}>
+                        {dealership}
                       </option>
                     ))}
                   </select>
@@ -1323,11 +1365,13 @@ export default function App() {
                   />
                 </label>
                 <div className="next-up">
-                  <span>Next up</span>
+                  <span>Next up for {leadForm.leadStore}</span>
                   <strong>{bdcState?.next_salesperson?.name || "No active salesperson"}</strong>
                   <small>
                     {bdcState?.next_salesperson?.dealership ||
-                      (activeSales.length ? "Everyone scheduled today is off" : "Round robin is empty")}
+                      (activeLeadStoreSales.length
+                        ? `Everyone in ${leadForm.leadStore} is scheduled off today`
+                        : `No active ${leadForm.leadStore} salespeople`)}
                   </small>
                 </div>
                 <button
@@ -1343,13 +1387,14 @@ export default function App() {
             {lastAssignment ? (
               <div className="notice success">
                 {lastAssignment.bdc_agent_name} assigned {lastAssignment.customer_name || "a customer"} to{" "}
-                {lastAssignment.salesperson_name} at {dateTimeLabel(lastAssignment.assigned_at)}
+                {lastAssignment.salesperson_name} for {lastAssignment.lead_store || lastAssignment.salesperson_dealership} at{" "}
+                {dateTimeLabel(lastAssignment.assigned_at)}
               </div>
             ) : null}
 
-            {activeSales.length && !bdcState?.next_salesperson ? (
+            {activeLeadStoreSales.length && !bdcState?.next_salesperson ? (
               <div className="notice">
-                Nobody is eligible in the round robin today because every active salesperson is scheduled off.
+                Nobody is eligible in the {leadForm.leadStore} round robin today because every active salesperson in that store is scheduled off.
               </div>
             ) : null}
 
@@ -1386,6 +1431,20 @@ export default function App() {
                     {salespeople.map((person) => (
                       <option key={person.id} value={person.id}>
                         {person.name} - {person.dealership}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  <span>Lead store</span>
+                  <select
+                    value={filters.leadStore}
+                    onChange={(event) => setFilters((current) => ({ ...current, leadStore: event.target.value }))}
+                  >
+                    <option value="">All stores</option>
+                    {DEALERSHIP_ORDER.map((dealership) => (
+                      <option key={`report-store-${dealership}`} value={dealership}>
+                        {dealership}
                       </option>
                     ))}
                   </select>

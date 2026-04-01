@@ -161,6 +161,7 @@ class ServiceAssignmentIn(BaseModel):
 class BdcLeadAssignIn(BaseModel):
     bdc_agent_id: Optional[int] = None
     bdc_agent_name: Optional[str] = None
+    lead_store: str = "Kia"
     customer_name: str = ""
     customer_phone: str = ""
 
@@ -171,6 +172,7 @@ class BdcAssignmentOut(BaseModel):
     assigned_at: str
     bdc_agent_id: Optional[int] = None
     bdc_agent_name: str
+    lead_store: str = ""
     salesperson_id: int
     salesperson_name: str
     salesperson_dealership: str
@@ -179,6 +181,7 @@ class BdcAssignmentOut(BaseModel):
 
 
 class BdcStateOut(BaseModel):
+    dealership: Optional[str] = None
     next_index: int
     next_salesperson: Optional[SalespersonOut] = None
     queue: List[SalespersonOut]
@@ -200,6 +203,7 @@ class BdcReportOut(BaseModel):
     start_date: Optional[str] = None
     end_date: Optional[str] = None
     salesperson_id: Optional[int] = None
+    lead_store: Optional[str] = None
     total_assignments: int
     filtered_assignments: int
     active_salespeople: int
@@ -355,6 +359,13 @@ def normalize_dealership(value: str) -> str:
     if not normalized:
         raise HTTPException(status_code=400, detail="dealership must be Kia, Mazda, or Outlet")
     return normalized
+
+
+def normalize_optional_dealership(value: Optional[str]) -> Optional[str]:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    return normalize_dealership(text)
 
 
 def normalize_brand(value: str) -> str:
@@ -652,12 +663,14 @@ def init_db() -> None:
             assigned_at TEXT NOT NULL,
             bdc_agent_id INTEGER,
             bdc_agent_name TEXT NOT NULL,
+            lead_store TEXT NOT NULL DEFAULT '',
             salesperson_id INTEGER NOT NULL,
             salesperson_name TEXT NOT NULL,
             salesperson_dealership TEXT NOT NULL
         )
         """
     )
+    ensure_column("bdc_assignment_log", "lead_store", "TEXT NOT NULL DEFAULT ''")
     ensure_column("bdc_assignment_log", "customer_name", "TEXT NOT NULL DEFAULT ''")
     ensure_column("bdc_assignment_log", "customer_phone", "TEXT NOT NULL DEFAULT ''")
     db_execute(
@@ -773,6 +786,7 @@ def bdc_log_out(row: Dict[str, Any]) -> BdcAssignmentOut:
         assigned_at=str(row.get("assigned_at") or ""),
         bdc_agent_id=int(row["bdc_agent_id"]) if row.get("bdc_agent_id") is not None else None,
         bdc_agent_name=str(row.get("bdc_agent_name") or ""),
+        lead_store=str(row.get("lead_store") or ""),
         salesperson_id=int(row.get("salesperson_id") or 0),
         salesperson_name=str(row.get("salesperson_name") or ""),
         salesperson_dealership=str(row.get("salesperson_dealership") or ""),
@@ -925,8 +939,15 @@ def fetch_salespeople(include_inactive: bool = False) -> List[SalespersonOut]:
     return [salesperson_out(row) for row in db_query_all(query)]
 
 
-def fetch_round_robin_salespeople() -> List[SalespersonOut]:
-    return [salesperson_out(row) for row in db_query_all("SELECT * FROM salespeople WHERE active = 1 ORDER BY id ASC")]
+def fetch_round_robin_salespeople(dealership: Optional[str] = None) -> List[SalespersonOut]:
+    query = "SELECT * FROM salespeople WHERE active = 1"
+    params: List[Any] = []
+    normalized_store = normalize_optional_dealership(dealership)
+    if normalized_store:
+        query += " AND dealership = ?"
+        params.append(normalized_store)
+    query += " ORDER BY id ASC"
+    return [salesperson_out(row) for row in db_query_all(query, tuple(params))]
 
 
 def fetch_bdc_agents(include_inactive: bool = False) -> List[BdcAgentOut]:
@@ -1302,45 +1323,58 @@ def resolve_bdc_agent(agent_id: Optional[int], agent_name: Optional[str]) -> Tup
     return None, name
 
 
-def build_bdc_state() -> BdcStateOut:
-    queue = fetch_round_robin_salespeople()
+def bdc_pointer_key(dealership: Optional[str]) -> str:
+    normalized_store = normalize_optional_dealership(dealership)
+    return f"bdc:pointer:{(normalized_store or 'all').lower()}"
+
+
+def build_bdc_state(dealership: Optional[str] = None) -> BdcStateOut:
+    normalized_store = normalize_optional_dealership(dealership)
+    queue = fetch_round_robin_salespeople(normalized_store)
     if not queue:
-        return BdcStateOut(next_index=0, next_salesperson=None, queue=[])
+        return BdcStateOut(dealership=normalized_store, next_index=0, next_salesperson=None, queue=[])
     try:
-        pointer = int(get_meta("bdc:pointer") or 0)
+        pointer = int(get_meta(bdc_pointer_key(normalized_store)) or 0)
     except Exception:
         pointer = 0
     next_index = pointer % len(queue)
     picked, _, available_queue = pick_round_robin_person(queue, now_local().date(), pointer)
-    return BdcStateOut(next_index=next_index, next_salesperson=picked, queue=available_queue)
+    return BdcStateOut(
+        dealership=normalized_store,
+        next_index=next_index,
+        next_salesperson=picked,
+        queue=available_queue,
+    )
 
 
 def assign_next_lead(payload: BdcLeadAssignIn) -> BdcAssignmentOut:
-    salespeople = fetch_round_robin_salespeople()
+    lead_store = normalize_dealership(payload.lead_store or "Kia")
+    salespeople = fetch_round_robin_salespeople(lead_store)
     if not salespeople:
-        raise HTTPException(status_code=400, detail="no active salespeople available")
+        raise HTTPException(status_code=400, detail=f"no active {lead_store} salespeople available")
     try:
-        pointer = int(get_meta("bdc:pointer") or 0)
+        pointer = int(get_meta(bdc_pointer_key(lead_store)) or 0)
     except Exception:
         pointer = 0
     salesperson, next_pointer, _ = pick_round_robin_person(salespeople, now_local().date(), pointer)
     if not salesperson:
-        raise HTTPException(status_code=400, detail="no active salespeople available for today's rotation")
+        raise HTTPException(status_code=400, detail=f"no active {lead_store} salespeople available for today's rotation")
     bdc_agent_id, bdc_agent_name = resolve_bdc_agent(payload.bdc_agent_id, payload.bdc_agent_name)
     customer_name = normalize_short_text(payload.customer_name, "customer_name")
     customer_phone = normalize_short_text(payload.customer_phone, "customer_phone", max_len=40)
     created_id = db_insert(
         """
         INSERT INTO bdc_assignment_log (
-            assigned_ts, assigned_at, bdc_agent_id, bdc_agent_name, salesperson_id, salesperson_name,
+            assigned_ts, assigned_at, bdc_agent_id, bdc_agent_name, lead_store, salesperson_id, salesperson_name,
             salesperson_dealership, customer_name, customer_phone
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             time.time(),
             now_iso(),
             bdc_agent_id,
             bdc_agent_name,
+            lead_store,
             salesperson.id,
             salesperson.name,
             salesperson.dealership,
@@ -1348,7 +1382,7 @@ def assign_next_lead(payload: BdcLeadAssignIn) -> BdcAssignmentOut:
             customer_phone,
         ),
     )
-    set_meta("bdc:pointer", str(next_pointer))
+    set_meta(bdc_pointer_key(lead_store), str(next_pointer))
     row = db_query_one("SELECT * FROM bdc_assignment_log WHERE id = ?", (created_id,))
     if not row:
         raise HTTPException(status_code=500, detail="failed to create assignment log")
@@ -1357,6 +1391,7 @@ def assign_next_lead(payload: BdcLeadAssignIn) -> BdcAssignmentOut:
 
 def build_log_filter(
     salesperson_id: Optional[int] = None,
+    lead_store: Optional[str] = None,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
 ) -> Tuple[str, Tuple[Any, ...], Optional[str], Optional[str]]:
@@ -1384,17 +1419,23 @@ def build_log_filter(
         clauses.append("salesperson_id = ?")
         params.append(int(salesperson_id))
 
+    normalized_store = normalize_optional_dealership(lead_store)
+    if normalized_store:
+        clauses.append("lead_store = ?")
+        params.append(normalized_store)
+
     where_sql = f" WHERE {' AND '.join(clauses)}" if clauses else ""
     return where_sql, tuple(params), start_norm, end_norm
 
 
 def fetch_bdc_log(
     salesperson_id: Optional[int] = None,
+    lead_store: Optional[str] = None,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
     limit: int = 200,
 ) -> BdcLogOut:
-    where_sql, params, _, _ = build_log_filter(salesperson_id, start_date, end_date)
+    where_sql, params, _, _ = build_log_filter(salesperson_id, lead_store, start_date, end_date)
     safe_limit = max(1, min(int(limit or 200), 500))
     count_row = db_query_one(f"SELECT COUNT(*) AS count FROM bdc_assignment_log{where_sql}", params) or {}
     rows = db_query_all(
@@ -1406,10 +1447,12 @@ def fetch_bdc_log(
 
 def fetch_bdc_report(
     salesperson_id: Optional[int] = None,
+    lead_store: Optional[str] = None,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
 ) -> BdcReportOut:
-    base_where_sql, base_params, start_norm, end_norm = build_log_filter(None, start_date, end_date)
+    normalized_store = normalize_optional_dealership(lead_store)
+    base_where_sql, base_params, start_norm, end_norm = build_log_filter(None, normalized_store, start_date, end_date)
     total_row = db_query_one(f"SELECT COUNT(*) AS count FROM bdc_assignment_log{base_where_sql}", base_params) or {}
     total_assignments = int(total_row.get("count") or 0)
     grouped_rows = db_query_all(
@@ -1422,7 +1465,7 @@ def fetch_bdc_report(
         base_params,
     )
 
-    active_salespeople = fetch_round_robin_salespeople()
+    active_salespeople = fetch_round_robin_salespeople(normalized_store)
     active_ids = {person.id for person in active_salespeople}
     grouped_by_id: Dict[int, Dict[str, Any]] = {}
     for row in grouped_rows:
@@ -1469,6 +1512,7 @@ def fetch_bdc_report(
         start_date=start_norm,
         end_date=end_norm,
         salesperson_id=int(salesperson_id) if salesperson_id is not None else None,
+        lead_store=normalized_store,
         total_assignments=total_assignments,
         filtered_assignments=filtered_assignments,
         active_salespeople=active_count,
@@ -2000,8 +2044,8 @@ def put_service_drive_traffic_sales(
 
 
 @app.get("/api/bdc/state", response_model=BdcStateOut)
-def get_bdc_state() -> BdcStateOut:
-    return build_bdc_state()
+def get_bdc_state(dealership: Optional[str] = None) -> BdcStateOut:
+    return build_bdc_state(dealership)
 
 
 @app.post("/api/bdc/assign", response_model=BdcAssignmentOut)
@@ -2012,17 +2056,30 @@ def post_bdc_assign(payload: BdcLeadAssignIn) -> BdcAssignmentOut:
 @app.get("/api/bdc/log", response_model=BdcLogOut)
 def get_bdc_log(
     salesperson_id: Optional[int] = None,
+    lead_store: Optional[str] = None,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
     limit: int = 200,
 ) -> BdcLogOut:
-    return fetch_bdc_log(salesperson_id=salesperson_id, start_date=start_date, end_date=end_date, limit=limit)
+    return fetch_bdc_log(
+        salesperson_id=salesperson_id,
+        lead_store=lead_store,
+        start_date=start_date,
+        end_date=end_date,
+        limit=limit,
+    )
 
 
 @app.get("/api/bdc/report", response_model=BdcReportOut)
 def get_bdc_report(
     salesperson_id: Optional[int] = None,
+    lead_store: Optional[str] = None,
     start_date: Optional[str] = None,
     end_date: Optional[str] = None,
 ) -> BdcReportOut:
-    return fetch_bdc_report(salesperson_id=salesperson_id, start_date=start_date, end_date=end_date)
+    return fetch_bdc_report(
+        salesperson_id=salesperson_id,
+        lead_store=lead_store,
+        start_date=start_date,
+        end_date=end_date,
+    )

@@ -125,11 +125,15 @@ export const updateServiceDriveSalesNote = (id, payload) =>
   request(`/api/service-drive/notes/${id}/sales`, { method: "PUT", body: payload });
 export const updateServiceDriveTrafficSales = (id, payload) =>
   request(`/api/service-drive/traffic/${id}/sales`, { method: "PUT", body: payload });
-export const getBdcState = () => request("/api/bdc/state");
+export const getBdcState = (params = {}) =>
+  request(`/api/bdc/state${qs({
+    dealership: params.dealership,
+  })}`);
 export const assignBdcLead = (payload) => request("/api/bdc/assign", { method: "POST", body: payload });
 export const getBdcLog = (params = {}) =>
   request(`/api/bdc/log${qs({
     salesperson_id: params.salespersonId,
+    lead_store: params.leadStore,
     start_date: params.startDate,
     end_date: params.endDate,
     limit: params.limit,
@@ -137,6 +141,7 @@ export const getBdcLog = (params = {}) =>
 export const getBdcReport = (params = {}) =>
   request(`/api/bdc/report${qs({
     salesperson_id: params.salespersonId,
+    lead_store: params.leadStore,
     start_date: params.startDate,
     end_date: params.endDate,
   })}`);
