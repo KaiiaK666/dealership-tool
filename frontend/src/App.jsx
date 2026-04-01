@@ -88,6 +88,18 @@ function dateTimeLabel(value) {
   }).format(parsed);
 }
 
+function longDateLabel(value) {
+  if (!value) return "";
+  const parsed = new Date(`${value}T00:00:00`);
+  if (Number.isNaN(parsed.getTime())) return value;
+  return new Intl.DateTimeFormat("en-US", {
+    weekday: "long",
+    month: "long",
+    day: "numeric",
+    year: "numeric",
+  }).format(parsed);
+}
+
 function errText(error) {
   if (!error) return "Request failed";
   if (typeof error === "string") return error;
@@ -154,6 +166,11 @@ function driveTeamMember(team, brand) {
   return team.find((member) => member.brand === brand) || { brand, salesperson_id: null, salesperson_name: null };
 }
 
+function shortPersonName(name) {
+  if (!name) return "Open";
+  return name.split(" ")[0];
+}
+
 function LogTable({ entries, empty }) {
   if (!entries.length) return <div className="empty">{empty}</div>;
   return (
@@ -212,6 +229,8 @@ function TrafficDayPicker({ cells, countsByDate, selectedDate, today, onSelect, 
           const count = countsByDate?.[value] || 0;
           const parts = dateParts(value);
           const team = scheduleDriveTeam(serviceDayMap.get(value));
+          const kia = driveTeamMember(team, "Kia");
+          const mazda = driveTeamMember(team, "Mazda");
 
           return (
             <button
@@ -226,7 +245,16 @@ function TrafficDayPicker({ cells, countsByDate, selectedDate, today, onSelect, 
               </div>
               <strong>{parts.dayNumber}</strong>
               <b>{count} rows</b>
-              <p>{driveTeamText(team)}</p>
+              <div className="traffic-day-tile__teams">
+                <div className="traffic-day-tile__team">
+                  <span>Kia</span>
+                  <small>{shortPersonName(kia.salesperson_name)}</small>
+                </div>
+                <div className="traffic-day-tile__team">
+                  <span>Mazda</span>
+                  <small>{shortPersonName(mazda.salesperson_name)}</small>
+                </div>
+              </div>
             </button>
           );
         })}
@@ -960,24 +988,59 @@ export default function App() {
 
         {tab === "serviceNotes" ? (
           <section className="stack">
-            <div className="traffic-layout">
+            <div className="panel traffic-toolbar">
+              <div className="traffic-toolbar__copy">
+                <span className="eyebrow">Service drive notes</span>
+                <h2>{longDateLabel(selectedTrafficDate)}</h2>
+                <p className="admin-note">
+                  Open a day from the month view, choose your salesperson name, and save notes only on rows tied to your
+                  assigned Kia or Mazda service-drive spot.
+                </p>
+              </div>
+              <div className="traffic-toolbar__controls">
+                <label>
+                  <span>Month</span>
+                  <input type="month" value={trafficMonth} onChange={(event) => setTrafficMonth(event.target.value)} />
+                </label>
+                <label>
+                  <span>Date</span>
+                  <input
+                    type="date"
+                    value={selectedTrafficDate}
+                    onChange={(event) => {
+                      setSelectedTrafficDate(event.target.value);
+                      if (event.target.value) {
+                        setTrafficMonth(event.target.value.slice(0, 7));
+                      }
+                    }}
+                  />
+                </label>
+                <label>
+                  <span>Salesperson</span>
+                  <select value={selectedTrafficSalesId} onChange={(event) => setSelectedTrafficSalesId(event.target.value)}>
+                    <option value="">Choose your name</option>
+                    {serviceEligible.map((person) => (
+                      <option key={`traffic-sales-${person.id}`} value={person.id}>
+                        {person.name} - {person.dealership}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <button type="button" className="secondary" onClick={() => setTab("serviceCalendar")}>
+                  Back to Calendar
+                </button>
+              </div>
+            </div>
+
+            <div className="traffic-dashboard">
               <div className="panel traffic-day-panel">
                 <div className="row">
                   <div>
                     <span className="eyebrow">Traffic month</span>
-                    <h2>{monthLabel(trafficMonth)}</h2>
+                    <h3>{monthLabel(trafficMonth)}</h3>
                   </div>
-                  <div className="controls">
-                    <input type="month" value={trafficMonth} onChange={(event) => setTrafficMonth(event.target.value)} />
-                    <button type="button" className="secondary" onClick={() => setTab("serviceCalendar")}>
-                      Back to Calendar
-                    </button>
-                  </div>
+                  <div className="traffic-day-panel__count">{selectedTrafficCount} rows</div>
                 </div>
-                <p className="admin-note">
-                  Open any day to see who came through the service drive. Only the Kia and Mazda salespeople assigned to
-                  that day can save notes on the rows below.
-                </p>
                 <TrafficDayPicker
                   cells={trafficMonthCells}
                   countsByDate={serviceTrafficData.counts_by_date}
@@ -989,130 +1052,119 @@ export default function App() {
                 />
               </div>
 
-              <div className="stack">
-                <div className="panel">
-                  <div className="row">
-                    <div>
-                      <span className="eyebrow">Service drive notes</span>
-                      <h2>{selectedTrafficDate}</h2>
+              <div className="traffic-sidebar">
+                <div className="panel traffic-summary-panel">
+                  <span className="eyebrow">Selected day</span>
+                  <h3>{longDateLabel(selectedTrafficDate)}</h3>
+                  <div className="traffic-summary-panel__status">
+                    <strong>{selectedTrafficSalesperson?.name || "No salesperson selected"}</strong>
+                    <small>
+                      {selectedTrafficUnlocked
+                        ? "Notes are unlocked for your assigned day."
+                        : selectedTrafficSalesId
+                          ? "That salesperson is not assigned to this service-drive day."
+                          : "Choose your name to unlock notes."}
+                    </small>
+                  </div>
+                  <div className="traffic-team-grid">
+                    <div className="traffic-team-card">
+                      <span>Kia</span>
+                      <strong>{selectedTrafficKia.salesperson_name || "Open"}</strong>
+                      <small>{selectedTrafficKia.salesperson_dealership || "No assignment"}</small>
                     </div>
-                    <div className="controls">
-                      <input
-                        type="date"
-                        value={selectedTrafficDate}
-                        onChange={(event) => {
-                          setSelectedTrafficDate(event.target.value);
-                          if (event.target.value) {
-                            setTrafficMonth(event.target.value.slice(0, 7));
-                          }
-                        }}
-                      />
-                      <select value={selectedTrafficSalesId} onChange={(event) => setSelectedTrafficSalesId(event.target.value)}>
-                        <option value="">Choose your name</option>
-                        {serviceEligible.map((person) => (
-                          <option key={`traffic-sales-${person.id}`} value={person.id}>
-                            {person.name} - {person.dealership}
-                          </option>
-                        ))}
-                      </select>
+                    <div className="traffic-team-card">
+                      <span>Mazda</span>
+                      <strong>{selectedTrafficMazda.salesperson_name || "Open"}</strong>
+                      <small>{selectedTrafficMazda.salesperson_dealership || "No assignment"}</small>
                     </div>
                   </div>
-                  <p className="admin-note">
-                    Admin controls the customer name, year, model and offer idea. Salespeople only update the notes field
-                    after talking with the prospect. Selected salesperson: {selectedTrafficSalesperson?.name || "none"}.
-                  </p>
-                </div>
-
-                <div className="stats">
-                  <div className="stat">
-                    <span>Traffic rows</span>
-                    <strong>{selectedTrafficCount}</strong>
+                  <div className="traffic-summary-grid">
+                    <div className="traffic-summary-stat">
+                      <span>Rows</span>
+                      <strong>{selectedTrafficCount}</strong>
+                    </div>
+                    <div className="traffic-summary-stat">
+                      <span>Month total</span>
+                      <strong>{trafficMonthTotal}</strong>
+                    </div>
                   </div>
-                  <div className="stat">
-                    <span>Kia assigned</span>
-                    <strong>{selectedTrafficKia.salesperson_name || "Open"}</strong>
-                  </div>
-                  <div className="stat">
-                    <span>Mazda assigned</span>
-                    <strong>{selectedTrafficMazda.salesperson_name || "Open"}</strong>
-                  </div>
-                </div>
-
-                <div className="notes-list">
-                  {serviceTrafficData.entries.length ? (
-                    serviceTrafficData.entries.map((entry) => {
-                      const canEditSales = Boolean(
-                        selectedTrafficSalesId &&
-                          entry.drive_team.some((member) => member.salesperson_id === Number(selectedTrafficSalesId))
-                      );
-
-                      return (
-                        <article key={entry.id} className="note-card">
-                          <div className="note-card__top">
-                            <div>
-                              <span className="eyebrow">Service drive traffic</span>
-                              <h3>{entry.customer_name}</h3>
-                              <p className="note-card__subtitle">{entry.traffic_date}</p>
-                            </div>
-                            <span className="brand-pill brand-pill--kia">Prospect</span>
-                          </div>
-
-                          <div className="note-meta">
-                            <div className="meta-item">
-                              <span>Year</span>
-                              <strong>{entry.vehicle_year || "N/A"}</strong>
-                            </div>
-                            <div className="meta-item">
-                              <span>Model / Make</span>
-                              <strong>{entry.model_make || "No model entered"}</strong>
-                            </div>
-                            <div className="meta-item">
-                              <span>Drive team</span>
-                              <strong>{driveTeamText(entry.drive_team)}</strong>
-                            </div>
-                          </div>
-
-                          <div className="note-copy">
-                            <div className="note-copy__block is-readonly">
-                              <span>Offer idea</span>
-                              <p>{entry.offer_idea || "No offer idea entered yet."}</p>
-                            </div>
-
-                            <label className="note-copy__block">
-                              <span>Salesperson notes</span>
-                              <textarea
-                                rows={5}
-                                value={entry.sales_notes}
-                                disabled={!canEditSales}
-                                onChange={(event) => patchTrafficEntry(entry.id, { sales_notes: event.target.value })}
-                              />
-                            </label>
-                          </div>
-
-                          <div className="note-actions">
-                            <small>
-                              {canEditSales
-                                ? "You are assigned to this day, so you can save notes on this row."
-                                : selectedTrafficUnlocked
-                                  ? "Only the salespeople assigned to that day can save notes."
-                                  : "Pick your salesperson name above to unlock note saving."}
-                            </small>
-                            <button
-                              type="button"
-                              onClick={() => saveTrafficSalesNotes(entry)}
-                              disabled={!canEditSales || busy === `traffic-sales-${entry.id}`}
-                            >
-                              {busy === `traffic-sales-${entry.id}` ? "Saving..." : "Save Notes"}
-                            </button>
-                          </div>
-                        </article>
-                      );
-                    })
-                  ) : (
-                    <div className="empty">No traffic rows have been entered for that day.</div>
-                  )}
                 </div>
               </div>
+            </div>
+
+            <div className="notes-list">
+              {serviceTrafficData.entries.length ? (
+                serviceTrafficData.entries.map((entry) => {
+                  const canEditSales = Boolean(
+                    selectedTrafficSalesId &&
+                      entry.drive_team.some((member) => member.salesperson_id === Number(selectedTrafficSalesId))
+                  );
+
+                  return (
+                    <article key={entry.id} className="note-card">
+                      <div className="note-card__top">
+                        <div>
+                          <span className="eyebrow">Service drive traffic</span>
+                          <h3>{entry.customer_name}</h3>
+                          <p className="note-card__subtitle">{entry.traffic_date}</p>
+                        </div>
+                        <span className="brand-pill brand-pill--kia">Prospect</span>
+                      </div>
+
+                      <div className="note-meta">
+                        <div className="meta-item">
+                          <span>Year</span>
+                          <strong>{entry.vehicle_year || "N/A"}</strong>
+                        </div>
+                        <div className="meta-item">
+                          <span>Model / Make</span>
+                          <strong>{entry.model_make || "No model entered"}</strong>
+                        </div>
+                        <div className="meta-item">
+                          <span>Drive team</span>
+                          <strong>{driveTeamText(entry.drive_team)}</strong>
+                        </div>
+                      </div>
+
+                      <div className="note-copy">
+                        <div className="note-copy__block is-readonly">
+                          <span>Offer idea</span>
+                          <p>{entry.offer_idea || "No offer idea entered yet."}</p>
+                        </div>
+
+                        <label className="note-copy__block">
+                          <span>Salesperson notes</span>
+                          <textarea
+                            rows={5}
+                            value={entry.sales_notes}
+                            disabled={!canEditSales}
+                            onChange={(event) => patchTrafficEntry(entry.id, { sales_notes: event.target.value })}
+                          />
+                        </label>
+                      </div>
+
+                      <div className="note-actions">
+                        <small>
+                          {canEditSales
+                            ? "You are assigned to this day, so you can save notes on this row."
+                            : selectedTrafficUnlocked
+                              ? "Only the salespeople assigned to that day can save notes."
+                              : "Pick your salesperson name above to unlock note saving."}
+                        </small>
+                        <button
+                          type="button"
+                          onClick={() => saveTrafficSalesNotes(entry)}
+                          disabled={!canEditSales || busy === `traffic-sales-${entry.id}`}
+                        >
+                          {busy === `traffic-sales-${entry.id}` ? "Saving..." : "Save Notes"}
+                        </button>
+                      </div>
+                    </article>
+                  );
+                })
+              ) : (
+                <div className="empty">No traffic rows have been entered for that day.</div>
+              )}
             </div>
           </section>
         ) : null}
@@ -1941,51 +1993,59 @@ export default function App() {
 
                 {adminSection === "trafficLog" ? (
                   <>
-                    <div className="traffic-layout">
+                    <div className="panel traffic-toolbar traffic-toolbar--admin">
+                      <div className="traffic-toolbar__copy">
+                        <span className="eyebrow">Traffic log</span>
+                        <h3>{monthLabel(trafficMonth)}</h3>
+                        <p className="admin-note">
+                          Pick a day from the month view, add prospect rows like a clean spreadsheet, and keep the
+                          customer-facing details locked to admin-only edits.
+                        </p>
+                      </div>
+                      <div className="traffic-toolbar__controls">
+                        <label>
+                          <span>Month</span>
+                          <input
+                            type="month"
+                            value={trafficMonth}
+                            onChange={(event) => setTrafficMonth(event.target.value)}
+                          />
+                        </label>
+                        <label>
+                          <span>Date</span>
+                          <input
+                            type="date"
+                            value={selectedTrafficDate}
+                            onChange={(event) => {
+                              setSelectedTrafficDate(event.target.value);
+                              if (event.target.value) {
+                                setTrafficMonth(event.target.value.slice(0, 7));
+                              }
+                            }}
+                          />
+                        </label>
+                        <div className="traffic-toolbar__chips">
+                          <div className="traffic-chip">
+                            <span>Month total</span>
+                            <strong>{trafficMonthTotal}</strong>
+                          </div>
+                          <div className="traffic-chip">
+                            <span>Selected day</span>
+                            <strong>{selectedTrafficCount}</strong>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="traffic-dashboard">
                       <div className="panel traffic-day-panel">
                         <div className="row">
                           <div>
-                            <span className="eyebrow">Traffic calendar</span>
+                            <span className="eyebrow">Month at a glance</span>
                             <h3>{monthLabel(trafficMonth)}</h3>
                           </div>
-                          <div className="controls">
-                            <input
-                              type="month"
-                              value={trafficMonth}
-                              onChange={(event) => setTrafficMonth(event.target.value)}
-                            />
-                            <input
-                              type="date"
-                              value={selectedTrafficDate}
-                              onChange={(event) => {
-                                setSelectedTrafficDate(event.target.value);
-                                if (event.target.value) {
-                                  setTrafficMonth(event.target.value.slice(0, 7));
-                                }
-                              }}
-                            />
-                          </div>
+                          <div className="traffic-day-panel__count">{selectedTrafficCount} rows</div>
                         </div>
-                        <p className="admin-note">
-                          Pick a day from the month view, then add prospect rows one by one like a simple Excel log.
-                          Sales staff can only save the notes column from the public Service Drive Notes page.
-                        </p>
-
-                        <div className="stats">
-                          <div className="stat">
-                            <span>Rows this month</span>
-                            <strong>{trafficMonthTotal}</strong>
-                          </div>
-                          <div className="stat">
-                            <span>Rows on {selectedTrafficDate}</span>
-                            <strong>{selectedTrafficCount}</strong>
-                          </div>
-                          <div className="stat">
-                            <span>Drive team</span>
-                            <strong>{driveTeamText(selectedTrafficTeam)}</strong>
-                          </div>
-                        </div>
-
                         <TrafficDayPicker
                           cells={trafficMonthCells}
                           countsByDate={serviceTrafficData.counts_by_date}
@@ -1997,76 +2057,99 @@ export default function App() {
                         />
                       </div>
 
-                      <div className="panel">
-                        <div className="row">
-                          <div>
-                            <span className="eyebrow">Add traffic row</span>
-                            <h3>{selectedTrafficDate}</h3>
+                      <div className="traffic-sidebar">
+                        <div className="panel traffic-summary-panel">
+                          <span className="eyebrow">Selected day</span>
+                          <h3>{longDateLabel(selectedTrafficDate)}</h3>
+                          <p className="admin-note">
+                            Sales staff can only edit the notes field from the public page. Everything else stays admin
+                            controlled here.
+                          </p>
+                          <div className="traffic-team-grid">
+                            <div className="traffic-team-card">
+                              <span>Kia</span>
+                              <strong>{selectedTrafficKia.salesperson_name || "Open"}</strong>
+                              <small>{selectedTrafficKia.salesperson_dealership || "No assignment"}</small>
+                            </div>
+                            <div className="traffic-team-card">
+                              <span>Mazda</span>
+                              <strong>{selectedTrafficMazda.salesperson_name || "Open"}</strong>
+                              <small>{selectedTrafficMazda.salesperson_dealership || "No assignment"}</small>
+                            </div>
                           </div>
-                          <button
-                            type="button"
-                            className="secondary"
-                            onClick={() =>
-                              setTrafficEntryForm({
-                                customerName: "",
-                                vehicleYear: "",
-                                modelMake: "",
-                                offerIdea: "",
-                              })
-                            }
-                          >
-                            Clear Fields
-                          </button>
                         </div>
 
-                        <form className="form" onSubmit={addTrafficEntry}>
-                          <div className="traffic-entry-grid">
-                            <label>
-                              <span>Name</span>
-                              <input
-                                value={trafficEntryForm.customerName}
-                                onChange={(event) =>
-                                  setTrafficEntryForm((current) => ({ ...current, customerName: event.target.value }))
-                                }
-                                placeholder="Customer name"
-                              />
-                            </label>
-                            <label>
-                              <span>Year</span>
-                              <input
-                                value={trafficEntryForm.vehicleYear}
-                                onChange={(event) =>
-                                  setTrafficEntryForm((current) => ({ ...current, vehicleYear: event.target.value }))
-                                }
-                                placeholder="2024"
-                              />
-                            </label>
-                            <label>
-                              <span>Model / Make</span>
-                              <input
-                                value={trafficEntryForm.modelMake}
-                                onChange={(event) =>
-                                  setTrafficEntryForm((current) => ({ ...current, modelMake: event.target.value }))
-                                }
-                                placeholder="Sportage / Kia"
-                              />
-                            </label>
-                            <label className="traffic-entry-grid__wide">
-                              <span>Offer Idea</span>
-                              <textarea
-                                rows={5}
-                                value={trafficEntryForm.offerIdea}
-                                onChange={(event) =>
-                                  setTrafficEntryForm((current) => ({ ...current, offerIdea: event.target.value }))
-                                }
-                                placeholder="Lease idea, trade angle, payment idea, or next step"
-                              />
-                            </label>
+                        <div className="panel">
+                          <div className="row">
+                            <div>
+                              <span className="eyebrow">Add traffic row</span>
+                              <h3>{selectedTrafficDate}</h3>
+                            </div>
+                            <button
+                              type="button"
+                              className="secondary"
+                              onClick={() =>
+                                setTrafficEntryForm({
+                                  customerName: "",
+                                  vehicleYear: "",
+                                  modelMake: "",
+                                  offerIdea: "",
+                                })
+                              }
+                            >
+                              Clear Fields
+                            </button>
                           </div>
-                          <button type="submit" disabled={busy === "add-traffic-entry"}>
-                            {busy === "add-traffic-entry" ? "Adding..." : "+ Add Traffic Row"}
-                          </button>
-                        </form>
+
+                          <form className="form" onSubmit={addTrafficEntry}>
+                            <div className="traffic-entry-grid">
+                              <label>
+                                <span>Name</span>
+                                <input
+                                  value={trafficEntryForm.customerName}
+                                  onChange={(event) =>
+                                    setTrafficEntryForm((current) => ({ ...current, customerName: event.target.value }))
+                                  }
+                                  placeholder="Customer name"
+                                />
+                              </label>
+                              <label>
+                                <span>Year</span>
+                                <input
+                                  value={trafficEntryForm.vehicleYear}
+                                  onChange={(event) =>
+                                    setTrafficEntryForm((current) => ({ ...current, vehicleYear: event.target.value }))
+                                  }
+                                  placeholder="2024"
+                                />
+                              </label>
+                              <label>
+                                <span>Model / Make</span>
+                                <input
+                                  value={trafficEntryForm.modelMake}
+                                  onChange={(event) =>
+                                    setTrafficEntryForm((current) => ({ ...current, modelMake: event.target.value }))
+                                  }
+                                  placeholder="Sportage / Kia"
+                                />
+                              </label>
+                              <label className="traffic-entry-grid__wide">
+                                <span>Offer Idea</span>
+                                <textarea
+                                  rows={5}
+                                  value={trafficEntryForm.offerIdea}
+                                  onChange={(event) =>
+                                    setTrafficEntryForm((current) => ({ ...current, offerIdea: event.target.value }))
+                                  }
+                                  placeholder="Lease idea, trade angle, payment idea, or next step"
+                                />
+                              </label>
+                            </div>
+                            <button type="submit" disabled={busy === "add-traffic-entry"}>
+                              {busy === "add-traffic-entry" ? "Adding..." : "+ Add Traffic Row"}
+                            </button>
+                          </form>
+                        </div>
                       </div>
                     </div>
 

@@ -521,36 +521,131 @@ button.calendar-day__plus:hover:not(:disabled) {
   padding-block: 10px;
 }
 
-.traffic-layout {
+.traffic-layout,
+.traffic-dashboard {
   display: grid;
-  grid-template-columns: minmax(320px, 380px) minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1.6fr) minmax(320px, 0.9fr);
   gap: 18px;
   align-items: start;
 }
 
-.traffic-day-panel {
+.traffic-sidebar,
+.traffic-day-panel,
+.traffic-summary-panel {
   display: grid;
   gap: 14px;
   align-content: start;
 }
 
-.traffic-day-grid {
-  min-width: 840px;
+.traffic-toolbar {
   display: grid;
-  grid-template-columns: repeat(7, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1.1fr) minmax(320px, 0.9fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.traffic-toolbar--admin {
+  background:
+    linear-gradient(180deg, rgba(255, 252, 247, 0.96), rgba(245, 239, 230, 0.84)),
+    var(--paper);
+}
+
+.traffic-toolbar__copy {
+  display: grid;
+  gap: 10px;
+}
+
+.traffic-toolbar__controls,
+.traffic-toolbar__chips,
+.traffic-summary-grid,
+.traffic-team-grid {
+  display: grid;
   gap: 12px;
 }
 
+.traffic-toolbar__controls {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: end;
+}
+
+.traffic-toolbar__controls > button {
+  width: 100%;
+}
+
+.traffic-toolbar__chips,
+.traffic-summary-grid,
+.traffic-team-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.traffic-chip,
+.traffic-team-card,
+.traffic-summary-stat {
+  padding: 14px;
+  border-radius: 18px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.82);
+  display: grid;
+  gap: 6px;
+}
+
+.traffic-chip span,
+.traffic-team-card span,
+.traffic-summary-stat span,
+.traffic-summary-panel__status small {
+  color: var(--muted);
+}
+
+.traffic-chip strong,
+.traffic-summary-stat strong {
+  font-size: 1.55rem;
+  line-height: 1;
+}
+
+.traffic-team-card strong {
+  font-size: 1.2rem;
+  line-height: 1.15;
+}
+
+.traffic-summary-panel__status {
+  padding: 14px 16px;
+  border-radius: 18px;
+  border: 1px dashed rgba(37, 48, 59, 0.14);
+  background: rgba(250, 246, 239, 0.86);
+  display: grid;
+  gap: 6px;
+}
+
+.traffic-day-panel__count {
+  min-width: 96px;
+  padding: 10px 14px;
+  border-radius: 999px;
+  text-align: center;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--accent-deep);
+  background: rgba(196, 102, 52, 0.12);
+}
+
+.traffic-day-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 10px;
+}
+
 .traffic-day-tile {
-  min-height: 150px;
-  padding: 12px;
+  min-height: 124px;
+  padding: 10px;
   border-radius: 18px;
   border: 1px solid var(--line);
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(247, 241, 232, 0.9));
   color: var(--ink);
   box-shadow: none;
   display: grid;
-  gap: 8px;
+  gap: 7px;
   align-content: start;
   text-align: left;
 }
@@ -580,9 +675,10 @@ button.traffic-day-tile:hover:not(:disabled) {
 }
 
 .traffic-day-tile__top span,
-.traffic-day-tile__top small {
+.traffic-day-tile__top small,
+.traffic-day-tile__team span {
   font-family: "IBM Plex Mono", monospace;
-  font-size: 0.7rem;
+  font-size: 0.67rem;
   font-weight: 600;
   letter-spacing: 0.14em;
   text-transform: uppercase;
@@ -590,20 +686,31 @@ button.traffic-day-tile:hover:not(:disabled) {
 }
 
 .traffic-day-tile strong {
-  font-size: 1.9rem;
+  font-size: 1.8rem;
   line-height: 1;
 }
 
 .traffic-day-tile b {
   color: var(--accent-deep);
-  font-size: 0.92rem;
+  font-size: 0.88rem;
 }
 
-.traffic-day-tile p {
-  margin: 0;
-  color: var(--muted);
-  font-size: 0.88rem;
-  line-height: 1.45;
+.traffic-day-tile__teams {
+  display: grid;
+  gap: 4px;
+}
+
+.traffic-day-tile__team {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.traffic-day-tile__team small {
+  color: var(--deep);
+  font-size: 0.78rem;
+  font-weight: 600;
 }
 
 .traffic-entry-grid {
@@ -1258,6 +1365,8 @@ button.special-card:hover:not(:disabled) {
   .lead-grid,
   .admin-grid,
   .traffic-layout,
+  .traffic-dashboard,
+  .traffic-toolbar,
   .days-off-layout,
   .weekday-board,
   .filters,
@@ -1267,6 +1376,10 @@ button.special-card:hover:not(:disabled) {
   .note-copy,
   .note-admin-grid,
   .traffic-entry-grid,
+  .traffic-toolbar__controls,
+  .traffic-toolbar__chips,
+  .traffic-summary-grid,
+  .traffic-team-grid,
   .editor-list--two-up,
   .upload-form,
   .specials-hero {
@@ -1284,6 +1397,8 @@ button.special-card:hover:not(:disabled) {
   .lead-grid,
   .admin-grid,
   .traffic-layout,
+  .traffic-dashboard,
+  .traffic-toolbar,
   .days-off-layout,
   .weekday-board,
   .filters,
@@ -1293,6 +1408,10 @@ button.special-card:hover:not(:disabled) {
   .note-copy,
   .note-admin-grid,
   .traffic-entry-grid,
+  .traffic-toolbar__controls,
+  .traffic-toolbar__chips,
+  .traffic-summary-grid,
+  .traffic-team-grid,
   .editor-list--two-up,
   .upload-form,
   .specials-hero {
@@ -1327,7 +1446,7 @@ button.special-card:hover:not(:disabled) {
   .calendar-grid,
   .days-off-grid,
   .traffic-day-grid {
-    min-width: 840px;
+    min-width: 780px;
     gap: 10px;
   }
 
