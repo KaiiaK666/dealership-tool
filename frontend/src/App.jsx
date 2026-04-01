@@ -331,7 +331,7 @@ export default function App() {
     0
   );
   const serviceDayMap = new Map((serviceMonth?.days || []).map((day) => [day.date, day]));
-  const focusTrafficDate = today.startsWith(trafficMonth) ? today : selectedTrafficDate;
+  const focusTrafficDate = selectedTrafficDate;
   const focusTrafficIsToday = focusTrafficDate === today;
   const focusTrafficCount = serviceTrafficData.counts_by_date?.[focusTrafficDate] || 0;
   const focusTrafficTeam = scheduleDriveTeam(serviceDayMap.get(focusTrafficDate));
@@ -998,67 +998,15 @@ export default function App() {
 
         {tab === "serviceNotes" ? (
           <section className="stack">
-            <div className="panel traffic-toolbar">
-              <div className="traffic-toolbar__copy">
-                <span className="eyebrow">Service drive notes</span>
-                <h2>{focusTrafficIsToday ? "Today's Activity" : "Current Activity"}</h2>
-                <p className="admin-note">
-                  The current service-drive day stays front and center here. The month view is still below it, but this top
-                  area is meant to show users exactly who is up right now and whether their notes are unlocked.
-                </p>
-              </div>
-              <div className="traffic-toolbar__controls">
-                <label>
-                  <span>Month</span>
-                  <input type="month" value={trafficMonth} onChange={(event) => setTrafficMonth(event.target.value)} />
-                </label>
-                <label>
-                  <span>Date</span>
-                  <input
-                    type="date"
-                    value={selectedTrafficDate}
-                    onChange={(event) => {
-                      setSelectedTrafficDate(event.target.value);
-                      if (event.target.value) {
-                        setTrafficMonth(event.target.value.slice(0, 7));
-                      }
-                    }}
-                  />
-                </label>
-                <label>
-                  <span>Salesperson</span>
-                  <select value={selectedTrafficSalesId} onChange={(event) => setSelectedTrafficSalesId(event.target.value)}>
-                    <option value="">Choose your name</option>
-                    {serviceEligible.map((person) => (
-                      <option key={`traffic-sales-${person.id}`} value={person.id}>
-                        {person.name} - {person.dealership}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <div className="traffic-toolbar__actions">
-                  <button
-                    type="button"
-                    className="secondary"
-                    onClick={() => {
-                      setSelectedTrafficDate(today);
-                      setTrafficMonth(today.slice(0, 7));
-                    }}
-                  >
-                    Jump to Today
-                  </button>
-                  <button type="button" className="secondary" onClick={() => setTab("serviceCalendar")}>
-                    Back to Calendar
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            <div className="panel traffic-focus-panel">
+            <div className="panel traffic-notes-hero">
               <div className="traffic-focus-panel__headline">
                 <div>
-                  <span className="eyebrow">{focusTrafficIsToday ? "Today" : "Current focus"}</span>
+                  <span className="eyebrow">{focusTrafficIsToday ? "Today's activity" : "Service drive activity"}</span>
                   <h2>{longDateLabel(focusTrafficDate)}</h2>
+                  <p className="admin-note">
+                    The selected date stays front and center here so the team immediately sees who is up for Kia and Mazda,
+                    how many traffic rows are on the board, and whether notes are unlocked.
+                  </p>
                 </div>
                 <div className="traffic-day-panel__count">{focusTrafficCount} rows</div>
               </div>
@@ -1084,70 +1032,50 @@ export default function App() {
                   <small>{focusTrafficMazda.salesperson_dealership || "No assignment"}</small>
                 </div>
                 <div className="traffic-summary-stat traffic-summary-stat--focus">
-                  <span>Viewing</span>
-                  <strong>{selectedTrafficDate === focusTrafficDate ? "Current day" : longDateLabel(selectedTrafficDate)}</strong>
+                  <span>Traffic rows</span>
+                  <strong>{focusTrafficCount}</strong>
                 </div>
               </div>
-            </div>
 
-            <div className="traffic-dashboard">
-              <div className="panel traffic-day-panel">
-                <div className="row">
-                  <div>
-                    <span className="eyebrow">Traffic month</span>
-                    <h3>{monthLabel(trafficMonth)}</h3>
-                  </div>
-                  <div className="traffic-day-panel__count">{selectedTrafficCount} rows</div>
-                </div>
-                <div className="traffic-picker-scroll">
-                  <TrafficDayPicker
-                    cells={trafficMonthCells}
-                    countsByDate={serviceTrafficData.counts_by_date}
-                    selectedDate={selectedTrafficDate}
-                    today={today}
-                    onSelect={setSelectedTrafficDate}
-                    serviceDayMap={serviceDayMap}
-                    idPrefix="traffic-view"
+              <div className="traffic-notes-hero__controls">
+                <label>
+                  <span>Date</span>
+                  <input
+                    type="date"
+                    value={selectedTrafficDate}
+                    onChange={(event) => {
+                      setSelectedTrafficDate(event.target.value);
+                      if (event.target.value) {
+                        setTrafficMonth(event.target.value.slice(0, 7));
+                      }
+                    }}
                   />
-                </div>
-              </div>
-
-              <div className="traffic-sidebar">
-                <div className="panel traffic-summary-panel">
-                  <span className="eyebrow">Selected day</span>
-                  <h3>{longDateLabel(selectedTrafficDate)}</h3>
-                  <div className="traffic-summary-panel__status">
-                    <strong>{selectedTrafficSalesperson?.name || "No salesperson selected"}</strong>
-                    <small>
-                      {selectedTrafficUnlocked
-                        ? "Notes are unlocked for your assigned day."
-                        : selectedTrafficSalesId
-                          ? "That salesperson is not assigned to this service-drive day."
-                          : "Choose your name to unlock notes."}
-                    </small>
-                  </div>
-                  <div className="traffic-team-grid">
-                    <div className="traffic-team-card">
-                      <span>Kia</span>
-                      <strong>{selectedTrafficKia.salesperson_name || "Open"}</strong>
-                      <small>{selectedTrafficKia.salesperson_dealership || "No assignment"}</small>
-                    </div>
-                    <div className="traffic-team-card">
-                      <span>Mazda</span>
-                      <strong>{selectedTrafficMazda.salesperson_name || "Open"}</strong>
-                      <small>{selectedTrafficMazda.salesperson_dealership || "No assignment"}</small>
-                    </div>
-                  </div>
-                  <div className="traffic-summary-grid">
-                    <div className="traffic-summary-stat">
-                      <span>Rows</span>
-                      <strong>{selectedTrafficCount}</strong>
-                    </div>
-                    <div className="traffic-summary-stat">
-                      <span>Month total</span>
-                      <strong>{trafficMonthTotal}</strong>
-                    </div>
-                  </div>
+                </label>
+                <label>
+                  <span>Salesperson</span>
+                  <select value={selectedTrafficSalesId} onChange={(event) => setSelectedTrafficSalesId(event.target.value)}>
+                    <option value="">Choose your name</option>
+                    {serviceEligible.map((person) => (
+                      <option key={`traffic-sales-${person.id}`} value={person.id}>
+                        {person.name} - {person.dealership}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <div className="traffic-notes-hero__actions">
+                  <button
+                    type="button"
+                    className="secondary"
+                    onClick={() => {
+                      setSelectedTrafficDate(today);
+                      setTrafficMonth(today.slice(0, 7));
+                    }}
+                  >
+                    Jump to Today
+                  </button>
+                  <button type="button" className="secondary" onClick={() => setTab("serviceCalendar")}>
+                    Back to Calendar
+                  </button>
                 </div>
               </div>
             </div>

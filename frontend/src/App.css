@@ -550,6 +550,26 @@ button.calendar-day__plus:hover:not(:disabled) {
   align-items: start;
 }
 
+.traffic-notes-hero {
+  display: grid;
+  gap: 18px;
+}
+
+.traffic-notes-hero__controls,
+.traffic-notes-hero__actions {
+  display: grid;
+  gap: 12px;
+}
+
+.traffic-notes-hero__controls {
+  grid-template-columns: repeat(2, minmax(0, 1fr)) minmax(220px, auto);
+  align-items: end;
+}
+
+.traffic-notes-hero__actions {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .traffic-toolbar--admin {
   background:
     linear-gradient(180deg, rgba(255, 252, 247, 0.96), rgba(245, 239, 230, 0.84)),
@@ -934,6 +954,7 @@ th {
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.9), rgba(247, 241, 232, 0.76));
   box-shadow: var(--card-shadow);
   display: grid;
+  grid-template-rows: auto minmax(0, auto);
   gap: 14px;
   align-content: start;
   align-self: start;
@@ -957,6 +978,11 @@ th {
 
 .editor-list--two-up {
   grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.editor-list {
+  align-content: start;
+  align-self: start;
 }
 
 .notes-list {
@@ -1442,6 +1468,8 @@ button.special-card:hover:not(:disabled) {
   .traffic-dashboard,
   .traffic-toolbar,
   .traffic-focus-grid,
+  .traffic-notes-hero__controls,
+  .traffic-notes-hero__actions,
   .days-off-layout,
   .weekday-board,
   .filters,
@@ -1550,7 +1578,9 @@ button.special-card:hover:not(:disabled) {
   .traffic-toolbar__chips,
   .traffic-summary-grid,
   .traffic-focus-grid,
-  .traffic-team-grid {
+  .traffic-team-grid,
+  .traffic-notes-hero__controls,
+  .traffic-notes-hero__actions {
     grid-template-columns: 1fr;
   }
 }
