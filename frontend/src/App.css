@@ -561,6 +561,7 @@ button.calendar-day__plus:hover:not(:disabled) {
   gap: 10px;
 }
 
+.traffic-toolbar__actions,
 .traffic-toolbar__controls,
 .traffic-toolbar__chips,
 .traffic-summary-grid,
@@ -572,6 +573,10 @@ button.calendar-day__plus:hover:not(:disabled) {
 .traffic-toolbar__controls {
   grid-template-columns: repeat(2, minmax(0, 1fr));
   align-items: end;
+}
+
+.traffic-toolbar__actions {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
 .traffic-toolbar__controls > button {
@@ -634,6 +639,55 @@ button.calendar-day__plus:hover:not(:disabled) {
   text-transform: uppercase;
   color: var(--accent-deep);
   background: rgba(196, 102, 52, 0.12);
+}
+
+.traffic-focus-panel,
+.traffic-focus-panel__headline {
+  display: grid;
+  gap: 16px;
+}
+
+.traffic-focus-panel__headline {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+}
+
+.traffic-focus-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.traffic-focus-status {
+  padding: 18px;
+  border-radius: 22px;
+  border: 1px solid rgba(37, 48, 59, 0.1);
+  background:
+    linear-gradient(145deg, rgba(37, 48, 59, 0.98), rgba(52, 66, 79, 0.94)),
+    linear-gradient(135deg, rgba(196, 102, 52, 0.1), rgba(28, 128, 121, 0.1));
+  color: #f8f1e7;
+  display: grid;
+  gap: 8px;
+}
+
+.traffic-focus-status strong {
+  font-size: 1.45rem;
+  line-height: 1.1;
+}
+
+.traffic-focus-status small {
+  color: rgba(248, 241, 231, 0.74);
+  line-height: 1.5;
+}
+
+.traffic-team-card--focus,
+.traffic-summary-stat--focus {
+  min-height: 100%;
+}
+
+.traffic-summary-stat--focus strong {
+  font-size: 1.05rem;
+  line-height: 1.35;
 }
 
 .traffic-picker-scroll {
@@ -870,6 +924,7 @@ th {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 16px;
+  align-items: start;
 }
 
 .store-column {
@@ -880,6 +935,8 @@ th {
   box-shadow: var(--card-shadow);
   display: grid;
   gap: 14px;
+  align-content: start;
+  align-self: start;
 }
 
 .store-column__header {
@@ -1384,6 +1441,7 @@ button.special-card:hover:not(:disabled) {
   .traffic-layout,
   .traffic-dashboard,
   .traffic-toolbar,
+  .traffic-focus-grid,
   .days-off-layout,
   .weekday-board,
   .filters,
@@ -1416,6 +1474,7 @@ button.special-card:hover:not(:disabled) {
   .traffic-layout,
   .traffic-dashboard,
   .traffic-toolbar,
+  .traffic-focus-grid,
   .days-off-layout,
   .weekday-board,
   .filters,
@@ -1487,8 +1546,10 @@ button.special-card:hover:not(:disabled) {
 @media (max-width: 980px) {
   .traffic-sidebar,
   .traffic-toolbar__controls,
+  .traffic-toolbar__actions,
   .traffic-toolbar__chips,
   .traffic-summary-grid,
+  .traffic-focus-grid,
   .traffic-team-grid {
     grid-template-columns: 1fr;
   }

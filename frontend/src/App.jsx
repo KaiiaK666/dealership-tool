@@ -331,6 +331,16 @@ export default function App() {
     0
   );
   const serviceDayMap = new Map((serviceMonth?.days || []).map((day) => [day.date, day]));
+  const focusTrafficDate = today.startsWith(trafficMonth) ? today : selectedTrafficDate;
+  const focusTrafficIsToday = focusTrafficDate === today;
+  const focusTrafficCount = serviceTrafficData.counts_by_date?.[focusTrafficDate] || 0;
+  const focusTrafficTeam = scheduleDriveTeam(serviceDayMap.get(focusTrafficDate));
+  const focusTrafficKia = driveTeamMember(focusTrafficTeam, "Kia");
+  const focusTrafficMazda = driveTeamMember(focusTrafficTeam, "Mazda");
+  const focusTrafficUnlocked = Boolean(
+    selectedTrafficSalesId &&
+      focusTrafficTeam.some((member) => member.salesperson_id === Number(selectedTrafficSalesId))
+  );
   const selectedTrafficScheduleDay = serviceDayMap.get(selectedTrafficDate) || null;
   const selectedTrafficTeam = serviceTrafficData.entries[0]?.drive_team?.length
     ? serviceTrafficData.entries[0].drive_team
@@ -991,10 +1001,10 @@ export default function App() {
             <div className="panel traffic-toolbar">
               <div className="traffic-toolbar__copy">
                 <span className="eyebrow">Service drive notes</span>
-                <h2>{longDateLabel(selectedTrafficDate)}</h2>
+                <h2>{focusTrafficIsToday ? "Today's Activity" : "Current Activity"}</h2>
                 <p className="admin-note">
-                  Open a day from the month view, choose your salesperson name, and save notes only on rows tied to your
-                  assigned Kia or Mazda service-drive spot.
+                  The current service-drive day stays front and center here. The month view is still below it, but this top
+                  area is meant to show users exactly who is up right now and whether their notes are unlocked.
                 </p>
               </div>
               <div className="traffic-toolbar__controls">
@@ -1026,9 +1036,57 @@ export default function App() {
                     ))}
                   </select>
                 </label>
-                <button type="button" className="secondary" onClick={() => setTab("serviceCalendar")}>
-                  Back to Calendar
-                </button>
+                <div className="traffic-toolbar__actions">
+                  <button
+                    type="button"
+                    className="secondary"
+                    onClick={() => {
+                      setSelectedTrafficDate(today);
+                      setTrafficMonth(today.slice(0, 7));
+                    }}
+                  >
+                    Jump to Today
+                  </button>
+                  <button type="button" className="secondary" onClick={() => setTab("serviceCalendar")}>
+                    Back to Calendar
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="panel traffic-focus-panel">
+              <div className="traffic-focus-panel__headline">
+                <div>
+                  <span className="eyebrow">{focusTrafficIsToday ? "Today" : "Current focus"}</span>
+                  <h2>{longDateLabel(focusTrafficDate)}</h2>
+                </div>
+                <div className="traffic-day-panel__count">{focusTrafficCount} rows</div>
+              </div>
+              <div className="traffic-focus-grid">
+                <div className="traffic-focus-status">
+                  <strong>{selectedTrafficSalesperson?.name || "No salesperson selected"}</strong>
+                  <small>
+                    {focusTrafficUnlocked
+                      ? "Your notes are unlocked for the current service-drive team."
+                      : selectedTrafficSalesId
+                        ? "That salesperson is not assigned to the current service-drive day."
+                        : "Choose your name to unlock notes for the current day."}
+                  </small>
+                </div>
+                <div className="traffic-team-card traffic-team-card--focus">
+                  <span>Kia assigned now</span>
+                  <strong>{focusTrafficKia.salesperson_name || "Open"}</strong>
+                  <small>{focusTrafficKia.salesperson_dealership || "No assignment"}</small>
+                </div>
+                <div className="traffic-team-card traffic-team-card--focus">
+                  <span>Mazda assigned now</span>
+                  <strong>{focusTrafficMazda.salesperson_name || "Open"}</strong>
+                  <small>{focusTrafficMazda.salesperson_dealership || "No assignment"}</small>
+                </div>
+                <div className="traffic-summary-stat traffic-summary-stat--focus">
+                  <span>Viewing</span>
+                  <strong>{selectedTrafficDate === focusTrafficDate ? "Current day" : longDateLabel(selectedTrafficDate)}</strong>
+                </div>
               </div>
             </div>
 
