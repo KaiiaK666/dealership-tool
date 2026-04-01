@@ -1041,15 +1041,17 @@ export default function App() {
                   </div>
                   <div className="traffic-day-panel__count">{selectedTrafficCount} rows</div>
                 </div>
-                <TrafficDayPicker
-                  cells={trafficMonthCells}
-                  countsByDate={serviceTrafficData.counts_by_date}
-                  selectedDate={selectedTrafficDate}
-                  today={today}
-                  onSelect={setSelectedTrafficDate}
-                  serviceDayMap={serviceDayMap}
-                  idPrefix="traffic-view"
-                />
+                <div className="traffic-picker-scroll">
+                  <TrafficDayPicker
+                    cells={trafficMonthCells}
+                    countsByDate={serviceTrafficData.counts_by_date}
+                    selectedDate={selectedTrafficDate}
+                    today={today}
+                    onSelect={setSelectedTrafficDate}
+                    serviceDayMap={serviceDayMap}
+                    idPrefix="traffic-view"
+                  />
+                </div>
               </div>
 
               <div className="traffic-sidebar">
@@ -2046,15 +2048,17 @@ export default function App() {
                           </div>
                           <div className="traffic-day-panel__count">{selectedTrafficCount} rows</div>
                         </div>
-                        <TrafficDayPicker
-                          cells={trafficMonthCells}
-                          countsByDate={serviceTrafficData.counts_by_date}
-                          selectedDate={selectedTrafficDate}
-                          today={today}
-                          onSelect={setSelectedTrafficDate}
-                          serviceDayMap={serviceDayMap}
-                          idPrefix="admin-traffic"
-                        />
+                        <div className="traffic-picker-scroll">
+                          <TrafficDayPicker
+                            cells={trafficMonthCells}
+                            countsByDate={serviceTrafficData.counts_by_date}
+                            selectedDate={selectedTrafficDate}
+                            today={today}
+                            onSelect={setSelectedTrafficDate}
+                            serviceDayMap={serviceDayMap}
+                            idPrefix="admin-traffic"
+                          />
+                        </div>
                       </div>
 
                       <div className="traffic-sidebar">
