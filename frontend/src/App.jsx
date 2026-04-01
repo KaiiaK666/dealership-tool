@@ -337,7 +337,7 @@ export default function App() {
   const focusTrafficTeam = scheduleDriveTeam(serviceDayMap.get(focusTrafficDate));
   const focusTrafficKia = driveTeamMember(focusTrafficTeam, "Kia");
   const focusTrafficMazda = driveTeamMember(focusTrafficTeam, "Mazda");
-  const focusTrafficUnlocked = Boolean(selectedTrafficSalesId);
+  const selectedTrafficHasAuthor = Boolean(selectedTrafficSalesId);
   const selectedTrafficScheduleDay = serviceDayMap.get(selectedTrafficDate) || null;
   const selectedTrafficTeam = serviceTrafficData.entries[0]?.drive_team?.length
     ? serviceTrafficData.entries[0].drive_team
@@ -748,15 +748,11 @@ export default function App() {
   }
 
   async function saveTrafficSalesNotes(entry) {
-    if (!selectedTrafficSalesId) {
-      setError("Choose your salesperson name first.");
-      return;
-    }
     setBusy(`traffic-sales-${entry.id}`);
     setError("");
     try {
       const saved = await updateServiceDriveTrafficSales(entry.id, {
-        salesperson_id: Number(selectedTrafficSalesId),
+        salesperson_id: selectedTrafficSalesId ? Number(selectedTrafficSalesId) : null,
         sales_notes: entry.sales_notes,
       });
       patchTrafficEntry(entry.id, saved);
@@ -842,7 +838,8 @@ export default function App() {
     <div className="shell">
       <main className="app">
         <header className="hero">
-          <div>
+          <div className="hero-brand">
+            <img className="hero-logo" src="/logo-head.png" alt="Dale Gas" />
             <span className="eyebrow">Service drive and BDC</span>
             <h1>Dealership BDC Tool</h1>
           </div>
@@ -998,18 +995,18 @@ export default function App() {
                   <h2>{longDateLabel(focusTrafficDate)}</h2>
                   <p className="admin-note">
                     The selected date stays front and center here so the team immediately sees who is up for Kia and Mazda,
-                    how many traffic rows are on the board, and who is saving notes on the page.
+                    how many traffic rows are on the board, and can start writing notes right away.
                   </p>
                 </div>
                 <div className="traffic-day-panel__count">{focusTrafficCount} rows</div>
               </div>
               <div className="traffic-focus-grid">
                 <div className="traffic-focus-status">
-                  <strong>{selectedTrafficSalesperson?.name || "No salesperson selected"}</strong>
+                  <strong>{selectedTrafficSalesperson?.name || "Notes are open"}</strong>
                   <small>
-                    {focusTrafficUnlocked
-                      ? "Notes will save under the selected salesperson name for every row on this date."
-                      : "Choose your name to start adding notes for this date."}
+                    {selectedTrafficHasAuthor
+                      ? "The selected name will be attached to each note you save on this date."
+                      : "Name tagging is optional. You can start typing and save notes without selecting anyone."}
                   </small>
                 </div>
                 <div className="traffic-team-card traffic-team-card--focus">
@@ -1043,9 +1040,9 @@ export default function App() {
                   />
                 </label>
                 <label>
-                  <span>Adding notes as</span>
+                  <span>Name tag optional</span>
                   <select value={selectedTrafficSalesId} onChange={(event) => setSelectedTrafficSalesId(event.target.value)}>
-                    <option value="">Choose your name</option>
+                    <option value="">No name tag</option>
                     {activeSales.map((person) => (
                       <option key={`traffic-sales-${person.id}`} value={person.id}>
                         {person.name} - {person.dealership}
@@ -1074,8 +1071,6 @@ export default function App() {
             <div className="notes-list">
               {serviceTrafficData.entries.length ? (
                 serviceTrafficData.entries.map((entry) => {
-                  const canEditSales = Boolean(selectedTrafficSalesId);
-
                   return (
                     <article key={entry.id} className="note-card">
                       <div className="note-card__top">
@@ -1113,7 +1108,6 @@ export default function App() {
                           <textarea
                             rows={5}
                             value={entry.sales_notes}
-                            disabled={!canEditSales}
                             onChange={(event) => patchTrafficEntry(entry.id, { sales_notes: event.target.value })}
                           />
                         </label>
@@ -1121,14 +1115,14 @@ export default function App() {
 
                       <div className="note-actions">
                         <small>
-                          {canEditSales
-                            ? `Saving as ${selectedTrafficSalesperson?.name || "selected salesperson"}`
-                            : "Pick your salesperson name above to unlock note saving."}
+                          {selectedTrafficHasAuthor
+                            ? `Saving with name tag: ${selectedTrafficSalesperson?.name || "selected salesperson"}`
+                            : "Saving with no name tag. Select a name above only if you want it attached to the note."}
                         </small>
                         <button
                           type="button"
                           onClick={() => saveTrafficSalesNotes(entry)}
-                          disabled={!canEditSales || busy === `traffic-sales-${entry.id}`}
+                          disabled={busy === `traffic-sales-${entry.id}`}
                         >
                           {busy === `traffic-sales-${entry.id}` ? "Saving..." : "Save Notes"}
                         </button>
@@ -1137,7 +1131,7 @@ export default function App() {
                       <div className="note-meta note-meta--notes">
                         <div className="meta-item">
                           <span>Latest note by</span>
-                          <strong>{entry.sales_note_salesperson_name || "No salesperson saved yet"}</strong>
+                          <strong>{entry.sales_note_salesperson_name || "No name tag saved"}</strong>
                         </div>
                       </div>
                     </article>

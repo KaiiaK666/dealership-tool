@@ -1702,12 +1702,14 @@ def update_service_drive_traffic_sales_note(traffic_id: int, payload: ServiceDri
     row = get_service_drive_traffic_row(traffic_id)
     if not row:
         raise HTTPException(status_code=404, detail="service drive traffic entry not found")
-    if payload.salesperson_id is None:
-        raise HTTPException(status_code=400, detail="salesperson_id is required")
-
-    salesperson_row = get_salesperson_row(int(payload.salesperson_id))
-    if not salesperson_row:
-        raise HTTPException(status_code=404, detail="salesperson not found")
+    salesperson_id: Optional[int] = None
+    salesperson_name = ""
+    if payload.salesperson_id is not None:
+        salesperson_row = get_salesperson_row(int(payload.salesperson_id))
+        if not salesperson_row:
+            raise HTTPException(status_code=404, detail="salesperson not found")
+        salesperson_id = int(payload.salesperson_id)
+        salesperson_name = str(salesperson_row.get("name") or "")
 
     traffic_date = str(row.get("traffic_date") or "")
     team = fetch_drive_team_map([traffic_date]).get(traffic_date, [])
@@ -1720,8 +1722,8 @@ def update_service_drive_traffic_sales_note(traffic_id: int, payload: ServiceDri
         """,
         (
             sales_notes,
-            int(payload.salesperson_id),
-            str(salesperson_row.get("name") or ""),
+            salesperson_id,
+            salesperson_name,
             time.time(),
             traffic_id,
         ),

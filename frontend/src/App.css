@@ -138,6 +138,18 @@ textarea:focus {
   align-items: stretch;
 }
 
+.hero-brand {
+  display: grid;
+  gap: 12px;
+  align-content: start;
+}
+
+.hero-logo {
+  width: min(100%, 360px);
+  height: auto;
+  display: block;
+}
+
 .hero h1,
 .panel h2,
 .panel h3,
@@ -146,7 +158,7 @@ textarea:focus {
 }
 
 .hero h1 {
-  max-width: 13ch;
+  max-width: 14ch;
   font-size: clamp(2rem, 3.8vw, 3.2rem);
   line-height: 0.98;
   letter-spacing: -0.05em;
