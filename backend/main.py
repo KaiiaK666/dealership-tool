@@ -271,6 +271,8 @@ class ServiceDriveTrafficOut(BaseModel):
     model_make: str
     offer_idea: str
     sales_notes: str
+    sales_note_salesperson_id: Optional[int] = None
+    sales_note_salesperson_name: Optional[str] = None
     drive_team: List[ServiceDriveTrafficAssignmentOut]
     created_ts: float
     updated_ts: float
@@ -690,6 +692,8 @@ def init_db() -> None:
         )
         """
     )
+    ensure_column("service_drive_traffic_entries", "sales_note_salesperson_id", "INTEGER")
+    ensure_column("service_drive_traffic_entries", "sales_note_salesperson_name", "TEXT NOT NULL DEFAULT ''")
     db_execute(
         """
         CREATE TABLE IF NOT EXISTS traffic_pdfs (
@@ -871,6 +875,10 @@ def service_drive_traffic_out(
         model_make=str(row.get("model_make") or ""),
         offer_idea=str(row.get("offer_idea") or ""),
         sales_notes=str(row.get("sales_notes") or ""),
+        sales_note_salesperson_id=int(row["sales_note_salesperson_id"])
+        if row.get("sales_note_salesperson_id") is not None
+        else None,
+        sales_note_salesperson_name=str(row.get("sales_note_salesperson_name") or "") or None,
         drive_team=team,
         created_ts=float(row.get("created_ts") or 0.0),
         updated_ts=float(row.get("updated_ts") or 0.0),
@@ -1697,16 +1705,26 @@ def update_service_drive_traffic_sales_note(traffic_id: int, payload: ServiceDri
     if payload.salesperson_id is None:
         raise HTTPException(status_code=400, detail="salesperson_id is required")
 
+    salesperson_row = get_salesperson_row(int(payload.salesperson_id))
+    if not salesperson_row:
+        raise HTTPException(status_code=404, detail="salesperson not found")
+
     traffic_date = str(row.get("traffic_date") or "")
     team = fetch_drive_team_map([traffic_date]).get(traffic_date, [])
-    allowed_ids = {member.salesperson_id for member in team if member.salesperson_id is not None}
-    if int(payload.salesperson_id) not in allowed_ids:
-        raise HTTPException(status_code=403, detail="only the salespeople assigned to that service-drive day can edit notes")
-
     sales_notes = normalize_notes(payload.sales_notes, "sales_notes")
     db_execute(
-        "UPDATE service_drive_traffic_entries SET sales_notes = ?, updated_ts = ? WHERE id = ?",
-        (sales_notes, time.time(), traffic_id),
+        """
+        UPDATE service_drive_traffic_entries
+        SET sales_notes = ?, sales_note_salesperson_id = ?, sales_note_salesperson_name = ?, updated_ts = ?
+        WHERE id = ?
+        """,
+        (
+            sales_notes,
+            int(payload.salesperson_id),
+            str(salesperson_row.get("name") or ""),
+            time.time(),
+            traffic_id,
+        ),
     )
     saved = get_service_drive_traffic_row(traffic_id)
     if not saved:

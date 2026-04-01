@@ -323,7 +323,7 @@ export default function App() {
     : [];
   const selectedSpecial = specials.find((item) => item.id === selectedSpecialId) || specials[0] || null;
   const selectedTrafficSalesperson =
-    serviceEligible.find((person) => String(person.id) === String(selectedTrafficSalesId)) || null;
+    activeSales.find((person) => String(person.id) === String(selectedTrafficSalesId)) || null;
   const trafficMonthCells = buildMonthDateCells(trafficMonth);
   const selectedTrafficCount = serviceTrafficData.counts_by_date?.[selectedTrafficDate] || 0;
   const trafficMonthTotal = Object.values(serviceTrafficData.counts_by_date || {}).reduce(
@@ -337,20 +337,13 @@ export default function App() {
   const focusTrafficTeam = scheduleDriveTeam(serviceDayMap.get(focusTrafficDate));
   const focusTrafficKia = driveTeamMember(focusTrafficTeam, "Kia");
   const focusTrafficMazda = driveTeamMember(focusTrafficTeam, "Mazda");
-  const focusTrafficUnlocked = Boolean(
-    selectedTrafficSalesId &&
-      focusTrafficTeam.some((member) => member.salesperson_id === Number(selectedTrafficSalesId))
-  );
+  const focusTrafficUnlocked = Boolean(selectedTrafficSalesId);
   const selectedTrafficScheduleDay = serviceDayMap.get(selectedTrafficDate) || null;
   const selectedTrafficTeam = serviceTrafficData.entries[0]?.drive_team?.length
     ? serviceTrafficData.entries[0].drive_team
     : scheduleDriveTeam(selectedTrafficScheduleDay);
   const selectedTrafficKia = driveTeamMember(selectedTrafficTeam, "Kia");
   const selectedTrafficMazda = driveTeamMember(selectedTrafficTeam, "Mazda");
-  const selectedTrafficUnlocked = Boolean(
-    selectedTrafficSalesId &&
-      selectedTrafficTeam.some((member) => member.salesperson_id === Number(selectedTrafficSalesId))
-  );
   const monthDaysOffSummary = monthDateValues(daysOffMonth).map((value) => ({
     date: value,
     people: activeSales.filter((person) => (daysOffEntriesBySalesperson.get(person.id) || []).includes(value)),
@@ -1005,7 +998,7 @@ export default function App() {
                   <h2>{longDateLabel(focusTrafficDate)}</h2>
                   <p className="admin-note">
                     The selected date stays front and center here so the team immediately sees who is up for Kia and Mazda,
-                    how many traffic rows are on the board, and whether notes are unlocked.
+                    how many traffic rows are on the board, and who is saving notes on the page.
                   </p>
                 </div>
                 <div className="traffic-day-panel__count">{focusTrafficCount} rows</div>
@@ -1015,10 +1008,8 @@ export default function App() {
                   <strong>{selectedTrafficSalesperson?.name || "No salesperson selected"}</strong>
                   <small>
                     {focusTrafficUnlocked
-                      ? "Your notes are unlocked for the current service-drive team."
-                      : selectedTrafficSalesId
-                        ? "That salesperson is not assigned to the current service-drive day."
-                        : "Choose your name to unlock notes for the current day."}
+                      ? "Notes will save under the selected salesperson name for every row on this date."
+                      : "Choose your name to start adding notes for this date."}
                   </small>
                 </div>
                 <div className="traffic-team-card traffic-team-card--focus">
@@ -1052,10 +1043,10 @@ export default function App() {
                   />
                 </label>
                 <label>
-                  <span>Salesperson</span>
+                  <span>Adding notes as</span>
                   <select value={selectedTrafficSalesId} onChange={(event) => setSelectedTrafficSalesId(event.target.value)}>
                     <option value="">Choose your name</option>
-                    {serviceEligible.map((person) => (
+                    {activeSales.map((person) => (
                       <option key={`traffic-sales-${person.id}`} value={person.id}>
                         {person.name} - {person.dealership}
                       </option>
@@ -1083,10 +1074,7 @@ export default function App() {
             <div className="notes-list">
               {serviceTrafficData.entries.length ? (
                 serviceTrafficData.entries.map((entry) => {
-                  const canEditSales = Boolean(
-                    selectedTrafficSalesId &&
-                      entry.drive_team.some((member) => member.salesperson_id === Number(selectedTrafficSalesId))
-                  );
+                  const canEditSales = Boolean(selectedTrafficSalesId);
 
                   return (
                     <article key={entry.id} className="note-card">
@@ -1134,10 +1122,8 @@ export default function App() {
                       <div className="note-actions">
                         <small>
                           {canEditSales
-                            ? "You are assigned to this day, so you can save notes on this row."
-                            : selectedTrafficUnlocked
-                              ? "Only the salespeople assigned to that day can save notes."
-                              : "Pick your salesperson name above to unlock note saving."}
+                            ? `Saving as ${selectedTrafficSalesperson?.name || "selected salesperson"}`
+                            : "Pick your salesperson name above to unlock note saving."}
                         </small>
                         <button
                           type="button"
@@ -1146,6 +1132,13 @@ export default function App() {
                         >
                           {busy === `traffic-sales-${entry.id}` ? "Saving..." : "Save Notes"}
                         </button>
+                      </div>
+
+                      <div className="note-meta note-meta--notes">
+                        <div className="meta-item">
+                          <span>Latest note by</span>
+                          <strong>{entry.sales_note_salesperson_name || "No salesperson saved yet"}</strong>
+                        </div>
                       </div>
                     </article>
                   );
@@ -2204,7 +2197,10 @@ export default function App() {
                             </div>
 
                             <div className="note-actions">
-                              <small>{driveTeamText(entry.drive_team)}</small>
+                              <small>
+                                {driveTeamText(entry.drive_team)}
+                                {entry.sales_note_salesperson_name ? ` • Latest note by ${entry.sales_note_salesperson_name}` : ""}
+                              </small>
                               <button
                                 type="button"
                                 onClick={() => saveTrafficEntry(entry)}

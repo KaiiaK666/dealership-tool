@@ -310,15 +310,15 @@ label span,
   background:
     linear-gradient(180deg, rgba(245, 239, 230, 0.82), rgba(255, 255, 255, 0.7)),
     linear-gradient(135deg, rgba(196, 102, 52, 0.06), transparent 28%);
-  overflow-x: auto;
+  overflow-x: hidden;
 }
 
 .calendar-board__weekdays,
 .calendar-grid {
-  width: max-content;
-  min-width: 1120px;
+  width: 100%;
+  min-width: 0;
   display: grid;
-  grid-template-columns: repeat(7, minmax(148px, 1fr));
+  grid-template-columns: repeat(7, minmax(0, 1fr));
   gap: 12px;
 }
 
@@ -342,10 +342,11 @@ label span,
 }
 
 .calendar-day {
-  min-height: 196px;
-  padding: 12px;
+  min-width: 0;
+  min-height: 188px;
+  padding: 10px;
   display: grid;
-  gap: 12px;
+  gap: 10px;
   align-content: start;
   border-radius: 22px;
   border: 1px solid var(--line);
@@ -427,6 +428,7 @@ label span,
 .calendar-day__traffic {
   padding: 10px;
   display: flex;
+  flex-wrap: wrap;
   align-items: flex-start;
   justify-content: space-between;
   gap: 8px;
@@ -450,8 +452,8 @@ label span,
 }
 
 .calendar-day__plus {
-  min-width: 74px;
-  padding: 9px 10px;
+  min-width: 68px;
+  padding: 8px 9px;
   border-radius: 16px;
   border: 1px solid rgba(37, 48, 59, 0.12);
   color: #fff;
@@ -486,9 +488,10 @@ button.calendar-day__plus:hover:not(:disabled) {
 }
 
 .assignment {
+  min-width: 0;
   padding: 10px;
   display: grid;
-  gap: 10px;
+  gap: 8px;
   border-radius: 18px;
   border: 1px solid var(--line);
   background: linear-gradient(180deg, #fff, rgba(247, 241, 232, 0.88));
@@ -514,7 +517,7 @@ button.calendar-day__plus:hover:not(:disabled) {
 }
 
 .assignment__summary strong {
-  font-size: 0.95rem;
+  font-size: 0.88rem;
   line-height: 1.2;
 }
 
@@ -525,6 +528,7 @@ button.calendar-day__plus:hover:not(:disabled) {
 
 .assignment__select {
   padding-block: 8px;
+  min-width: 0;
 }
 
 .traffic-layout,
@@ -1056,6 +1060,10 @@ th {
 
 .note-meta {
   grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.note-meta--notes {
+  grid-template-columns: 1fr;
 }
 
 .meta-item,
