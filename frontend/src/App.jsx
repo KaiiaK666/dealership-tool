@@ -5,8 +5,8 @@ import {
   assignBdcLead,
   createBdcAgent,
   createSalesperson,
+  createServiceDriveTraffic,
   createSpecial,
-  createServiceDriveNote,
   createTrafficPdf,
   generateServiceDrive,
   getAdminDaysOff,
@@ -18,14 +18,14 @@ import {
   getSalespeople,
   getSpecials,
   getServiceDrive,
-  getServiceDriveNotes,
+  getServiceDriveTraffic,
   getTrafficPdfs,
   updateAdminDaysOff,
   updateBdcAgent,
   updateSalesperson,
   updateServiceDriveAssignment,
-  updateServiceDriveNote,
-  updateServiceDriveSalesNote,
+  updateServiceDriveTraffic,
+  updateServiceDriveTrafficSales,
 } from "./api.js";
 import "./App.css";
 
@@ -42,7 +42,7 @@ const TABS = [
 const ADMIN_SECTIONS = [
   { id: "staff", label: "Staff Setup" },
   { id: "daysOff", label: "Days Off" },
-  { id: "serviceNotes", label: "Service Notes" },
+  { id: "trafficLog", label: "Traffic Log" },
   { id: "specials", label: "Specials" },
 ];
 
@@ -58,26 +58,6 @@ function currentMonth() {
 function todayDateValue() {
   const now = new Date();
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
-}
-
-function currentDateTimeInput() {
-  const now = new Date();
-  const year = now.getFullYear();
-  const month = String(now.getMonth() + 1).padStart(2, "0");
-  const day = String(now.getDate()).padStart(2, "0");
-  const hours = String(now.getHours()).padStart(2, "0");
-  const minutes = String(now.getMinutes()).padStart(2, "0");
-  return `${year}-${month}-${day}T${hours}:${minutes}`;
-}
-
-function defaultServiceNoteForm() {
-  return {
-    appointmentAt: currentDateTimeInput(),
-    brand: "Kia",
-    customerName: "",
-    customerPhone: "",
-    adminNotes: "",
-  };
 }
 
 function monthLabel(value) {
@@ -147,6 +127,33 @@ function buildMonthDateCells(monthKey) {
   return [...Array.from({ length: firstOffset }, () => null), ...dates];
 }
 
+function scheduleDriveTeam(day) {
+  if (!day) return [];
+  return [
+    {
+      brand: "Kia",
+      salesperson_id: day.kia?.salesperson_id ?? null,
+      salesperson_name: day.kia?.salesperson_name ?? null,
+      salesperson_dealership: day.kia?.salesperson_dealership ?? null,
+    },
+    {
+      brand: "Mazda",
+      salesperson_id: day.mazda?.salesperson_id ?? null,
+      salesperson_name: day.mazda?.salesperson_name ?? null,
+      salesperson_dealership: day.mazda?.salesperson_dealership ?? null,
+    },
+  ];
+}
+
+function driveTeamText(team) {
+  if (!team?.length) return "No team assigned";
+  return team.map((member) => `${member.brand}: ${member.salesperson_name || "Open"}`).join(" / ");
+}
+
+function driveTeamMember(team, brand) {
+  return team.find((member) => member.brand === brand) || { brand, salesperson_id: null, salesperson_name: null };
+}
+
 function LogTable({ entries, empty }) {
   if (!entries.length) return <div className="empty">{empty}</div>;
   return (
@@ -188,21 +195,58 @@ function EditorCard({ title, children }) {
   );
 }
 
+function TrafficDayPicker({ cells, countsByDate, selectedDate, today, onSelect, serviceDayMap, idPrefix }) {
+  return (
+    <>
+      <div className="calendar-board__weekdays">
+        {CALENDAR_WEEKDAYS.map((label) => (
+          <span key={`${idPrefix}-${label}`}>{label}</span>
+        ))}
+      </div>
+      <div className="traffic-day-grid">
+        {cells.map((value, index) => {
+          if (!value) {
+            return <div key={`${idPrefix}-blank-${index}`} className="calendar-blank" aria-hidden="true" />;
+          }
+
+          const count = countsByDate?.[value] || 0;
+          const parts = dateParts(value);
+          const team = scheduleDriveTeam(serviceDayMap.get(value));
+
+          return (
+            <button
+              key={`${idPrefix}-${value}`}
+              type="button"
+              className={`traffic-day-tile ${selectedDate === value ? "is-active" : ""} ${value === today ? "is-today" : ""}`}
+              onClick={() => onSelect(value)}
+            >
+              <div className="traffic-day-tile__top">
+                <span>{parts.monthShort}</span>
+                {value === today ? <small>Today</small> : null}
+              </div>
+              <strong>{parts.dayNumber}</strong>
+              <b>{count} rows</b>
+              <p>{driveTeamText(team)}</p>
+            </button>
+          );
+        })}
+      </div>
+    </>
+  );
+}
+
 export default function App() {
   const [tab, setTab] = useState("serviceCalendar");
   const [adminSection, setAdminSection] = useState("staff");
   const [month, setMonth] = useState(currentMonth());
   const [daysOffMonth, setDaysOffMonth] = useState(currentMonth());
-  const [serviceNotesFilters, setServiceNotesFilters] = useState({
-    salespersonId: "",
-    startDate: todayDateValue(),
-    endDate: "",
-    brand: "",
-  });
+  const [trafficMonth, setTrafficMonth] = useState(currentMonth());
+  const [selectedTrafficDate, setSelectedTrafficDate] = useState(todayDateValue());
+  const [selectedTrafficSalesId, setSelectedTrafficSalesId] = useState("");
   const [salespeople, setSalespeople] = useState([]);
   const [bdcAgents, setBdcAgents] = useState([]);
   const [serviceMonth, setServiceMonth] = useState(null);
-  const [serviceNotesData, setServiceNotesData] = useState({ total: 0, entries: [] });
+  const [serviceTrafficData, setServiceTrafficData] = useState({ month: currentMonth(), selected_date: null, total: 0, counts_by_date: {}, entries: [] });
   const [trafficPdfs, setTrafficPdfs] = useState([]);
   const [specials, setSpecials] = useState([]);
   const [selectedSpecialId, setSelectedSpecialId] = useState(null);
@@ -222,7 +266,12 @@ export default function App() {
   const [salesForm, setSalesForm] = useState({ name: "", dealership: "Kia", weekly_days_off: [], active: true });
   const [bdcForm, setBdcForm] = useState({ name: "", active: true });
   const [leadForm, setLeadForm] = useState({ bdcAgentId: "", customerName: "", customerPhone: "" });
-  const [serviceNoteForm, setServiceNoteForm] = useState(defaultServiceNoteForm());
+  const [trafficEntryForm, setTrafficEntryForm] = useState({
+    customerName: "",
+    vehicleYear: "",
+    modelMake: "",
+    offerIdea: "",
+  });
   const [trafficPdfForm, setTrafficPdfForm] = useState({ title: "", file: null });
   const [specialForm, setSpecialForm] = useState({ title: "", tag: "", file: null });
   const [trafficUploadKey, setTrafficUploadKey] = useState(0);
@@ -244,11 +293,26 @@ export default function App() {
   const selectedDaysOffDates = selectedDaysOffSalesperson
     ? daysOffEntriesBySalesperson.get(selectedDaysOffSalesperson.id) || []
     : [];
-  const selectedServiceNotesSalesId = serviceNotesFilters.salespersonId ? Number(serviceNotesFilters.salespersonId) : null;
-  const selectedServiceNotesSalesperson =
-    serviceEligible.find((person) => person.id === selectedServiceNotesSalesId) || null;
-  const serviceNotesMissingCount = serviceNotesData.entries.filter((entry) => !entry.sales_notes?.trim()).length;
   const selectedSpecial = specials.find((item) => item.id === selectedSpecialId) || specials[0] || null;
+  const selectedTrafficSalesperson =
+    serviceEligible.find((person) => String(person.id) === String(selectedTrafficSalesId)) || null;
+  const trafficMonthCells = buildMonthDateCells(trafficMonth);
+  const selectedTrafficCount = serviceTrafficData.counts_by_date?.[selectedTrafficDate] || 0;
+  const trafficMonthTotal = Object.values(serviceTrafficData.counts_by_date || {}).reduce(
+    (sum, value) => sum + Number(value || 0),
+    0
+  );
+  const serviceDayMap = new Map((serviceMonth?.days || []).map((day) => [day.date, day]));
+  const selectedTrafficScheduleDay = serviceDayMap.get(selectedTrafficDate) || null;
+  const selectedTrafficTeam = serviceTrafficData.entries[0]?.drive_team?.length
+    ? serviceTrafficData.entries[0].drive_team
+    : scheduleDriveTeam(selectedTrafficScheduleDay);
+  const selectedTrafficKia = driveTeamMember(selectedTrafficTeam, "Kia");
+  const selectedTrafficMazda = driveTeamMember(selectedTrafficTeam, "Mazda");
+  const selectedTrafficUnlocked = Boolean(
+    selectedTrafficSalesId &&
+      selectedTrafficTeam.some((member) => member.salesperson_id === Number(selectedTrafficSalesId))
+  );
   const monthDaysOffSummary = monthDateValues(daysOffMonth).map((value) => ({
     date: value,
     people: activeSales.filter((person) => (daysOffEntriesBySalesperson.get(person.id) || []).includes(value)),
@@ -280,15 +344,12 @@ export default function App() {
     setBdcReport(report);
   }
 
-  async function refreshServiceNotes(nextFilters = serviceNotesFilters) {
-    const data = await getServiceDriveNotes({
-      salespersonId: nextFilters.salespersonId || undefined,
-      startDate: nextFilters.startDate || undefined,
-      endDate: nextFilters.endDate || undefined,
-      brand: nextFilters.brand || undefined,
-      limit: 300,
+  async function refreshServiceTraffic(nextMonth = trafficMonth, nextDate = selectedTrafficDate) {
+    const data = await getServiceDriveTraffic({
+      month: nextMonth,
+      trafficDate: nextDate,
     });
-    setServiceNotesData(data);
+    setServiceTrafficData(data);
   }
 
   async function refreshTrafficPdfs() {
@@ -324,14 +385,11 @@ export default function App() {
     let active = true;
     const run = async () => {
       try {
-        const data = await getServiceDriveNotes({
-          salespersonId: serviceNotesFilters.salespersonId || undefined,
-          startDate: serviceNotesFilters.startDate || undefined,
-          endDate: serviceNotesFilters.endDate || undefined,
-          brand: serviceNotesFilters.brand || undefined,
-          limit: 300,
+        const data = await getServiceDriveTraffic({
+          month: trafficMonth,
+          trafficDate: selectedTrafficDate,
         });
-        if (active) setServiceNotesData(data);
+        if (active) setServiceTrafficData(data);
       } catch (errorValue) {
         if (active) setError(errText(errorValue));
       }
@@ -340,7 +398,7 @@ export default function App() {
     return () => {
       active = false;
     };
-  }, [serviceNotesFilters.salespersonId, serviceNotesFilters.startDate, serviceNotesFilters.endDate, serviceNotesFilters.brand]);
+  }, [trafficMonth, selectedTrafficDate]);
 
   useEffect(() => {
     let active = true;
@@ -387,6 +445,25 @@ export default function App() {
   }, [selectedDaysOffSalesId, salespeople]);
 
   useEffect(() => {
+    if (!selectedTrafficDate.startsWith(trafficMonth)) {
+      const fallbackDate = today.startsWith(trafficMonth) ? today : `${trafficMonth}-01`;
+      setSelectedTrafficDate(fallbackDate);
+    }
+  }, [selectedTrafficDate, today, trafficMonth]);
+
+  useEffect(() => {
+    if (tab === "serviceCalendar" && trafficMonth !== month) {
+      setTrafficMonth(month);
+    }
+  }, [month, tab, trafficMonth]);
+
+  useEffect(() => {
+    if ((tab === "serviceNotes" || (tab === "admin" && adminSection === "trafficLog")) && month !== trafficMonth) {
+      setMonth(trafficMonth);
+    }
+  }, [adminSection, month, tab, trafficMonth]);
+
+  useEffect(() => {
     let active = true;
     const check = async () => {
       if (!adminToken) {
@@ -431,7 +508,7 @@ export default function App() {
 
   async function refresh() {
     try {
-      await loadAll(month, filters);
+      await Promise.all([loadAll(month, filters), refreshServiceTraffic(trafficMonth, selectedTrafficDate)]);
     } catch (errorValue) {
       setError(errText(errorValue));
     }
@@ -496,6 +573,7 @@ export default function App() {
         off_dates: offDates,
       });
       setDaysOffData(data);
+      await refresh();
     } catch (errorValue) {
       setError(errText(errorValue));
     } finally {
@@ -552,6 +630,7 @@ export default function App() {
     try {
       const data = await generateServiceDrive(adminToken, { month, overwrite });
       setServiceMonth(data);
+      await refreshServiceTraffic(trafficMonth, selectedTrafficDate);
     } catch (errorValue) {
       setError(errText(errorValue));
     } finally {
@@ -570,7 +649,7 @@ export default function App() {
         salesperson_id: salespersonId ? Number(salespersonId) : null,
       });
       setServiceMonth(data);
-      await refreshServiceNotes();
+      await refreshServiceTraffic(trafficMonth, selectedTrafficDate);
     } catch (errorValue) {
       setError(errText(errorValue));
     } finally {
@@ -578,27 +657,38 @@ export default function App() {
     }
   }
 
-  function patchServiceNoteEntry(noteId, patch) {
-    setServiceNotesData((current) => ({
+  function openTrafficDay(trafficDate) {
+    setSelectedTrafficDate(trafficDate);
+    setTrafficMonth(trafficDate.slice(0, 7));
+    setTab("serviceNotes");
+  }
+
+  function patchTrafficEntry(entryId, patch) {
+    setServiceTrafficData((current) => ({
       ...current,
-      entries: current.entries.map((entry) => (entry.id === noteId ? { ...entry, ...patch } : entry)),
+      entries: current.entries.map((entry) => (entry.id === entryId ? { ...entry, ...patch } : entry)),
     }));
   }
 
-  async function addServiceNote(event) {
+  async function addTrafficEntry(event) {
     event.preventDefault();
-    setBusy("add-service-note");
+    setBusy("add-traffic-entry");
     setError("");
     try {
-      await createServiceDriveNote(adminToken, {
-        appointment_at: serviceNoteForm.appointmentAt,
-        brand: serviceNoteForm.brand,
-        customer_name: serviceNoteForm.customerName,
-        customer_phone: serviceNoteForm.customerPhone,
-        admin_notes: serviceNoteForm.adminNotes,
+      await createServiceDriveTraffic(adminToken, {
+        traffic_date: selectedTrafficDate,
+        customer_name: trafficEntryForm.customerName,
+        vehicle_year: trafficEntryForm.vehicleYear,
+        model_make: trafficEntryForm.modelMake,
+        offer_idea: trafficEntryForm.offerIdea,
       });
-      setServiceNoteForm(defaultServiceNoteForm());
-      await refreshServiceNotes();
+      setTrafficEntryForm({
+        customerName: "",
+        vehicleYear: "",
+        modelMake: "",
+        offerIdea: "",
+      });
+      await refreshServiceTraffic();
     } catch (errorValue) {
       setError(errText(errorValue));
     } finally {
@@ -606,19 +696,19 @@ export default function App() {
     }
   }
 
-  async function saveServiceNote(entry) {
-    setBusy(`service-note-admin-${entry.id}`);
+  async function saveTrafficEntry(entry) {
+    setBusy(`traffic-admin-${entry.id}`);
     setError("");
     try {
-      const saved = await updateServiceDriveNote(adminToken, entry.id, {
-        appointment_at: entry.appointment_at,
-        brand: entry.brand,
+      const saved = await updateServiceDriveTraffic(adminToken, entry.id, {
+        traffic_date: entry.traffic_date,
         customer_name: entry.customer_name,
-        customer_phone: entry.customer_phone,
-        admin_notes: entry.admin_notes,
+        vehicle_year: entry.vehicle_year,
+        model_make: entry.model_make,
+        offer_idea: entry.offer_idea,
       });
-      patchServiceNoteEntry(entry.id, saved);
-      await refreshServiceNotes();
+      patchTrafficEntry(entry.id, saved);
+      await refreshServiceTraffic();
     } catch (errorValue) {
       setError(errText(errorValue));
     } finally {
@@ -626,19 +716,19 @@ export default function App() {
     }
   }
 
-  async function saveSalesNote(entry) {
-    if (!selectedServiceNotesSalesId) {
+  async function saveTrafficSalesNotes(entry) {
+    if (!selectedTrafficSalesId) {
       setError("Choose your salesperson name first.");
       return;
     }
-    setBusy(`service-note-sales-${entry.id}`);
+    setBusy(`traffic-sales-${entry.id}`);
     setError("");
     try {
-      const saved = await updateServiceDriveSalesNote(entry.id, {
-        salesperson_id: selectedServiceNotesSalesId,
+      const saved = await updateServiceDriveTrafficSales(entry.id, {
+        salesperson_id: Number(selectedTrafficSalesId),
         sales_notes: entry.sales_notes,
       });
-      patchServiceNoteEntry(entry.id, saved);
+      patchTrafficEntry(entry.id, saved);
     } catch (errorValue) {
       setError(errText(errorValue));
     } finally {
@@ -799,6 +889,8 @@ export default function App() {
                   }
 
                   const parts = dateParts(day.date);
+                  const trafficCount =
+                    serviceTrafficData.month === month ? serviceTrafficData.counts_by_date?.[day.date] || 0 : 0;
 
                   return (
                     <article
@@ -814,6 +906,19 @@ export default function App() {
                           <strong>{parts.dayNumber}</strong>
                           <small>{parts.monthShort}</small>
                         </div>
+                      </div>
+
+                      <div className="calendar-day__traffic">
+                        <span>{trafficCount} traffic rows</span>
+                        <button
+                          type="button"
+                          className="calendar-day__plus"
+                          aria-label={`Open service-drive traffic for ${day.date}`}
+                          onClick={() => openTrafficDay(day.date)}
+                        >
+                          <b>+</b>
+                          <small>Traffic</small>
+                        </button>
                       </div>
 
                       <div className="calendar-day__assignments">
@@ -855,54 +960,197 @@ export default function App() {
 
         {tab === "serviceNotes" ? (
           <section className="stack">
+            <div className="traffic-layout">
+              <div className="panel traffic-day-panel">
+                <div className="row">
+                  <div>
+                    <span className="eyebrow">Traffic month</span>
+                    <h2>{monthLabel(trafficMonth)}</h2>
+                  </div>
+                  <div className="controls">
+                    <input type="month" value={trafficMonth} onChange={(event) => setTrafficMonth(event.target.value)} />
+                    <button type="button" className="secondary" onClick={() => setTab("serviceCalendar")}>
+                      Back to Calendar
+                    </button>
+                  </div>
+                </div>
+                <p className="admin-note">
+                  Open any day to see who came through the service drive. Only the Kia and Mazda salespeople assigned to
+                  that day can save notes on the rows below.
+                </p>
+                <TrafficDayPicker
+                  cells={trafficMonthCells}
+                  countsByDate={serviceTrafficData.counts_by_date}
+                  selectedDate={selectedTrafficDate}
+                  today={today}
+                  onSelect={setSelectedTrafficDate}
+                  serviceDayMap={serviceDayMap}
+                  idPrefix="traffic-view"
+                />
+              </div>
+
+              <div className="stack">
+                <div className="panel">
+                  <div className="row">
+                    <div>
+                      <span className="eyebrow">Service drive notes</span>
+                      <h2>{selectedTrafficDate}</h2>
+                    </div>
+                    <div className="controls">
+                      <input
+                        type="date"
+                        value={selectedTrafficDate}
+                        onChange={(event) => {
+                          setSelectedTrafficDate(event.target.value);
+                          if (event.target.value) {
+                            setTrafficMonth(event.target.value.slice(0, 7));
+                          }
+                        }}
+                      />
+                      <select value={selectedTrafficSalesId} onChange={(event) => setSelectedTrafficSalesId(event.target.value)}>
+                        <option value="">Choose your name</option>
+                        {serviceEligible.map((person) => (
+                          <option key={`traffic-sales-${person.id}`} value={person.id}>
+                            {person.name} - {person.dealership}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                  <p className="admin-note">
+                    Admin controls the customer name, year, model and offer idea. Salespeople only update the notes field
+                    after talking with the prospect. Selected salesperson: {selectedTrafficSalesperson?.name || "none"}.
+                  </p>
+                </div>
+
+                <div className="stats">
+                  <div className="stat">
+                    <span>Traffic rows</span>
+                    <strong>{selectedTrafficCount}</strong>
+                  </div>
+                  <div className="stat">
+                    <span>Kia assigned</span>
+                    <strong>{selectedTrafficKia.salesperson_name || "Open"}</strong>
+                  </div>
+                  <div className="stat">
+                    <span>Mazda assigned</span>
+                    <strong>{selectedTrafficMazda.salesperson_name || "Open"}</strong>
+                  </div>
+                </div>
+
+                <div className="notes-list">
+                  {serviceTrafficData.entries.length ? (
+                    serviceTrafficData.entries.map((entry) => {
+                      const canEditSales = Boolean(
+                        selectedTrafficSalesId &&
+                          entry.drive_team.some((member) => member.salesperson_id === Number(selectedTrafficSalesId))
+                      );
+
+                      return (
+                        <article key={entry.id} className="note-card">
+                          <div className="note-card__top">
+                            <div>
+                              <span className="eyebrow">Service drive traffic</span>
+                              <h3>{entry.customer_name}</h3>
+                              <p className="note-card__subtitle">{entry.traffic_date}</p>
+                            </div>
+                            <span className="brand-pill brand-pill--kia">Prospect</span>
+                          </div>
+
+                          <div className="note-meta">
+                            <div className="meta-item">
+                              <span>Year</span>
+                              <strong>{entry.vehicle_year || "N/A"}</strong>
+                            </div>
+                            <div className="meta-item">
+                              <span>Model / Make</span>
+                              <strong>{entry.model_make || "No model entered"}</strong>
+                            </div>
+                            <div className="meta-item">
+                              <span>Drive team</span>
+                              <strong>{driveTeamText(entry.drive_team)}</strong>
+                            </div>
+                          </div>
+
+                          <div className="note-copy">
+                            <div className="note-copy__block is-readonly">
+                              <span>Offer idea</span>
+                              <p>{entry.offer_idea || "No offer idea entered yet."}</p>
+                            </div>
+
+                            <label className="note-copy__block">
+                              <span>Salesperson notes</span>
+                              <textarea
+                                rows={5}
+                                value={entry.sales_notes}
+                                disabled={!canEditSales}
+                                onChange={(event) => patchTrafficEntry(entry.id, { sales_notes: event.target.value })}
+                              />
+                            </label>
+                          </div>
+
+                          <div className="note-actions">
+                            <small>
+                              {canEditSales
+                                ? "You are assigned to this day, so you can save notes on this row."
+                                : selectedTrafficUnlocked
+                                  ? "Only the salespeople assigned to that day can save notes."
+                                  : "Pick your salesperson name above to unlock note saving."}
+                            </small>
+                            <button
+                              type="button"
+                              onClick={() => saveTrafficSalesNotes(entry)}
+                              disabled={!canEditSales || busy === `traffic-sales-${entry.id}`}
+                            >
+                              {busy === `traffic-sales-${entry.id}` ? "Saving..." : "Save Notes"}
+                            </button>
+                          </div>
+                        </article>
+                      );
+                    })
+                  ) : (
+                    <div className="empty">No traffic rows have been entered for that day.</div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </section>
+        ) : null}
+
+        {false && tab === "serviceNotes" ? (
+          <section className="stack">
             <div className="panel">
               <div className="row">
                 <div>
-                  <span className="eyebrow">Service drive notes</span>
-                  <h2>Traffic notes tied to the daily service schedule</h2>
+                  <span className="eyebrow">Traffic month</span>
+                  <h2>Prospecting traffic for {selectedTrafficDate}</h2>
                   <p className="admin-note">
-                    Choose your salesperson name to unlock note saving for only your assigned appointments. Admin notes stay
-                    read-only on this page.
+                    Choose your salesperson name, open a day from the calendar, and update only the notes column for that
+                    day’s traffic rows.
                   </p>
                 </div>
               </div>
               <div className="filters filters--notes">
                 <label>
-                  <span>Start date</span>
+                  <span>Traffic date</span>
                   <input
                     type="date"
-                    value={serviceNotesFilters.startDate}
-                    onChange={(event) => setServiceNotesFilters((current) => ({ ...current, startDate: event.target.value }))}
+                    value={selectedTrafficDate}
+                    onChange={(event) => {
+                      setSelectedTrafficDate(event.target.value);
+                      if (event.target.value) {
+                        setTrafficMonth(event.target.value.slice(0, 7));
+                      }
+                    }}
                   />
-                </label>
-                <label>
-                  <span>End date</span>
-                  <input
-                    type="date"
-                    value={serviceNotesFilters.endDate}
-                    onChange={(event) => setServiceNotesFilters((current) => ({ ...current, endDate: event.target.value }))}
-                  />
-                </label>
-                <label>
-                  <span>Store</span>
-                  <select
-                    value={serviceNotesFilters.brand}
-                    onChange={(event) => setServiceNotesFilters((current) => ({ ...current, brand: event.target.value }))}
-                  >
-                    <option value="">All stores</option>
-                    <option value="Kia">Kia</option>
-                    <option value="Mazda">Mazda</option>
-                  </select>
                 </label>
                 <label>
                   <span>Salesperson</span>
                   <select
-                    value={serviceNotesFilters.salespersonId}
-                    onChange={(event) =>
-                      setServiceNotesFilters((current) => ({ ...current, salespersonId: event.target.value }))
-                    }
+                    value={selectedTrafficSalesId}
+                    onChange={(event) => setSelectedTrafficSalesId(event.target.value)}
                   >
-                    <option value="">View all appointments</option>
+                    <option value="">Choose your name</option>
                     {serviceEligible.map((person) => (
                       <option key={`note-sales-${person.id}`} value={person.id}>
                         {person.name} - {person.dealership}
@@ -915,64 +1163,69 @@ export default function App() {
 
             <div className="stats">
               <div className="stat">
-                <span>Appointments in view</span>
-                <strong>{serviceNotesData.total}</strong>
+                <span>Traffic rows that day</span>
+                <strong>{serviceTrafficData.total}</strong>
               </div>
               <div className="stat">
-                <span>Still missing salesperson notes</span>
-                <strong>{serviceNotesMissingCount}</strong>
+                <span>Calendar count for selected day</span>
+                <strong>{selectedTrafficCount}</strong>
               </div>
               <div className="stat">
                 <span>Selected salesperson</span>
-                <strong>{selectedServiceNotesSalesperson?.name || "None"}</strong>
+                <strong>{selectedTrafficSalesperson?.name || "None"}</strong>
               </div>
             </div>
 
             <div className="notes-list">
-              {serviceNotesData.entries.length ? (
-                serviceNotesData.entries.map((entry) => {
+              {serviceTrafficData.entries.length ? (
+                serviceTrafficData.entries.map((entry) => {
+                  const driveTeamIds = entry.drive_team.map((member) => member.salesperson_id).filter(Boolean);
                   const canEditSales =
-                    selectedServiceNotesSalesId !== null && entry.salesperson_id === selectedServiceNotesSalesId;
+                    selectedTrafficSalesId && driveTeamIds.includes(Number(selectedTrafficSalesId));
 
                   return (
                     <article key={entry.id} className="note-card">
                       <div className="note-card__top">
                         <div>
-                          <span className="eyebrow">Service appointment</span>
+                          <span className="eyebrow">Service drive traffic</span>
                           <h3>{entry.customer_name}</h3>
-                          <p className="note-card__subtitle">{dateTimeLabel(entry.appointment_at)}</p>
+                          <p className="note-card__subtitle">{entry.traffic_date}</p>
                         </div>
-                        <span className={`brand-pill brand-pill--${entry.brand.toLowerCase()}`}>{entry.brand}</span>
+                        <span className="brand-pill brand-pill--kia">Prospect</span>
                       </div>
 
                       <div className="note-meta">
                         <div className="meta-item">
-                          <span>Phone</span>
-                          <strong>{entry.customer_phone || "No phone"}</strong>
+                          <span>Year</span>
+                          <strong>{entry.vehicle_year || "N/A"}</strong>
                         </div>
                         <div className="meta-item">
-                          <span>Assigned salesperson</span>
-                          <strong>{entry.salesperson_name || "Open service slot"}</strong>
+                          <span>Model / Make</span>
+                          <strong>{entry.model_make || "No model entered"}</strong>
                         </div>
                         <div className="meta-item">
-                          <span>Store</span>
-                          <strong>{entry.brand}</strong>
+                          <span>Drive team</span>
+                          <strong>
+                            {entry.drive_team
+                              .map((member) => `${member.brand}: ${member.salesperson_name || "Open"}`)
+                              .join(" · ") || "No team assigned"}
+                          </strong>
                         </div>
                       </div>
 
                       <div className="note-copy">
                         <div className="note-copy__block is-readonly">
-                          <span>Admin notes</span>
-                          <p>{entry.admin_notes || "No admin notes yet."}</p>
+                          <span>Offer idea</span>
+                          <p>{entry.offer_idea || "No offer idea entered yet."}</p>
                         </div>
 
                         <label className="note-copy__block">
-                          <span>Salesperson notes</span>
+                          <span>Notes</span>
                           <textarea
                             rows={5}
                             value={entry.sales_notes}
                             disabled={!canEditSales}
-                            onChange={(event) => patchServiceNoteEntry(entry.id, { sales_notes: event.target.value })}
+                            onChange={(event) => patchTrafficEntry(entry.id, { sales_notes: event.target.value })}
                           />
                         </label>
                       </div>
@@ -980,24 +1233,24 @@ export default function App() {
                       <div className="note-actions">
                         <small>
                           {canEditSales
-                            ? "You can only update the salesperson notes field on this appointment."
-                            : selectedServiceNotesSalesId
-                              ? "This appointment is not assigned to your selected salesperson today."
+                            ? "You can only update the notes field for traffic on your assigned day."
+                            : selectedTrafficSalesId
+                              ? "That salesperson is not assigned to the service drive for this day."
                               : "Pick your salesperson name above to unlock note saving."}
                         </small>
                         <button
                           type="button"
-                          onClick={() => saveSalesNote(entry)}
-                          disabled={!canEditSales || busy === `service-note-sales-${entry.id}`}
+                          onClick={() => saveTrafficSalesNotes(entry)}
+                          disabled={!canEditSales || busy === `traffic-sales-${entry.id}`}
                         >
-                          {busy === `service-note-sales-${entry.id}` ? "Saving..." : "Save Notes"}
+                          {busy === `traffic-sales-${entry.id}` ? "Saving..." : "Save Notes"}
                         </button>
                       </div>
                     </article>
                   );
                 })
               ) : (
-                <div className="empty">No service appointments match these filters.</div>
+                <div className="empty">No traffic rows have been entered for that day.</div>
               )}
             </div>
           </section>
@@ -1686,7 +1939,217 @@ export default function App() {
                   </>
                 ) : null}
 
-                {adminSection === "serviceNotes" ? (
+                {adminSection === "trafficLog" ? (
+                  <>
+                    <div className="traffic-layout">
+                      <div className="panel traffic-day-panel">
+                        <div className="row">
+                          <div>
+                            <span className="eyebrow">Traffic calendar</span>
+                            <h3>{monthLabel(trafficMonth)}</h3>
+                          </div>
+                          <div className="controls">
+                            <input
+                              type="month"
+                              value={trafficMonth}
+                              onChange={(event) => setTrafficMonth(event.target.value)}
+                            />
+                            <input
+                              type="date"
+                              value={selectedTrafficDate}
+                              onChange={(event) => {
+                                setSelectedTrafficDate(event.target.value);
+                                if (event.target.value) {
+                                  setTrafficMonth(event.target.value.slice(0, 7));
+                                }
+                              }}
+                            />
+                          </div>
+                        </div>
+                        <p className="admin-note">
+                          Pick a day from the month view, then add prospect rows one by one like a simple Excel log.
+                          Sales staff can only save the notes column from the public Service Drive Notes page.
+                        </p>
+
+                        <div className="stats">
+                          <div className="stat">
+                            <span>Rows this month</span>
+                            <strong>{trafficMonthTotal}</strong>
+                          </div>
+                          <div className="stat">
+                            <span>Rows on {selectedTrafficDate}</span>
+                            <strong>{selectedTrafficCount}</strong>
+                          </div>
+                          <div className="stat">
+                            <span>Drive team</span>
+                            <strong>{driveTeamText(selectedTrafficTeam)}</strong>
+                          </div>
+                        </div>
+
+                        <TrafficDayPicker
+                          cells={trafficMonthCells}
+                          countsByDate={serviceTrafficData.counts_by_date}
+                          selectedDate={selectedTrafficDate}
+                          today={today}
+                          onSelect={setSelectedTrafficDate}
+                          serviceDayMap={serviceDayMap}
+                          idPrefix="admin-traffic"
+                        />
+                      </div>
+
+                      <div className="panel">
+                        <div className="row">
+                          <div>
+                            <span className="eyebrow">Add traffic row</span>
+                            <h3>{selectedTrafficDate}</h3>
+                          </div>
+                          <button
+                            type="button"
+                            className="secondary"
+                            onClick={() =>
+                              setTrafficEntryForm({
+                                customerName: "",
+                                vehicleYear: "",
+                                modelMake: "",
+                                offerIdea: "",
+                              })
+                            }
+                          >
+                            Clear Fields
+                          </button>
+                        </div>
+
+                        <form className="form" onSubmit={addTrafficEntry}>
+                          <div className="traffic-entry-grid">
+                            <label>
+                              <span>Name</span>
+                              <input
+                                value={trafficEntryForm.customerName}
+                                onChange={(event) =>
+                                  setTrafficEntryForm((current) => ({ ...current, customerName: event.target.value }))
+                                }
+                                placeholder="Customer name"
+                              />
+                            </label>
+                            <label>
+                              <span>Year</span>
+                              <input
+                                value={trafficEntryForm.vehicleYear}
+                                onChange={(event) =>
+                                  setTrafficEntryForm((current) => ({ ...current, vehicleYear: event.target.value }))
+                                }
+                                placeholder="2024"
+                              />
+                            </label>
+                            <label>
+                              <span>Model / Make</span>
+                              <input
+                                value={trafficEntryForm.modelMake}
+                                onChange={(event) =>
+                                  setTrafficEntryForm((current) => ({ ...current, modelMake: event.target.value }))
+                                }
+                                placeholder="Sportage / Kia"
+                              />
+                            </label>
+                            <label className="traffic-entry-grid__wide">
+                              <span>Offer Idea</span>
+                              <textarea
+                                rows={5}
+                                value={trafficEntryForm.offerIdea}
+                                onChange={(event) =>
+                                  setTrafficEntryForm((current) => ({ ...current, offerIdea: event.target.value }))
+                                }
+                                placeholder="Lease idea, trade angle, payment idea, or next step"
+                              />
+                            </label>
+                          </div>
+                          <button type="submit" disabled={busy === "add-traffic-entry"}>
+                            {busy === "add-traffic-entry" ? "Adding..." : "+ Add Traffic Row"}
+                          </button>
+                        </form>
+                      </div>
+                    </div>
+
+                    <div className="notes-list">
+                      {serviceTrafficData.entries.length ? (
+                        serviceTrafficData.entries.map((entry) => (
+                          <article key={entry.id} className="note-card is-admin">
+                            <div className="note-card__top">
+                              <div>
+                                <span className="eyebrow">Traffic row</span>
+                                <h3>{entry.customer_name}</h3>
+                                <p className="note-card__subtitle">{entry.traffic_date}</p>
+                              </div>
+                              <span className="brand-pill brand-pill--kia">Prospect</span>
+                            </div>
+
+                            <div className="traffic-entry-grid">
+                              <label>
+                                <span>Date</span>
+                                <input
+                                  type="date"
+                                  value={entry.traffic_date}
+                                  onChange={(event) => patchTrafficEntry(entry.id, { traffic_date: event.target.value })}
+                                />
+                              </label>
+                              <label>
+                                <span>Name</span>
+                                <input
+                                  value={entry.customer_name}
+                                  onChange={(event) => patchTrafficEntry(entry.id, { customer_name: event.target.value })}
+                                />
+                              </label>
+                              <label>
+                                <span>Year</span>
+                                <input
+                                  value={entry.vehicle_year}
+                                  onChange={(event) => patchTrafficEntry(entry.id, { vehicle_year: event.target.value })}
+                                />
+                              </label>
+                              <label>
+                                <span>Model / Make</span>
+                                <input
+                                  value={entry.model_make}
+                                  onChange={(event) => patchTrafficEntry(entry.id, { model_make: event.target.value })}
+                                />
+                              </label>
+                            </div>
+
+                            <div className="note-copy note-copy--admin">
+                              <label className="note-copy__block">
+                                <span>Offer idea</span>
+                                <textarea
+                                  rows={4}
+                                  value={entry.offer_idea}
+                                  onChange={(event) => patchTrafficEntry(entry.id, { offer_idea: event.target.value })}
+                                />
+                              </label>
+                              <div className="note-copy__block is-readonly">
+                                <span>Salesperson notes</span>
+                                <p>{entry.sales_notes || "No salesperson notes saved yet."}</p>
+                              </div>
+                            </div>
+
+                            <div className="note-actions">
+                              <small>{driveTeamText(entry.drive_team)}</small>
+                              <button
+                                type="button"
+                                onClick={() => saveTrafficEntry(entry)}
+                                disabled={busy === `traffic-admin-${entry.id}`}
+                              >
+                                {busy === `traffic-admin-${entry.id}` ? "Saving..." : "Save Row"}
+                              </button>
+                            </div>
+                          </article>
+                        ))
+                      ) : (
+                        <div className="empty">No traffic rows have been entered for this day.</div>
+                      )}
+                    </div>
+                  </>
+                ) : null}
+
+                {false && adminSection === "serviceNotes" ? (
                   <>
                     <div className="admin-grid">
                       <div className="panel">

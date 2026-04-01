@@ -90,6 +90,11 @@ export const createBdcAgent = (token, payload) =>
 export const updateBdcAgent = (token, id, payload) =>
   request(`/api/admin/bdc/agents/${id}`, { method: "PUT", body: payload, headers: adminHeaders(token) });
 export const getServiceDrive = ({ month } = {}) => request(`/api/service-drive${qs({ month })}`);
+export const getServiceDriveTraffic = (params = {}) =>
+  request(`/api/service-drive/traffic${qs({
+    month: params.month,
+    traffic_date: params.trafficDate,
+  })}`);
 export const getTrafficPdfs = () => request("/api/traffic/pdfs");
 export const getSpecials = () => request("/api/specials");
 export const getServiceDriveNotes = (params = {}) =>
@@ -102,6 +107,10 @@ export const getServiceDriveNotes = (params = {}) =>
   })}`);
 export const generateServiceDrive = (token, payload) =>
   request("/api/admin/service-drive/generate", { method: "POST", body: payload, headers: adminHeaders(token) });
+export const createServiceDriveTraffic = (token, payload) =>
+  request("/api/admin/service-drive/traffic", { method: "POST", body: payload, headers: adminHeaders(token) });
+export const updateServiceDriveTraffic = (token, id, payload) =>
+  request(`/api/admin/service-drive/traffic/${id}`, { method: "PUT", body: payload, headers: adminHeaders(token) });
 export const createTrafficPdf = (token, formData) =>
   request("/api/admin/traffic/pdfs", { method: "POST", body: formData, headers: adminHeaders(token), timeout: 60000 });
 export const createSpecial = (token, formData) =>
@@ -114,6 +123,8 @@ export const updateServiceDriveAssignment = (token, payload) =>
   request("/api/admin/service-drive/assignment", { method: "PUT", body: payload, headers: adminHeaders(token) });
 export const updateServiceDriveSalesNote = (id, payload) =>
   request(`/api/service-drive/notes/${id}/sales`, { method: "PUT", body: payload });
+export const updateServiceDriveTrafficSales = (id, payload) =>
+  request(`/api/service-drive/traffic/${id}/sales`, { method: "PUT", body: payload });
 export const getBdcState = () => request("/api/bdc/state");
 export const assignBdcLead = (payload) => request("/api/bdc/assign", { method: "POST", body: payload });
 export const getBdcLog = (params = {}) =>
