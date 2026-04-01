@@ -8,8 +8,9 @@ from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 from zoneinfo import ZoneInfo
 
-from fastapi import FastAPI, Header, HTTPException
+from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 
@@ -17,6 +18,13 @@ DB_PATH = os.getenv(
     "DEALER_DB_PATH",
     os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "dealership.db"),
 )
+DATA_ROOT = os.path.dirname(DB_PATH)
+UPLOADS_ROOT = os.path.join(DATA_ROOT, "uploads")
+TRAFFIC_PDF_ROOT = os.path.join(UPLOADS_ROOT, "traffic-pdfs")
+SPECIALS_ROOT = os.path.join(UPLOADS_ROOT, "specials")
+for path in (DATA_ROOT, UPLOADS_ROOT, TRAFFIC_PDF_ROOT, SPECIALS_ROOT):
+    if path:
+        os.makedirs(path, exist_ok=True)
 RULES_TIMEZONE = os.getenv("DEALER_TIMEZONE", "America/Chicago").strip() or "America/Chicago"
 ADMIN_USERNAME = os.getenv("DEALER_ADMIN_USERNAME", "admin").strip() or "admin"
 ADMIN_PASSWORD = os.getenv("DEALER_ADMIN_PASSWORD", "admin123").strip() or "admin123"
@@ -48,6 +56,7 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+app.mount("/uploads", StaticFiles(directory=UPLOADS_ROOT), name="uploads")
 
 db_lock = threading.Lock()
 db_conn: Optional[sqlite3.Connection] = None
@@ -234,6 +243,31 @@ class ServiceDriveNotesOut(BaseModel):
     entries: List[ServiceDriveNoteOut]
 
 
+class TrafficPdfOut(BaseModel):
+    id: int
+    title: str
+    original_filename: str
+    file_url: str
+    created_ts: float
+
+
+class TrafficPdfListOut(BaseModel):
+    entries: List[TrafficPdfOut]
+
+
+class SpecialOut(BaseModel):
+    id: int
+    title: str
+    tag: str
+    original_filename: str
+    image_url: str
+    created_ts: float
+
+
+class SpecialsListOut(BaseModel):
+    entries: List[SpecialOut]
+
+
 def now_local() -> datetime:
     return datetime.now(ZoneInfo(RULES_TIMEZONE))
 
@@ -354,6 +388,49 @@ def parse_local_datetime(value: str, field_name: str) -> Tuple[str, str, float]:
 
     local_dt = parsed.replace(second=0, microsecond=0, tzinfo=ZoneInfo(RULES_TIMEZONE))
     return local_dt.strftime("%Y-%m-%dT%H:%M"), local_dt.date().isoformat(), local_dt.timestamp()
+
+
+def upload_url(folder_name: str, stored_name: str) -> str:
+    return f"/uploads/{folder_name}/{stored_name}"
+
+
+def save_upload_file(
+    upload: UploadFile,
+    *,
+    folder_path: str,
+    folder_name: str,
+    allowed_exts: set[str],
+    max_bytes: int,
+) -> Tuple[str, str, str]:
+    original_filename = str(upload.filename or "").strip()
+    if not original_filename:
+        raise HTTPException(status_code=400, detail="file is required")
+
+    ext = os.path.splitext(original_filename)[1].lower()
+    if ext not in allowed_exts:
+        raise HTTPException(status_code=400, detail="file type is not allowed")
+
+    stored_name = f"{int(time.time())}-{secrets.token_hex(8)}{ext}"
+    destination = os.path.join(folder_path, stored_name)
+    total_bytes = 0
+
+    with open(destination, "wb") as handle:
+        while True:
+            chunk = upload.file.read(1024 * 1024)
+            if not chunk:
+                break
+            total_bytes += len(chunk)
+            if total_bytes > max_bytes:
+                handle.close()
+                try:
+                    os.remove(destination)
+                except OSError:
+                    pass
+                raise HTTPException(status_code=400, detail="file is too large")
+            handle.write(chunk)
+
+    upload.file.close()
+    return original_filename, stored_name, upload_url(folder_name, stored_name)
 
 
 def month_dates(month_key: str) -> List[date]:
@@ -557,6 +634,31 @@ def init_db() -> None:
         )
         """
     )
+    db_execute(
+        """
+        CREATE TABLE IF NOT EXISTS traffic_pdfs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT NOT NULL,
+            original_filename TEXT NOT NULL,
+            stored_filename TEXT NOT NULL,
+            file_url TEXT NOT NULL,
+            created_ts REAL NOT NULL
+        )
+        """
+    )
+    db_execute(
+        """
+        CREATE TABLE IF NOT EXISTS specials (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            title TEXT NOT NULL,
+            tag TEXT NOT NULL,
+            original_filename TEXT NOT NULL,
+            stored_filename TEXT NOT NULL,
+            image_url TEXT NOT NULL,
+            created_ts REAL NOT NULL
+        )
+        """
+    )
 
 
 def prune_sessions() -> None:
@@ -660,6 +762,27 @@ def service_note_out(row: Dict[str, Any]) -> ServiceDriveNoteOut:
         salesperson_dealership=str(row.get("salesperson_dealership") or "") or None,
         created_ts=float(row.get("created_ts") or 0.0),
         updated_ts=float(row.get("updated_ts") or 0.0),
+    )
+
+
+def traffic_pdf_out(row: Dict[str, Any]) -> TrafficPdfOut:
+    return TrafficPdfOut(
+        id=int(row.get("id") or 0),
+        title=str(row.get("title") or ""),
+        original_filename=str(row.get("original_filename") or ""),
+        file_url=str(row.get("file_url") or ""),
+        created_ts=float(row.get("created_ts") or 0.0),
+    )
+
+
+def special_out(row: Dict[str, Any]) -> SpecialOut:
+    return SpecialOut(
+        id=int(row.get("id") or 0),
+        title=str(row.get("title") or ""),
+        tag=str(row.get("tag") or ""),
+        original_filename=str(row.get("original_filename") or ""),
+        image_url=str(row.get("image_url") or ""),
+        created_ts=float(row.get("created_ts") or 0.0),
     )
 
 
@@ -1373,6 +1496,63 @@ def update_service_note_sales(note_id: int, payload: ServiceDriveSalesNoteIn) ->
     return service_note_out(saved)
 
 
+def fetch_traffic_pdfs() -> TrafficPdfListOut:
+    rows = db_query_all("SELECT * FROM traffic_pdfs ORDER BY created_ts DESC, id DESC")
+    return TrafficPdfListOut(entries=[traffic_pdf_out(row) for row in rows])
+
+
+def create_traffic_pdf(title: str, upload: UploadFile) -> TrafficPdfOut:
+    original_filename, stored_name, file_url = save_upload_file(
+        upload,
+        folder_path=TRAFFIC_PDF_ROOT,
+        folder_name="traffic-pdfs",
+        allowed_exts={".pdf"},
+        max_bytes=25 * 1024 * 1024,
+    )
+    resolved_title = normalize_short_text(title or os.path.splitext(original_filename)[0], "title", max_len=120)
+    now_ts = time.time()
+    created_id = db_insert(
+        """
+        INSERT INTO traffic_pdfs (title, original_filename, stored_filename, file_url, created_ts)
+        VALUES (?, ?, ?, ?, ?)
+        """,
+        (resolved_title, original_filename, stored_name, file_url, now_ts),
+    )
+    row = db_query_one("SELECT * FROM traffic_pdfs WHERE id = ?", (created_id,))
+    if not row:
+        raise HTTPException(status_code=500, detail="failed to save traffic pdf")
+    return traffic_pdf_out(row)
+
+
+def fetch_specials() -> SpecialsListOut:
+    rows = db_query_all("SELECT * FROM specials ORDER BY created_ts DESC, id DESC")
+    return SpecialsListOut(entries=[special_out(row) for row in rows])
+
+
+def create_special(title: str, tag: str, upload: UploadFile) -> SpecialOut:
+    original_filename, stored_name, image_url = save_upload_file(
+        upload,
+        folder_path=SPECIALS_ROOT,
+        folder_name="specials",
+        allowed_exts={".png", ".jpg", ".jpeg", ".webp"},
+        max_bytes=12 * 1024 * 1024,
+    )
+    resolved_title = normalize_short_text(title or os.path.splitext(original_filename)[0], "title", max_len=120)
+    resolved_tag = normalize_short_text(tag or resolved_title, "tag", max_len=80)
+    now_ts = time.time()
+    created_id = db_insert(
+        """
+        INSERT INTO specials (title, tag, original_filename, stored_filename, image_url, created_ts)
+        VALUES (?, ?, ?, ?, ?, ?)
+        """,
+        (resolved_title, resolved_tag, original_filename, stored_name, image_url, now_ts),
+    )
+    row = db_query_one("SELECT * FROM specials WHERE id = ?", (created_id,))
+    if not row:
+        raise HTTPException(status_code=500, detail="failed to save special")
+    return special_out(row)
+
+
 @app.on_event("startup")
 def on_startup() -> None:
     init_db()
@@ -1457,6 +1637,16 @@ def get_service_drive(month: Optional[str] = None) -> ServiceMonthOut:
     return fetch_service_month(parse_month_key(month or now_local().strftime("%Y-%m")))
 
 
+@app.get("/api/traffic/pdfs", response_model=TrafficPdfListOut)
+def get_traffic_pdfs() -> TrafficPdfListOut:
+    return fetch_traffic_pdfs()
+
+
+@app.get("/api/specials", response_model=SpecialsListOut)
+def get_specials() -> SpecialsListOut:
+    return fetch_specials()
+
+
 @app.get("/api/service-drive/notes", response_model=ServiceDriveNotesOut)
 def get_service_drive_notes(
     salesperson_id: Optional[int] = None,
@@ -1480,6 +1670,27 @@ def post_service_generate(payload: ServiceGenerateIn, x_admin_token: Optional[st
     month_key = parse_month_key(payload.month)
     generate_service_schedule(month_key, overwrite=payload.overwrite)
     return fetch_service_month(month_key)
+
+
+@app.post("/api/admin/traffic/pdfs", response_model=TrafficPdfOut)
+def post_traffic_pdf(
+    title: str = Form(default=""),
+    file: UploadFile = File(...),
+    x_admin_token: Optional[str] = Header(default=None),
+) -> TrafficPdfOut:
+    require_admin(x_admin_token)
+    return create_traffic_pdf(title, file)
+
+
+@app.post("/api/admin/specials", response_model=SpecialOut)
+def post_special(
+    title: str = Form(default=""),
+    tag: str = Form(default=""),
+    file: UploadFile = File(...),
+    x_admin_token: Optional[str] = Header(default=None),
+) -> SpecialOut:
+    require_admin(x_admin_token)
+    return create_special(title, tag, file)
 
 
 @app.post("/api/admin/service-drive/notes", response_model=ServiceDriveNoteOut)

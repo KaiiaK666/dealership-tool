@@ -1,10 +1,13 @@
 import React, { useEffect, useState } from "react";
 import {
+  apiBase,
   adminLogin,
   assignBdcLead,
   createBdcAgent,
   createSalesperson,
+  createSpecial,
   createServiceDriveNote,
+  createTrafficPdf,
   generateServiceDrive,
   getAdminDaysOff,
   getAdminSession,
@@ -13,8 +16,10 @@ import {
   getBdcReport,
   getBdcState,
   getSalespeople,
+  getSpecials,
   getServiceDrive,
   getServiceDriveNotes,
+  getTrafficPdfs,
   updateAdminDaysOff,
   updateBdcAgent,
   updateSalesperson,
@@ -30,6 +35,7 @@ const TABS = [
   { id: "bdc", label: "BDC Assign" },
   { id: "reports", label: "BDC Reports" },
   { id: "traffic", label: "Service Drive Traffic" },
+  { id: "specials", label: "Specials" },
   { id: "admin", label: "Admin" },
 ];
 
@@ -37,6 +43,7 @@ const ADMIN_SECTIONS = [
   { id: "staff", label: "Staff Setup" },
   { id: "daysOff", label: "Days Off" },
   { id: "serviceNotes", label: "Service Notes" },
+  { id: "specials", label: "Specials" },
 ];
 
 const DEALERSHIP_ORDER = ["Kia", "Mazda", "Outlet"];
@@ -106,6 +113,12 @@ function errText(error) {
   if (typeof error === "string") return error;
   if (error.message) return error.message;
   return "Request failed";
+}
+
+function assetUrl(path) {
+  if (!path) return "";
+  if (/^https?:\/\//i.test(path)) return path;
+  return `${apiBase}${path}`;
 }
 
 function buildCalendarCells(days) {
@@ -190,6 +203,9 @@ export default function App() {
   const [bdcAgents, setBdcAgents] = useState([]);
   const [serviceMonth, setServiceMonth] = useState(null);
   const [serviceNotesData, setServiceNotesData] = useState({ total: 0, entries: [] });
+  const [trafficPdfs, setTrafficPdfs] = useState([]);
+  const [specials, setSpecials] = useState([]);
+  const [selectedSpecialId, setSelectedSpecialId] = useState(null);
   const [bdcState, setBdcState] = useState(null);
   const [bdcLog, setBdcLog] = useState({ total: 0, entries: [] });
   const [bdcReport, setBdcReport] = useState(null);
@@ -207,6 +223,10 @@ export default function App() {
   const [bdcForm, setBdcForm] = useState({ name: "", active: true });
   const [leadForm, setLeadForm] = useState({ bdcAgentId: "", customerName: "", customerPhone: "" });
   const [serviceNoteForm, setServiceNoteForm] = useState(defaultServiceNoteForm());
+  const [trafficPdfForm, setTrafficPdfForm] = useState({ title: "", file: null });
+  const [specialForm, setSpecialForm] = useState({ title: "", tag: "", file: null });
+  const [trafficUploadKey, setTrafficUploadKey] = useState(0);
+  const [specialUploadKey, setSpecialUploadKey] = useState(0);
 
   const activeSales = salespeople.filter((person) => person.active);
   const serviceEligible = activeSales.filter((person) => person.dealership !== "Outlet");
@@ -228,6 +248,7 @@ export default function App() {
   const selectedServiceNotesSalesperson =
     serviceEligible.find((person) => person.id === selectedServiceNotesSalesId) || null;
   const serviceNotesMissingCount = serviceNotesData.entries.filter((entry) => !entry.sales_notes?.trim()).length;
+  const selectedSpecial = specials.find((item) => item.id === selectedSpecialId) || specials[0] || null;
   const monthDaysOffSummary = monthDateValues(daysOffMonth).map((value) => ({
     date: value,
     people: activeSales.filter((person) => (daysOffEntriesBySalesperson.get(person.id) || []).includes(value)),
@@ -270,6 +291,16 @@ export default function App() {
     setServiceNotesData(data);
   }
 
+  async function refreshTrafficPdfs() {
+    const data = await getTrafficPdfs();
+    setTrafficPdfs(data.entries || []);
+  }
+
+  async function refreshSpecials() {
+    const data = await getSpecials();
+    setSpecials(data.entries || []);
+  }
+
   useEffect(() => {
     let active = true;
     const run = async () => {
@@ -310,6 +341,34 @@ export default function App() {
       active = false;
     };
   }, [serviceNotesFilters.salespersonId, serviceNotesFilters.startDate, serviceNotesFilters.endDate, serviceNotesFilters.brand]);
+
+  useEffect(() => {
+    let active = true;
+    const run = async () => {
+      try {
+        const [pdfData, specialData] = await Promise.all([getTrafficPdfs(), getSpecials()]);
+        if (!active) return;
+        setTrafficPdfs(pdfData.entries || []);
+        setSpecials(specialData.entries || []);
+      } catch (errorValue) {
+        if (active) setError(errText(errorValue));
+      }
+    };
+    run();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!selectedSpecialId && specials.length) {
+      setSelectedSpecialId(specials[0].id);
+      return;
+    }
+    if (selectedSpecialId && !specials.some((item) => item.id === selectedSpecialId)) {
+      setSelectedSpecialId(specials.length ? specials[0].id : null);
+    }
+  }, [selectedSpecialId, specials]);
 
   useEffect(() => {
     if (!leadForm.bdcAgentId && activeBdc.length) {
@@ -580,6 +639,54 @@ export default function App() {
         sales_notes: entry.sales_notes,
       });
       patchServiceNoteEntry(entry.id, saved);
+    } catch (errorValue) {
+      setError(errText(errorValue));
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function uploadTrafficPdf(event) {
+    event.preventDefault();
+    if (!trafficPdfForm.file) {
+      setError("Choose a PDF file first.");
+      return;
+    }
+    setBusy("upload-traffic-pdf");
+    setError("");
+    try {
+      const formData = new FormData();
+      formData.append("title", trafficPdfForm.title);
+      formData.append("file", trafficPdfForm.file);
+      await createTrafficPdf(adminToken, formData);
+      setTrafficPdfForm({ title: "", file: null });
+      setTrafficUploadKey((current) => current + 1);
+      await refreshTrafficPdfs();
+    } catch (errorValue) {
+      setError(errText(errorValue));
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function uploadSpecial(event) {
+    event.preventDefault();
+    if (!specialForm.file) {
+      setError("Choose a specials image first.");
+      return;
+    }
+    setBusy("upload-special");
+    setError("");
+    try {
+      const formData = new FormData();
+      formData.append("title", specialForm.title);
+      formData.append("tag", specialForm.tag);
+      formData.append("file", specialForm.file);
+      const created = await createSpecial(adminToken, formData);
+      setSpecialForm({ title: "", tag: "", file: null });
+      setSpecialUploadKey((current) => current + 1);
+      await refreshSpecials();
+      setSelectedSpecialId(created.id);
     } catch (errorValue) {
       setError(errText(errorValue));
     } finally {
@@ -1081,6 +1188,100 @@ export default function App() {
             </div>
             <div className="frame">
               <iframe title="Service Drive Traffic" src={TRAFFIC_URL} loading="lazy" />
+            </div>
+            <div className="panel">
+              <div className="row">
+                <div>
+                  <span className="eyebrow">Traffic PDFs</span>
+                  <h3>Uploaded documents</h3>
+                </div>
+              </div>
+              {adminSession ? (
+                <form className="upload-form" onSubmit={uploadTrafficPdf}>
+                  <label>
+                    <span>Document title</span>
+                    <input
+                      value={trafficPdfForm.title}
+                      onChange={(event) => setTrafficPdfForm((current) => ({ ...current, title: event.target.value }))}
+                      placeholder="March service traffic sheet"
+                    />
+                  </label>
+                  <label>
+                    <span>PDF file</span>
+                    <input
+                      key={trafficUploadKey}
+                      type="file"
+                      accept="application/pdf,.pdf"
+                      onChange={(event) =>
+                        setTrafficPdfForm((current) => ({ ...current, file: event.target.files?.[0] || null }))
+                      }
+                    />
+                  </label>
+                  <button type="submit" disabled={busy === "upload-traffic-pdf"}>
+                    {busy === "upload-traffic-pdf" ? "Uploading..." : "Upload PDF"}
+                  </button>
+                </form>
+              ) : null}
+
+              <div className="asset-list">
+                {trafficPdfs.length ? (
+                  trafficPdfs.map((entry) => (
+                    <article key={entry.id} className="asset-card">
+                      <div>
+                        <span className="eyebrow">PDF</span>
+                        <h4>{entry.title}</h4>
+                        <p>{entry.original_filename}</p>
+                      </div>
+                      <a className="asset-link" href={assetUrl(entry.file_url)} target="_blank" rel="noreferrer">
+                        Open PDF
+                      </a>
+                    </article>
+                  ))
+                ) : (
+                  <div className="empty">No traffic PDFs uploaded yet.</div>
+                )}
+              </div>
+            </div>
+          </section>
+        ) : null}
+
+        {tab === "specials" ? (
+          <section className="stack">
+            <div className="panel">
+              <span className="eyebrow">Specials</span>
+              <h2>Offer tiles</h2>
+            </div>
+
+            {selectedSpecial ? (
+              <div className="panel specials-hero">
+                <div className="specials-hero__copy">
+                  <span className="eyebrow">{selectedSpecial.tag}</span>
+                  <h2>{selectedSpecial.title}</h2>
+                  <p>Click any tile below to switch the current offer.</p>
+                </div>
+                <div className="specials-hero__media">
+                  <img src={assetUrl(selectedSpecial.image_url)} alt={selectedSpecial.title} />
+                </div>
+              </div>
+            ) : (
+              <div className="empty">No specials uploaded yet.</div>
+            )}
+
+            <div className="specials-grid">
+              {specials.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  className={`special-card ${selectedSpecial?.id === item.id ? "is-active" : ""}`}
+                  onClick={() => setSelectedSpecialId(item.id)}
+                >
+                  <img src={assetUrl(item.image_url)} alt={item.title} />
+                  <div className="special-card__copy">
+                    <span>{item.tag}</span>
+                    <strong>{item.title}</strong>
+                  </div>
+                </button>
+              ))}
             </div>
           </section>
         ) : null}
@@ -1689,6 +1890,74 @@ export default function App() {
                       ) : (
                         <div className="empty">No service appointments match these filters.</div>
                       )}
+                    </div>
+                  </>
+                ) : null}
+
+                {adminSection === "specials" ? (
+                  <>
+                    <div className="admin-grid">
+                      <div className="panel">
+                        <span className="eyebrow">Upload special</span>
+                        <h3>1080 x 1080 offer tile</h3>
+                        <form className="form" onSubmit={uploadSpecial}>
+                          <label>
+                            <span>Title</span>
+                            <input
+                              value={specialForm.title}
+                              onChange={(event) => setSpecialForm((current) => ({ ...current, title: event.target.value }))}
+                              placeholder="Sportage Lease Offer"
+                            />
+                          </label>
+                          <label>
+                            <span>Tag</span>
+                            <input
+                              value={specialForm.tag}
+                              onChange={(event) => setSpecialForm((current) => ({ ...current, tag: event.target.value }))}
+                              placeholder="Sportage"
+                            />
+                          </label>
+                          <label>
+                            <span>Image file</span>
+                            <input
+                              key={specialUploadKey}
+                              type="file"
+                              accept="image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp"
+                              onChange={(event) =>
+                                setSpecialForm((current) => ({ ...current, file: event.target.files?.[0] || null }))
+                              }
+                            />
+                          </label>
+                          <button type="submit" disabled={busy === "upload-special"}>
+                            {busy === "upload-special" ? "Uploading..." : "Upload Special"}
+                          </button>
+                        </form>
+                      </div>
+
+                      <div className="panel">
+                        <span className="eyebrow">Live specials</span>
+                        <h3>Current uploaded graphics</h3>
+                        <div className="specials-grid specials-grid--admin">
+                          {specials.length ? (
+                            specials.map((item) => (
+                              <button
+                                key={`admin-special-${item.id}`}
+                                type="button"
+                                className={`special-card ${selectedSpecial?.id === item.id ? "is-active" : ""}`}
+                                onClick={() => setSelectedSpecialId(item.id)}
+                              >
+                                <img src={assetUrl(item.image_url)} alt={item.title} />
+                                <div className="special-card__copy">
+                                  <span>{item.tag}</span>
+                                  <strong>{item.title}</strong>
+                                </div>
+                              </button>
+                            ))
+                          ) : (
+                            <div className="empty">No specials uploaded yet.</div>
+                          )}
+                        </div>
+                      </div>
                     </div>
                   </>
                 ) : null}

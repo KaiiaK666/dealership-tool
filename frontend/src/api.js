@@ -37,14 +37,15 @@ function buildUrl(path) {
 async function request(path, { method = "GET", body, headers = {}, timeout = 10000 } = {}) {
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeout);
+  const isFormData = typeof FormData !== "undefined" && body instanceof FormData;
   try {
     const response = await fetch(buildUrl(path), {
       method,
       headers: {
-        ...(body ? { "Content-Type": "application/json" } : {}),
+        ...(!isFormData && body ? { "Content-Type": "application/json" } : {}),
         ...headers,
       },
-      body: body ? JSON.stringify(body) : undefined,
+      body: body ? (isFormData ? body : JSON.stringify(body)) : undefined,
       signal: controller.signal,
     });
     if (!response.ok) {
@@ -89,6 +90,8 @@ export const createBdcAgent = (token, payload) =>
 export const updateBdcAgent = (token, id, payload) =>
   request(`/api/admin/bdc/agents/${id}`, { method: "PUT", body: payload, headers: adminHeaders(token) });
 export const getServiceDrive = ({ month } = {}) => request(`/api/service-drive${qs({ month })}`);
+export const getTrafficPdfs = () => request("/api/traffic/pdfs");
+export const getSpecials = () => request("/api/specials");
 export const getServiceDriveNotes = (params = {}) =>
   request(`/api/service-drive/notes${qs({
     salesperson_id: params.salespersonId,
@@ -99,6 +102,10 @@ export const getServiceDriveNotes = (params = {}) =>
   })}`);
 export const generateServiceDrive = (token, payload) =>
   request("/api/admin/service-drive/generate", { method: "POST", body: payload, headers: adminHeaders(token) });
+export const createTrafficPdf = (token, formData) =>
+  request("/api/admin/traffic/pdfs", { method: "POST", body: formData, headers: adminHeaders(token), timeout: 60000 });
+export const createSpecial = (token, formData) =>
+  request("/api/admin/specials", { method: "POST", body: formData, headers: adminHeaders(token), timeout: 60000 });
 export const createServiceDriveNote = (token, payload) =>
   request("/api/admin/service-drive/notes", { method: "POST", body: payload, headers: adminHeaders(token) });
 export const updateServiceDriveNote = (token, id, payload) =>
