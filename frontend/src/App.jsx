@@ -20,7 +20,7 @@ import {
   getServiceDrive,
   getServiceDriveTraffic,
   getTrafficPdfs,
-  updateAdminDaysOff,
+  replaceAdminDaysOffMonth,
   updateBdcAgent,
   updateSalesperson,
   updateServiceDriveAssignment,
@@ -294,6 +294,7 @@ export default function App() {
   const [trafficMonth, setTrafficMonth] = useState(currentMonth());
   const [selectedTrafficDate, setSelectedTrafficDate] = useState(todayDateValue());
   const [selectedTrafficSalesId, setSelectedTrafficSalesId] = useState("");
+  const [selectedTrafficBrandFilter, setSelectedTrafficBrandFilter] = useState("All");
   const [salespeople, setSalespeople] = useState([]);
   const [bdcAgents, setBdcAgents] = useState([]);
   const [serviceMonth, setServiceMonth] = useState(null);
@@ -344,9 +345,14 @@ export default function App() {
     dealership,
     people: salespeople.filter((person) => person.dealership === dealership),
   }));
+  const daysOffSalespeople = [...salespeople].sort((left, right) =>
+    left.name.localeCompare(right.name, undefined, { sensitivity: "base" }) ||
+    left.dealership.localeCompare(right.dealership, undefined, { sensitivity: "base" }) ||
+    left.id - right.id
+  );
   const daysOffEntriesBySalesperson = new Map(daysOffData.entries.map((entry) => [entry.salesperson_id, entry.off_dates]));
   const selectedDaysOffSalesperson =
-    salespeople.find((person) => String(person.id) === String(selectedDaysOffSalesId)) || salespeople[0] || null;
+    daysOffSalespeople.find((person) => String(person.id) === String(selectedDaysOffSalesId)) || daysOffSalespeople[0] || null;
   const selectedDaysOffDates = selectedDaysOffSalesperson
     ? daysOffEntriesBySalesperson.get(selectedDaysOffSalesperson.id) || []
     : [];
@@ -371,6 +377,13 @@ export default function App() {
   const focusTrafficKia = driveTeamMember(focusTrafficTeam, "Kia");
   const focusTrafficMazda = driveTeamMember(focusTrafficTeam, "Mazda");
   const selectedTrafficHasAuthor = Boolean(selectedTrafficSalesId);
+  const visibleTrafficEntries =
+    selectedTrafficBrandFilter === "All"
+      ? serviceTrafficData.entries
+      : serviceTrafficData.entries.filter((entry) => entry.brand === selectedTrafficBrandFilter);
+  const visibleTrafficCount = visibleTrafficEntries.length;
+  const selectedTrafficFilterLabel =
+    selectedTrafficBrandFilter === "All" ? "All Franchises" : `${selectedTrafficBrandFilter} Only`;
   const selectedTrafficScheduleDay = serviceDayMap.get(selectedTrafficDate) || null;
   const selectedTrafficTeam = serviceTrafficData.entries[0]?.drive_team?.length
     ? serviceTrafficData.entries[0].drive_team
@@ -520,14 +533,17 @@ export default function App() {
   }, [leadForm.bdcAgentId, activeBdc]);
 
   useEffect(() => {
-    if (!selectedDaysOffSalesId && salespeople.length) {
-      setSelectedDaysOffSalesId(String(salespeople[0].id));
+    if (!selectedDaysOffSalesId && daysOffSalespeople.length) {
+      setSelectedDaysOffSalesId(String(daysOffSalespeople[0].id));
       return;
     }
-    if (selectedDaysOffSalesId && !salespeople.some((person) => String(person.id) === String(selectedDaysOffSalesId))) {
-      setSelectedDaysOffSalesId(salespeople.length ? String(salespeople[0].id) : "");
+    if (
+      selectedDaysOffSalesId &&
+      !daysOffSalespeople.some((person) => String(person.id) === String(selectedDaysOffSalesId))
+    ) {
+      setSelectedDaysOffSalesId(daysOffSalespeople.length ? String(daysOffSalespeople[0].id) : "");
     }
-  }, [selectedDaysOffSalesId, salespeople]);
+  }, [daysOffSalespeople, selectedDaysOffSalesId]);
 
   useEffect(() => {
     if (!selectedTrafficDate.startsWith(trafficMonth)) {
@@ -652,14 +668,16 @@ export default function App() {
     });
   }
 
-  async function saveDaysOff(personId, offDates) {
-    setBusy(`days-off-${personId}`);
+  async function saveAllDaysOffMonth() {
+    setBusy("days-off-month");
     setError("");
     try {
-      const data = await updateAdminDaysOff(adminToken, {
-        salesperson_id: personId,
+      const data = await replaceAdminDaysOffMonth(adminToken, {
         month: daysOffMonth,
-        off_dates: offDates,
+        entries: daysOffData.entries.map((entry) => ({
+          salesperson_id: entry.salesperson_id,
+          off_dates: entry.off_dates,
+        })),
       });
       setDaysOffData(data);
       await refresh();
@@ -1117,7 +1135,7 @@ export default function App() {
                     how many traffic rows are on the board, and can start writing notes right away.
                   </p>
                 </div>
-                <div className="traffic-day-panel__count">{focusTrafficCount} rows</div>
+                <div className="traffic-day-panel__count">{visibleTrafficCount} rows</div>
               </div>
               <div className="traffic-focus-grid">
                 <div className="traffic-focus-status">
@@ -1139,8 +1157,26 @@ export default function App() {
                   <small>{focusTrafficMazda.salesperson_dealership || "No assignment"}</small>
                 </div>
                 <div className="traffic-summary-stat traffic-summary-stat--focus">
-                  <span>Traffic rows</span>
-                  <strong>{focusTrafficCount}</strong>
+                  <span>{selectedTrafficFilterLabel}</span>
+                  <strong>{visibleTrafficCount}</strong>
+                </div>
+              </div>
+
+              <div className="traffic-franchise-toggle">
+                <span className="traffic-franchise-toggle__label">Franchise view</span>
+                <div className="traffic-franchise-toggle__buttons">
+                  {["All", "Kia", "Mazda"].map((brand) => (
+                    <button
+                      key={`traffic-filter-${brand}`}
+                      type="button"
+                      className={`traffic-franchise-toggle__button traffic-franchise-toggle__button--${brand.toLowerCase()} ${
+                        selectedTrafficBrandFilter === brand ? "is-active" : ""
+                      }`}
+                      onClick={() => setSelectedTrafficBrandFilter(brand)}
+                    >
+                      {brand === "All" ? "All Franchises" : brand}
+                    </button>
+                  ))}
                 </div>
               </div>
 
@@ -1188,8 +1224,8 @@ export default function App() {
             </div>
 
             <div className="notes-list">
-              {serviceTrafficData.entries.length ? (
-                serviceTrafficData.entries.map((entry) => {
+              {visibleTrafficEntries.length ? (
+                visibleTrafficEntries.map((entry) => {
                   const brandKey = String(entry.brand || "Kia").toLowerCase();
                   const matchesSelectedStore = Boolean(selectedTrafficSalesStore && selectedTrafficSalesStore === entry.brand);
                   return (
@@ -1272,7 +1308,11 @@ export default function App() {
                   );
                 })
               ) : (
-                <div className="empty">No traffic rows have been entered for that day.</div>
+                <div className="empty">
+                  {selectedTrafficBrandFilter === "All"
+                    ? "No traffic rows have been entered for that day."
+                    : `No ${selectedTrafficBrandFilter} traffic rows have been entered for that day.`}
+                </div>
               )}
             </div>
           </section>
@@ -1987,8 +2027,8 @@ export default function App() {
                         <span className="eyebrow">Sales days off</span>
                         <h2>{monthLabel(daysOffMonth)}</h2>
                         <p className="admin-note">
-                          Pick one salesperson, mark their exact dates off for the month, then save. Those dates block
-                          both service-drive assignments and BDC round-robin leads.
+                          Pick one salesperson, mark exact dates off, and save the whole month together. Those dates
+                          block both service-drive assignments and BDC round-robin leads.
                         </p>
                       </div>
                       <div className="controls">
@@ -1998,7 +2038,7 @@ export default function App() {
                           onChange={(event) => setSelectedDaysOffSalesId(event.target.value)}
                         >
                           <option value="">Choose salesperson</option>
-                          {salespeople.map((person) => (
+                          {daysOffSalespeople.map((person) => (
                             <option key={`days-off-select-${person.id}`} value={person.id}>
                               {person.name} - {person.dealership}
                             </option>
@@ -2025,9 +2065,9 @@ export default function App() {
                     <div className="days-off-layout">
                       <div className="panel">
                         <span className="eyebrow">Salespeople</span>
-                        <h3>Schedule in order</h3>
+                        <h3>Alphabetical list</h3>
                         <div className="days-off-people">
-                          {salespeople.map((person) => {
+                          {daysOffSalespeople.map((person) => {
                             const total = (daysOffEntriesBySalesperson.get(person.id) || []).length;
                             return (
                               <button
@@ -2067,10 +2107,10 @@ export default function App() {
                               </button>
                               <button
                                 type="button"
-                                onClick={() => saveDaysOff(selectedDaysOffSalesperson.id, selectedDaysOffDates)}
-                                disabled={busy === `days-off-${selectedDaysOffSalesperson.id}`}
+                                onClick={saveAllDaysOffMonth}
+                                disabled={busy === "days-off-month"}
                               >
-                                {busy === `days-off-${selectedDaysOffSalesperson.id}` ? "Saving..." : "Save Month"}
+                                {busy === "days-off-month" ? "Saving..." : "Save All Month Changes"}
                               </button>
                             </div>
                           ) : null}

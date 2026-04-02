@@ -84,6 +84,8 @@ export const getAdminDaysOff = (token, { month }) =>
   request(`/api/admin/days-off${qs({ month })}`, { headers: adminHeaders(token) });
 export const updateAdminDaysOff = (token, payload) =>
   request("/api/admin/days-off", { method: "PUT", body: payload, headers: adminHeaders(token) });
+export const replaceAdminDaysOffMonth = (token, payload) =>
+  request("/api/admin/days-off/bulk", { method: "PUT", body: payload, headers: adminHeaders(token) });
 export const getBdcAgents = (params = {}) => request(`/api/bdc/agents${qs({ include_inactive: params.includeInactive })}`);
 export const createBdcAgent = (token, payload) =>
   request("/api/admin/bdc/agents", { method: "POST", body: payload, headers: adminHeaders(token) });

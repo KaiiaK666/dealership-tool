@@ -126,6 +126,11 @@ class DaysOffMonthIn(BaseModel):
     off_dates: List[str] = []
 
 
+class DaysOffMonthBulkIn(BaseModel):
+    month: str
+    entries: List[DaysOffEntryOut] = []
+
+
 class ServiceSlotOut(BaseModel):
     brand: str
     salesperson_id: Optional[int] = None
@@ -1073,6 +1078,47 @@ def update_days_off_month(payload: DaysOffMonthIn) -> DaysOffMonthOut:
     return fetch_days_off_month(month_key)
 
 
+def replace_days_off_month(payload: DaysOffMonthBulkIn) -> DaysOffMonthOut:
+    month_key = parse_month_key(payload.month)
+    valid_dates = {item.isoformat() for item in month_dates(month_key)}
+    normalized_by_salesperson: Dict[int, List[str]] = {}
+
+    for entry in payload.entries:
+        person = get_salesperson_row(int(entry.salesperson_id))
+        if not person:
+            raise HTTPException(status_code=404, detail="salesperson not found")
+        dates: List[str] = []
+        for value in entry.off_dates:
+            off_day = parse_iso_date(value, "off_dates")
+            off_date = off_day.isoformat()
+            if off_date not in valid_dates:
+                raise HTTPException(status_code=400, detail="off_dates must stay within the selected month")
+            if off_date not in dates:
+                dates.append(off_date)
+        dates.sort()
+        normalized_by_salesperson[int(entry.salesperson_id)] = dates
+
+    start_date, end_date = month_date_bounds(month_key)
+    db_execute(
+        "DELETE FROM salesperson_days_off WHERE off_date >= ? AND off_date < ?",
+        (start_date, end_date),
+    )
+
+    now_ts = time.time()
+    for salesperson_id, off_dates in normalized_by_salesperson.items():
+        for off_date in off_dates:
+            db_execute(
+                """
+                INSERT INTO salesperson_days_off (salesperson_id, off_date, created_ts)
+                VALUES (?, ?, ?)
+                ON CONFLICT(salesperson_id, off_date) DO NOTHING
+                """,
+                (salesperson_id, off_date, now_ts),
+            )
+
+    return fetch_days_off_month(month_key)
+
+
 def create_salesperson(payload: SalespersonIn) -> SalespersonOut:
     name = normalize_name(payload.name, "name")
     dealership = normalize_dealership(payload.dealership)
@@ -2005,6 +2051,15 @@ def put_admin_days_off(
 ) -> DaysOffMonthOut:
     require_admin(x_admin_token)
     return update_days_off_month(payload)
+
+
+@app.put("/api/admin/days-off/bulk", response_model=DaysOffMonthOut)
+def put_admin_days_off_bulk(
+    payload: DaysOffMonthBulkIn,
+    x_admin_token: Optional[str] = Header(default=None),
+) -> DaysOffMonthOut:
+    require_admin(x_admin_token)
+    return replace_days_off_month(payload)
 
 
 @app.get("/api/bdc/agents", response_model=List[BdcAgentOut])
