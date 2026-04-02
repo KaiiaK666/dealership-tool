@@ -22,7 +22,8 @@ DATA_ROOT = os.path.dirname(DB_PATH)
 UPLOADS_ROOT = os.path.join(DATA_ROOT, "uploads")
 TRAFFIC_PDF_ROOT = os.path.join(UPLOADS_ROOT, "traffic-pdfs")
 SPECIALS_ROOT = os.path.join(UPLOADS_ROOT, "specials")
-for path in (DATA_ROOT, UPLOADS_ROOT, TRAFFIC_PDF_ROOT, SPECIALS_ROOT):
+TRAFFIC_OFFER_ROOT = os.path.join(UPLOADS_ROOT, "traffic-offers")
+for path in (DATA_ROOT, UPLOADS_ROOT, TRAFFIC_PDF_ROOT, SPECIALS_ROOT, TRAFFIC_OFFER_ROOT):
     if path:
         os.makedirs(path, exist_ok=True)
 RULES_TIMEZONE = os.getenv("DEALER_TIMEZONE", "America/Chicago").strip() or "America/Chicago"
@@ -256,6 +257,7 @@ class ServiceDriveTrafficAssignmentOut(BaseModel):
 
 class ServiceDriveTrafficIn(BaseModel):
     traffic_date: str
+    brand: str = "Kia"
     customer_name: str
     vehicle_year: str = ""
     model_make: str = ""
@@ -267,13 +269,22 @@ class ServiceDriveTrafficSalesNoteIn(BaseModel):
     sales_notes: str = ""
 
 
+class ServiceDriveTrafficImageOut(BaseModel):
+    id: int
+    original_filename: str
+    image_url: str
+    created_ts: float
+
+
 class ServiceDriveTrafficOut(BaseModel):
     id: int
     traffic_date: str
+    brand: str
     customer_name: str
     vehicle_year: str
     model_make: str
     offer_idea: str
+    offer_images: List[ServiceDriveTrafficImageOut]
     sales_notes: str
     sales_note_salesperson_id: Optional[int] = None
     sales_note_salesperson_name: Optional[str] = None
@@ -695,6 +706,7 @@ def init_db() -> None:
         CREATE TABLE IF NOT EXISTS service_drive_traffic_entries (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             traffic_date TEXT NOT NULL,
+            brand TEXT NOT NULL DEFAULT 'Kia',
             customer_name TEXT NOT NULL,
             vehicle_year TEXT NOT NULL DEFAULT '',
             model_make TEXT NOT NULL DEFAULT '',
@@ -705,8 +717,21 @@ def init_db() -> None:
         )
         """
     )
+    ensure_column("service_drive_traffic_entries", "brand", "TEXT NOT NULL DEFAULT 'Kia'")
     ensure_column("service_drive_traffic_entries", "sales_note_salesperson_id", "INTEGER")
     ensure_column("service_drive_traffic_entries", "sales_note_salesperson_name", "TEXT NOT NULL DEFAULT ''")
+    db_execute(
+        """
+        CREATE TABLE IF NOT EXISTS service_drive_traffic_images (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            traffic_entry_id INTEGER NOT NULL,
+            original_filename TEXT NOT NULL,
+            stored_filename TEXT NOT NULL,
+            image_url TEXT NOT NULL,
+            created_ts REAL NOT NULL
+        )
+        """
+    )
     db_execute(
         """
         CREATE TABLE IF NOT EXISTS traffic_pdfs (
@@ -839,6 +864,36 @@ def service_note_out(row: Dict[str, Any]) -> ServiceDriveNoteOut:
     )
 
 
+def traffic_offer_image_out(row: Dict[str, Any]) -> ServiceDriveTrafficImageOut:
+    return ServiceDriveTrafficImageOut(
+        id=int(row.get("id") or 0),
+        original_filename=str(row.get("original_filename") or ""),
+        image_url=str(row.get("image_url") or ""),
+        created_ts=float(row.get("created_ts") or 0.0),
+    )
+
+
+def fetch_traffic_offer_image_map(traffic_ids: List[int]) -> Dict[int, List[ServiceDriveTrafficImageOut]]:
+    unique_ids = sorted({int(item) for item in traffic_ids if item})
+    if not unique_ids:
+        return {}
+    placeholders = ",".join("?" for _ in unique_ids)
+    rows = db_query_all(
+        f"""
+        SELECT *
+        FROM service_drive_traffic_images
+        WHERE traffic_entry_id IN ({placeholders})
+        ORDER BY created_ts ASC, id ASC
+        """,
+        tuple(unique_ids),
+    )
+    grouped: Dict[int, List[ServiceDriveTrafficImageOut]] = {traffic_id: [] for traffic_id in unique_ids}
+    for row in rows:
+        traffic_id = int(row.get("traffic_entry_id") or 0)
+        grouped.setdefault(traffic_id, []).append(traffic_offer_image_out(row))
+    return grouped
+
+
 def fetch_drive_team_map(date_values: List[str]) -> Dict[str, List[ServiceDriveTrafficAssignmentOut]]:
     unique_dates = sorted({value for value in date_values if value})
     if not unique_dates:
@@ -878,16 +933,20 @@ def fetch_drive_team_map(date_values: List[str]) -> Dict[str, List[ServiceDriveT
 def service_drive_traffic_out(
     row: Dict[str, Any],
     drive_team_map: Optional[Dict[str, List[ServiceDriveTrafficAssignmentOut]]] = None,
+    offer_image_map: Optional[Dict[int, List[ServiceDriveTrafficImageOut]]] = None,
 ) -> ServiceDriveTrafficOut:
     traffic_date = str(row.get("traffic_date") or "")
     team = (drive_team_map or {}).get(traffic_date, [])
+    traffic_id = int(row.get("id") or 0)
     return ServiceDriveTrafficOut(
-        id=int(row.get("id") or 0),
+        id=traffic_id,
         traffic_date=traffic_date,
+        brand=normalize_brand(str(row.get("brand") or "Kia")),
         customer_name=str(row.get("customer_name") or ""),
         vehicle_year=str(row.get("vehicle_year") or ""),
         model_make=str(row.get("model_make") or ""),
         offer_idea=str(row.get("offer_idea") or ""),
+        offer_images=(offer_image_map or {}).get(traffic_id, []),
         sales_notes=str(row.get("sales_notes") or ""),
         sales_note_salesperson_id=int(row["sales_note_salesperson_id"])
         if row.get("sales_note_salesperson_id") is not None
@@ -1689,17 +1748,19 @@ def fetch_service_drive_traffic(
 
     selected_rows = [row for row in month_rows if not resolved_date or str(row.get("traffic_date") or "") == resolved_date]
     drive_team_map = fetch_drive_team_map([str(row.get("traffic_date") or "") for row in selected_rows])
+    offer_image_map = fetch_traffic_offer_image_map([int(row.get("id") or 0) for row in selected_rows])
     return ServiceDriveTrafficListOut(
         month=resolved_month,
         selected_date=resolved_date,
         total=len(selected_rows),
         counts_by_date=counts_by_date,
-        entries=[service_drive_traffic_out(row, drive_team_map) for row in selected_rows],
+        entries=[service_drive_traffic_out(row, drive_team_map, offer_image_map) for row in selected_rows],
     )
 
 
 def create_service_drive_traffic_entry(payload: ServiceDriveTrafficIn) -> ServiceDriveTrafficOut:
     traffic_date = parse_iso_date(payload.traffic_date, "traffic_date").isoformat()
+    brand = normalize_brand(payload.brand)
     customer_name = normalize_name(payload.customer_name, "customer_name")
     vehicle_year = normalize_short_text(payload.vehicle_year, "vehicle_year", max_len=16)
     model_make = normalize_short_text(payload.model_make, "model_make", max_len=120)
@@ -1708,15 +1769,19 @@ def create_service_drive_traffic_entry(payload: ServiceDriveTrafficIn) -> Servic
     created_id = db_insert(
         """
         INSERT INTO service_drive_traffic_entries (
-            traffic_date, customer_name, vehicle_year, model_make, offer_idea, sales_notes, created_ts, updated_ts
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            traffic_date, brand, customer_name, vehicle_year, model_make, offer_idea, sales_notes, created_ts, updated_ts
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (traffic_date, customer_name, vehicle_year, model_make, offer_idea, "", now_ts, now_ts),
+        (traffic_date, brand, customer_name, vehicle_year, model_make, offer_idea, "", now_ts, now_ts),
     )
     row = get_service_drive_traffic_row(created_id)
     if not row:
         raise HTTPException(status_code=500, detail="failed to create service drive traffic entry")
-    return service_drive_traffic_out(row, fetch_drive_team_map([traffic_date]))
+    return service_drive_traffic_out(
+        row,
+        fetch_drive_team_map([traffic_date]),
+        fetch_traffic_offer_image_map([created_id]),
+    )
 
 
 def update_service_drive_traffic_entry(traffic_id: int, payload: ServiceDriveTrafficIn) -> ServiceDriveTrafficOut:
@@ -1724,6 +1789,7 @@ def update_service_drive_traffic_entry(traffic_id: int, payload: ServiceDriveTra
     if not existing:
         raise HTTPException(status_code=404, detail="service drive traffic entry not found")
     traffic_date = parse_iso_date(payload.traffic_date, "traffic_date").isoformat()
+    brand = normalize_brand(payload.brand)
     customer_name = normalize_name(payload.customer_name, "customer_name")
     vehicle_year = normalize_short_text(payload.vehicle_year, "vehicle_year", max_len=16)
     model_make = normalize_short_text(payload.model_make, "model_make", max_len=120)
@@ -1731,15 +1797,19 @@ def update_service_drive_traffic_entry(traffic_id: int, payload: ServiceDriveTra
     db_execute(
         """
         UPDATE service_drive_traffic_entries
-        SET traffic_date = ?, customer_name = ?, vehicle_year = ?, model_make = ?, offer_idea = ?, updated_ts = ?
+        SET traffic_date = ?, brand = ?, customer_name = ?, vehicle_year = ?, model_make = ?, offer_idea = ?, updated_ts = ?
         WHERE id = ?
         """,
-        (traffic_date, customer_name, vehicle_year, model_make, offer_idea, time.time(), traffic_id),
+        (traffic_date, brand, customer_name, vehicle_year, model_make, offer_idea, time.time(), traffic_id),
     )
     row = get_service_drive_traffic_row(traffic_id)
     if not row:
         raise HTTPException(status_code=500, detail="failed to update service drive traffic entry")
-    return service_drive_traffic_out(row, fetch_drive_team_map([traffic_date]))
+    return service_drive_traffic_out(
+        row,
+        fetch_drive_team_map([traffic_date]),
+        fetch_traffic_offer_image_map([traffic_id]),
+    )
 
 
 def update_service_drive_traffic_sales_note(traffic_id: int, payload: ServiceDriveTrafficSalesNoteIn) -> ServiceDriveTrafficOut:
@@ -1775,7 +1845,47 @@ def update_service_drive_traffic_sales_note(traffic_id: int, payload: ServiceDri
     saved = get_service_drive_traffic_row(traffic_id)
     if not saved:
         raise HTTPException(status_code=500, detail="failed to update traffic notes")
-    return service_drive_traffic_out(saved, {traffic_date: team})
+    return service_drive_traffic_out(
+        saved,
+        {traffic_date: team},
+        fetch_traffic_offer_image_map([traffic_id]),
+    )
+
+
+def add_service_drive_traffic_images(traffic_id: int, uploads: List[UploadFile]) -> ServiceDriveTrafficOut:
+    row = get_service_drive_traffic_row(traffic_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="service drive traffic entry not found")
+    files = [upload for upload in uploads if str(upload.filename or "").strip()]
+    if not files:
+        raise HTTPException(status_code=400, detail="at least one image file is required")
+    now_ts = time.time()
+    for upload in files:
+        original_filename, stored_name, image_url = save_upload_file(
+            upload,
+            folder_path=TRAFFIC_OFFER_ROOT,
+            folder_name="traffic-offers",
+            allowed_exts={".png", ".jpg", ".jpeg", ".webp", ".gif"},
+            max_bytes=12 * 1024 * 1024,
+        )
+        db_insert(
+            """
+            INSERT INTO service_drive_traffic_images (
+                traffic_entry_id, original_filename, stored_filename, image_url, created_ts
+            ) VALUES (?, ?, ?, ?, ?)
+            """,
+            (traffic_id, original_filename, stored_name, image_url, now_ts),
+        )
+        now_ts += 0.001
+    saved = get_service_drive_traffic_row(traffic_id)
+    if not saved:
+        raise HTTPException(status_code=500, detail="failed to refresh service drive traffic entry")
+    traffic_date = str(saved.get("traffic_date") or "")
+    return service_drive_traffic_out(
+        saved,
+        fetch_drive_team_map([traffic_date]),
+        fetch_traffic_offer_image_map([traffic_id]),
+    )
 
 
 def fetch_traffic_pdfs() -> TrafficPdfListOut:
@@ -1979,6 +2089,16 @@ def put_service_drive_traffic(
 ) -> ServiceDriveTrafficOut:
     require_admin(x_admin_token)
     return update_service_drive_traffic_entry(traffic_id, payload)
+
+
+@app.post("/api/admin/service-drive/traffic/{traffic_id}/images", response_model=ServiceDriveTrafficOut)
+def post_service_drive_traffic_images(
+    traffic_id: int,
+    files: List[UploadFile] = File(...),
+    x_admin_token: Optional[str] = Header(default=None),
+) -> ServiceDriveTrafficOut:
+    require_admin(x_admin_token)
+    return add_service_drive_traffic_images(traffic_id, files)
 
 
 @app.post("/api/admin/traffic/pdfs", response_model=TrafficPdfOut)

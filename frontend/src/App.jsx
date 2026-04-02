@@ -25,6 +25,7 @@ import {
   updateSalesperson,
   updateServiceDriveAssignment,
   updateServiceDriveTraffic,
+  uploadServiceDriveTrafficImages,
   updateServiceDriveTrafficSales,
 } from "./api.js";
 import "./App.css";
@@ -47,6 +48,7 @@ const ADMIN_SECTIONS = [
 ];
 
 const DEALERSHIP_ORDER = ["Kia", "Mazda", "Outlet"];
+const TRAFFIC_BRANDS = ["Kia", "Mazda"];
 const TRAFFIC_URL = "https://bokbbui-production.up.railway.app/";
 const CALENDAR_WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
@@ -214,6 +216,25 @@ function EditorCard({ title, children }) {
   );
 }
 
+function TrafficOfferGallery({ images, brand }) {
+  if (!images?.length) return null;
+  return (
+    <div className={`traffic-offer-gallery traffic-offer-gallery--${String(brand || "kia").toLowerCase()}`}>
+      {images.map((image) => (
+        <a
+          key={image.id}
+          className="traffic-offer-gallery__item"
+          href={assetUrl(image.image_url)}
+          target="_blank"
+          rel="noreferrer"
+        >
+          <img src={assetUrl(image.image_url)} alt={image.original_filename || "Offer screenshot"} />
+        </a>
+      ))}
+    </div>
+  );
+}
+
 function TrafficDayPicker({ cells, countsByDate, selectedDate, today, onSelect, serviceDayMap, idPrefix }) {
   return (
     <>
@@ -297,11 +318,16 @@ export default function App() {
   const [bdcForm, setBdcForm] = useState({ name: "", active: true });
   const [leadForm, setLeadForm] = useState({ bdcAgentId: "", leadStore: "Kia", customerName: "", customerPhone: "" });
   const [trafficEntryForm, setTrafficEntryForm] = useState({
+    brand: "Kia",
     customerName: "",
     vehicleYear: "",
     modelMake: "",
     offerIdea: "",
   });
+  const [trafficEntryFiles, setTrafficEntryFiles] = useState([]);
+  const [trafficEntryFileKey, setTrafficEntryFileKey] = useState(0);
+  const [trafficRowUploadFiles, setTrafficRowUploadFiles] = useState({});
+  const [trafficRowUploadKeys, setTrafficRowUploadKeys] = useState({});
   const [trafficPdfForm, setTrafficPdfForm] = useState({ title: "", file: null });
   const [specialForm, setSpecialForm] = useState({ title: "", tag: "", file: null });
   const [trafficUploadKey, setTrafficUploadKey] = useState(0);
@@ -327,6 +353,10 @@ export default function App() {
   const selectedSpecial = specials.find((item) => item.id === selectedSpecialId) || specials[0] || null;
   const selectedTrafficSalesperson =
     activeSales.find((person) => String(person.id) === String(selectedTrafficSalesId)) || null;
+  const selectedTrafficSalesStore =
+    selectedTrafficSalesperson && TRAFFIC_BRANDS.includes(selectedTrafficSalesperson.dealership)
+      ? selectedTrafficSalesperson.dealership
+      : null;
   const trafficMonthCells = buildMonthDateCells(trafficMonth);
   const selectedTrafficCount = serviceTrafficData.counts_by_date?.[selectedTrafficDate] || 0;
   const trafficMonthTotal = Object.values(serviceTrafficData.counts_by_date || {}).reduce(
@@ -729,24 +759,63 @@ export default function App() {
     }));
   }
 
+  function resetTrafficEntryForm() {
+    setTrafficEntryForm({
+      brand: "Kia",
+      customerName: "",
+      vehicleYear: "",
+      modelMake: "",
+      offerIdea: "",
+    });
+    setTrafficEntryFiles([]);
+    setTrafficEntryFileKey((current) => current + 1);
+  }
+
+  function setTrafficRowFiles(entryId, files) {
+    setTrafficRowUploadFiles((current) => ({
+      ...current,
+      [entryId]: Array.from(files || []),
+    }));
+  }
+
+  function clearTrafficRowFiles(entryId) {
+    setTrafficRowUploadFiles((current) => {
+      const next = { ...current };
+      delete next[entryId];
+      return next;
+    });
+    setTrafficRowUploadKeys((current) => ({
+      ...current,
+      [entryId]: (current[entryId] || 0) + 1,
+    }));
+  }
+
+  async function uploadTrafficImages(entryId, files) {
+    const uploads = Array.from(files || []);
+    if (!uploads.length) return null;
+    const formData = new FormData();
+    uploads.forEach((file) => formData.append("files", file));
+    return await uploadServiceDriveTrafficImages(adminToken, entryId, formData);
+  }
+
   async function addTrafficEntry(event) {
     event.preventDefault();
     setBusy("add-traffic-entry");
     setError("");
     try {
-      await createServiceDriveTraffic(adminToken, {
+      let saved = await createServiceDriveTraffic(adminToken, {
         traffic_date: selectedTrafficDate,
+        brand: trafficEntryForm.brand,
         customer_name: trafficEntryForm.customerName,
         vehicle_year: trafficEntryForm.vehicleYear,
         model_make: trafficEntryForm.modelMake,
         offer_idea: trafficEntryForm.offerIdea,
       });
-      setTrafficEntryForm({
-        customerName: "",
-        vehicleYear: "",
-        modelMake: "",
-        offerIdea: "",
-      });
+      if (trafficEntryFiles.length) {
+        saved = (await uploadTrafficImages(saved.id, trafficEntryFiles)) || saved;
+      }
+      patchTrafficEntry(saved.id, saved);
+      resetTrafficEntryForm();
       await refreshServiceTraffic();
     } catch (errorValue) {
       setError(errText(errorValue));
@@ -761,12 +830,33 @@ export default function App() {
     try {
       const saved = await updateServiceDriveTraffic(adminToken, entry.id, {
         traffic_date: entry.traffic_date,
+        brand: entry.brand,
         customer_name: entry.customer_name,
         vehicle_year: entry.vehicle_year,
         model_make: entry.model_make,
         offer_idea: entry.offer_idea,
       });
       patchTrafficEntry(entry.id, saved);
+      await refreshServiceTraffic();
+    } catch (errorValue) {
+      setError(errText(errorValue));
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function uploadTrafficRowImages(entry) {
+    const files = trafficRowUploadFiles[entry.id] || [];
+    if (!files.length) {
+      setError("Choose one or more screenshots first.");
+      return;
+    }
+    setBusy(`traffic-images-${entry.id}`);
+    setError("");
+    try {
+      const saved = await uploadTrafficImages(entry.id, files);
+      if (saved) patchTrafficEntry(entry.id, saved);
+      clearTrafficRowFiles(entry.id);
       await refreshServiceTraffic();
     } catch (errorValue) {
       setError(errText(errorValue));
@@ -1100,18 +1190,27 @@ export default function App() {
             <div className="notes-list">
               {serviceTrafficData.entries.length ? (
                 serviceTrafficData.entries.map((entry) => {
+                  const brandKey = String(entry.brand || "Kia").toLowerCase();
+                  const matchesSelectedStore = Boolean(selectedTrafficSalesStore && selectedTrafficSalesStore === entry.brand);
                   return (
-                    <article key={entry.id} className="note-card">
+                    <article
+                      key={entry.id}
+                      className={`note-card note-card--${brandKey} ${matchesSelectedStore ? "note-card--store-match" : ""}`}
+                    >
                       <div className="note-card__top">
                         <div>
                           <span className="eyebrow">Service drive traffic</span>
                           <h3>{entry.customer_name}</h3>
                           <p className="note-card__subtitle">{entry.traffic_date}</p>
                         </div>
-                        <span className="brand-pill brand-pill--kia">Prospect</span>
+                        <span className={`brand-pill brand-pill--${brandKey}`}>{entry.brand}</span>
                       </div>
 
                       <div className="note-meta">
+                        <div className={`meta-item meta-item--brand meta-item--${brandKey}`}>
+                          <span>Store</span>
+                          <strong>{entry.brand}</strong>
+                        </div>
                         <div className="meta-item">
                           <span>Year</span>
                           <strong>{entry.vehicle_year || "N/A"}</strong>
@@ -1130,6 +1229,7 @@ export default function App() {
                         <div className="note-copy__block is-readonly">
                           <span>Offer idea</span>
                           <p>{entry.offer_idea || "No offer idea entered yet."}</p>
+                          <TrafficOfferGallery images={entry.offer_images} brand={entry.brand} />
                         </div>
 
                         <label className="note-copy__block">
@@ -1147,6 +1247,11 @@ export default function App() {
                           {selectedTrafficHasAuthor
                             ? `Saving with name tag: ${selectedTrafficSalesperson?.name || "selected salesperson"}`
                             : "Saving with no name tag. Select a name above only if you want it attached to the note."}
+                          {selectedTrafficSalesStore
+                            ? matchesSelectedStore
+                              ? ` • ${entry.brand} is your selected store`
+                              : ` • ${entry.brand} belongs to the other store`
+                            : ""}
                         </small>
                         <button
                           type="button"
@@ -2125,12 +2230,7 @@ export default function App() {
                               type="button"
                               className="secondary"
                               onClick={() =>
-                                setTrafficEntryForm({
-                                  customerName: "",
-                                  vehicleYear: "",
-                                  modelMake: "",
-                                  offerIdea: "",
-                                })
+                                resetTrafficEntryForm()
                               }
                             >
                               Clear Fields
@@ -2139,6 +2239,21 @@ export default function App() {
 
                           <form className="form" onSubmit={addTrafficEntry}>
                             <div className="traffic-entry-grid">
+                              <label>
+                                <span>Store</span>
+                                <select
+                                  value={trafficEntryForm.brand}
+                                  onChange={(event) =>
+                                    setTrafficEntryForm((current) => ({ ...current, brand: event.target.value }))
+                                  }
+                                >
+                                  {TRAFFIC_BRANDS.map((brand) => (
+                                    <option key={`traffic-form-${brand}`} value={brand}>
+                                      {brand}
+                                    </option>
+                                  ))}
+                                </select>
+                              </label>
                               <label>
                                 <span>Name</span>
                                 <input
@@ -2180,6 +2295,17 @@ export default function App() {
                                   placeholder="Lease idea, trade angle, payment idea, or next step"
                                 />
                               </label>
+                              <label className="traffic-entry-grid__wide">
+                                <span>Offer screenshots</span>
+                                <input
+                                  key={trafficEntryFileKey}
+                                  type="file"
+                                  accept="image/*"
+                                  multiple
+                                  onChange={(event) => setTrafficEntryFiles(Array.from(event.target.files || []))}
+                                />
+                                <small>{trafficEntryFiles.length ? `${trafficEntryFiles.length} image(s) ready to upload` : "Optional screenshots for the offer idea"}</small>
+                              </label>
                             </div>
                             <button type="submit" disabled={busy === "add-traffic-entry"}>
                               {busy === "add-traffic-entry" ? "Adding..." : "+ Add Traffic Row"}
@@ -2191,15 +2317,17 @@ export default function App() {
 
                     <div className="notes-list">
                       {serviceTrafficData.entries.length ? (
-                        serviceTrafficData.entries.map((entry) => (
-                          <article key={entry.id} className="note-card is-admin">
+                        serviceTrafficData.entries.map((entry) => {
+                          const brandKey = String(entry.brand || "Kia").toLowerCase();
+                          return (
+                          <article key={entry.id} className={`note-card note-card--${brandKey} is-admin`}>
                             <div className="note-card__top">
                               <div>
                                 <span className="eyebrow">Traffic row</span>
                                 <h3>{entry.customer_name}</h3>
                                 <p className="note-card__subtitle">{entry.traffic_date}</p>
                               </div>
-                              <span className="brand-pill brand-pill--kia">Prospect</span>
+                              <span className={`brand-pill brand-pill--${brandKey}`}>{entry.brand}</span>
                             </div>
 
                             <div className="traffic-entry-grid">
@@ -2210,6 +2338,19 @@ export default function App() {
                                   value={entry.traffic_date}
                                   onChange={(event) => patchTrafficEntry(entry.id, { traffic_date: event.target.value })}
                                 />
+                              </label>
+                              <label>
+                                <span>Store</span>
+                                <select
+                                  value={entry.brand}
+                                  onChange={(event) => patchTrafficEntry(entry.id, { brand: event.target.value })}
+                                >
+                                  {TRAFFIC_BRANDS.map((brand) => (
+                                    <option key={`traffic-row-${entry.id}-${brand}`} value={brand}>
+                                      {brand}
+                                    </option>
+                                  ))}
+                                </select>
                               </label>
                               <label>
                                 <span>Name</span>
@@ -2242,11 +2383,33 @@ export default function App() {
                                   value={entry.offer_idea}
                                   onChange={(event) => patchTrafficEntry(entry.id, { offer_idea: event.target.value })}
                                 />
+                                <TrafficOfferGallery images={entry.offer_images} brand={entry.brand} />
                               </label>
                               <div className="note-copy__block is-readonly">
                                 <span>Salesperson notes</span>
                                 <p>{entry.sales_notes || "No salesperson notes saved yet."}</p>
                               </div>
+                            </div>
+
+                            <div className="traffic-upload-row">
+                              <label className="traffic-upload-row__input">
+                                <span>Add offer screenshots</span>
+                                <input
+                                  key={trafficRowUploadKeys[entry.id] || 0}
+                                  type="file"
+                                  accept="image/*"
+                                  multiple
+                                  onChange={(event) => setTrafficRowFiles(entry.id, event.target.files || [])}
+                                />
+                              </label>
+                              <button
+                                type="button"
+                                className="secondary"
+                                onClick={() => uploadTrafficRowImages(entry)}
+                                disabled={busy === `traffic-images-${entry.id}` || !(trafficRowUploadFiles[entry.id] || []).length}
+                              >
+                                {busy === `traffic-images-${entry.id}` ? "Uploading..." : "Upload Images"}
+                              </button>
                             </div>
 
                             <div className="note-actions">
@@ -2263,7 +2426,7 @@ export default function App() {
                               </button>
                             </div>
                           </article>
-                        ))
+                        )})
                       ) : (
                         <div className="empty">No traffic rows have been entered for this day.</div>
                       )}
