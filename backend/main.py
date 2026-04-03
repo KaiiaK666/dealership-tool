@@ -519,6 +519,10 @@ def month_date_bounds(month_key: str) -> Tuple[str, str]:
     return start_day.isoformat(), end_day.isoformat()
 
 
+def is_sunday(day_value: date) -> bool:
+    return day_value.weekday() == 6
+
+
 def fetch_days_off_lookup(start_day: date, end_day: date) -> set[Tuple[int, str]]:
     end_exclusive = end_day + timedelta(days=1)
     rows = db_query_all(
@@ -1236,6 +1240,8 @@ def pick_round_robin_person(
     working_day: date,
     cursor: int,
 ) -> Tuple[Optional[SalespersonOut], int, List[SalespersonOut]]:
+    if is_sunday(working_day):
+        return None, cursor, []
     if not pool:
         return None, 0, []
 
@@ -1284,6 +1290,16 @@ def generate_service_schedule(month_key: str, overwrite: bool = False) -> None:
     for service_day in month_days:
         for brand in SERVICE_BRANDS:
             row = existing_map.get((service_day.isoformat(), brand)) or {}
+            if is_sunday(service_day):
+                db_execute(
+                    """
+                    UPDATE service_drive_assignments
+                    SET salesperson_id = ?, updated_ts = ?
+                    WHERE schedule_date = ? AND brand = ?
+                    """,
+                    (None, time.time(), service_day.isoformat(), brand),
+                )
+                continue
             if not overwrite and row.get("salesperson_id") is not None:
                 continue
             picked, next_pointer = pick_service_person(pools.get(brand, []), service_day, pointers[brand], off_lookup)
@@ -1371,8 +1387,12 @@ def fetch_service_month(month_key: str) -> ServiceMonthOut:
     assigned_slots = 0
     for service_day in month_days:
         service_date = service_day.isoformat()
-        kia = slots_by_day[service_date]["Kia"]
-        mazda = slots_by_day[service_date]["Mazda"]
+        if is_sunday(service_day):
+            kia = ServiceSlotOut(brand="Kia")
+            mazda = ServiceSlotOut(brand="Mazda")
+        else:
+            kia = slots_by_day[service_date]["Kia"]
+            mazda = slots_by_day[service_date]["Mazda"]
         if kia.salesperson_id is not None:
             assigned_slots += 1
         if mazda.salesperson_id is not None:
@@ -1388,10 +1408,11 @@ def fetch_service_month(month_key: str) -> ServiceMonthOut:
         )
 
     total_days = len(days)
+    open_service_days = sum(1 for service_day in month_days if not is_sunday(service_day))
     return ServiceMonthOut(
         month=month_key,
         total_days=total_days,
-        total_slots=total_days * len(SERVICE_BRANDS),
+        total_slots=open_service_days * len(SERVICE_BRANDS),
         assigned_slots=assigned_slots,
         days=days,
     )
@@ -1402,6 +1423,8 @@ def update_service_assignment(schedule_date: str, brand: str, salesperson_id: Op
     month_key = service_day.strftime("%Y-%m")
     ensure_month_slots(month_key)
     brand_name = normalize_brand(brand)
+    if is_sunday(service_day) and salesperson_id is not None:
+        raise HTTPException(status_code=400, detail="service drive is closed on Sundays")
     resolved_id: Optional[int] = None
     if salesperson_id is not None:
         person = get_salesperson_row(int(salesperson_id))
@@ -1469,6 +1492,8 @@ def build_bdc_state(dealership: Optional[str] = None) -> BdcStateOut:
 
 
 def assign_next_lead(payload: BdcLeadAssignIn) -> BdcAssignmentOut:
+    if is_sunday(now_local().date()):
+        raise HTTPException(status_code=400, detail="BDC round robin is closed on Sundays")
     lead_store = normalize_dealership(payload.lead_store or "Kia")
     salespeople = fetch_round_robin_salespeople(lead_store)
     if not salespeople:

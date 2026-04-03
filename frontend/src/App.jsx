@@ -181,6 +181,11 @@ function shortPersonName(name) {
   return name.split(" ")[0];
 }
 
+function isSundayDate(value) {
+  if (!value) return false;
+  return dateParts(value).weekdayIndex === 0;
+}
+
 function LogTable({ entries, empty }) {
   if (!entries.length) return <div className="empty">{empty}</div>;
   return (
@@ -347,6 +352,7 @@ export default function App() {
   const activeLeadStoreSales = activeSales.filter((person) => person.dealership === leadForm.leadStore);
   const serviceEligible = activeSales.filter((person) => person.dealership !== "Outlet");
   const activeBdc = bdcAgents.filter((agent) => agent.active);
+  const bdcClosedToday = isSundayDate(today);
   const serviceCalendarCells = buildCalendarCells(serviceMonth?.days || []);
   const serviceCalendarPrintCells = buildPrintCalendarCells(serviceMonth?.days || []);
   const daysOffMonthCells = buildMonthDateCells(daysOffMonth);
@@ -1116,6 +1122,7 @@ export default function App() {
                   }
 
                   const parts = dateParts(day.date);
+                  const isSunday = parts.weekdayIndex === 0;
                   const trafficCount =
                     serviceTrafficData.month === month ? serviceTrafficData.counts_by_date?.[day.date] || 0 : 0;
 
@@ -1156,10 +1163,10 @@ export default function App() {
                           <div key={brand} className="assignment">
                             <div className="assignment__summary">
                               <span className="assignment__brand">{brand}</span>
-                              <strong>{slot.salesperson_name || "Open"}</strong>
-                              <small>{slot.salesperson_dealership || "No assignment"}</small>
+                              <strong>{isSunday ? "Closed" : slot.salesperson_name || "Open"}</strong>
+                              <small>{isSunday ? "Sunday" : slot.salesperson_dealership || "No assignment"}</small>
                             </div>
-                            {adminSession ? (
+                            {adminSession && !isSunday ? (
                               <select
                                 className="assignment__select"
                                 value={slot.salesperson_id ?? ""}
@@ -1185,8 +1192,11 @@ export default function App() {
 
             <div className="calendar-print-sheet">
               <div className="calendar-print-sheet__title">
-                <span className="eyebrow">Service drive calendar</span>
-                <h2>{monthLabel(month)}</h2>
+                <img className="calendar-print-sheet__logo" src="/logo-head.png" alt="Bert Ogden Auto Group" />
+                <div className="calendar-print-sheet__title-copy">
+                  <span className="eyebrow">Service drive calendar</span>
+                  <h2>{monthLabel(month)}</h2>
+                </div>
               </div>
               <div className="calendar-print-sheet__weekdays">
                 {CALENDAR_WEEKDAYS.map((label) => (
@@ -1204,6 +1214,7 @@ export default function App() {
                   }
 
                   const parts = dateParts(day.date);
+                  const isSunday = isSundayDate(day.date);
                   return (
                     <article
                       key={`print-${day.date}`}
@@ -1216,15 +1227,21 @@ export default function App() {
                       <div className="calendar-print-cell__assignments">
                         <div className="calendar-print-line calendar-print-line--kia">
                           <span>Kia Service Drive:</span>
-                          <b>{shortPersonName(day.kia?.salesperson_name)}</b>
+                          <b className="calendar-print-name-bubble calendar-print-name-bubble--kia">
+                            {isSunday ? "Closed" : shortPersonName(day.kia?.salesperson_name)}
+                          </b>
                         </div>
                         <div className="calendar-print-line calendar-print-line--mazda">
                           <span>Mazda Service Drive:</span>
-                          <b>{shortPersonName(day.mazda?.salesperson_name)}</b>
+                          <b className="calendar-print-name-bubble calendar-print-name-bubble--mazda">
+                            {isSunday ? "Closed" : shortPersonName(day.mazda?.salesperson_name)}
+                          </b>
                         </div>
                         <div className="calendar-print-line calendar-print-line--off">
                           <span>Off:</span>
-                          <b>{day.people_off?.length ? day.people_off.map((name) => shortPersonName(name)).join(", ") : "None"}</b>
+                          <b className="calendar-print-name-bubble calendar-print-name-bubble--off">
+                            {day.people_off?.length ? day.people_off.map((name) => shortPersonName(name)).join(", ") : "None"}
+                          </b>
                         </div>
                       </div>
                     </article>
@@ -1656,7 +1673,9 @@ export default function App() {
                   <span>Next up for {leadForm.leadStore}</span>
                   <strong>{bdcState?.next_salesperson?.name || "No active salesperson"}</strong>
                   <small>
-                    {bdcState?.next_salesperson?.dealership ||
+                    {bdcClosedToday
+                      ? "Closed on Sundays"
+                      : bdcState?.next_salesperson?.dealership ||
                       (activeLeadStoreSales.length
                         ? `Everyone in ${leadForm.leadStore} is scheduled off today`
                         : `No active ${leadForm.leadStore} salespeople`)}
@@ -1665,7 +1684,7 @@ export default function App() {
                 <button
                   type="button"
                   onClick={assignLead}
-                  disabled={busy === "assign" || !activeBdc.length || !bdcState?.next_salesperson}
+                  disabled={busy === "assign" || bdcClosedToday || !activeBdc.length || !bdcState?.next_salesperson}
                 >
                   {busy === "assign" ? "Assigning..." : "Assign Next Lead"}
                 </button>
@@ -1680,11 +1699,13 @@ export default function App() {
               </div>
             ) : null}
 
-            {activeLeadStoreSales.length && !bdcState?.next_salesperson ? (
+            {!bdcClosedToday && activeLeadStoreSales.length && !bdcState?.next_salesperson ? (
               <div className="notice">
                 Nobody is eligible in the {leadForm.leadStore} round robin today because every active salesperson in that store is scheduled off.
               </div>
             ) : null}
+
+            {bdcClosedToday ? <div className="notice">BDC round robin is closed on Sundays.</div> : null}
 
             <div className="panel">
               <div className="row">
