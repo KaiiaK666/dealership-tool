@@ -1991,6 +1991,56 @@ def create_special(title: str, tag: str, upload: UploadFile) -> SpecialOut:
     return special_out(row)
 
 
+def get_special_row(special_id: int) -> Optional[Dict[str, Any]]:
+    return db_query_one("SELECT * FROM specials WHERE id = ?", (int(special_id),))
+
+
+def remove_uploaded_file(folder_path: str, stored_filename: Optional[str]) -> None:
+    if not stored_filename:
+        return
+    try:
+        os.remove(os.path.join(folder_path, stored_filename))
+    except OSError:
+        pass
+
+
+def update_special(special_id: int, title: str, tag: str, upload: Optional[UploadFile]) -> SpecialOut:
+    existing = get_special_row(special_id)
+    if not existing:
+        raise HTTPException(status_code=404, detail="special not found")
+
+    resolved_title = normalize_short_text(title or existing.get("title") or "", "title", max_len=120)
+    resolved_tag = normalize_short_text(tag or existing.get("tag") or resolved_title, "tag", max_len=80)
+    original_filename = str(existing.get("original_filename") or "")
+    stored_filename = str(existing.get("stored_filename") or "")
+    image_url = str(existing.get("image_url") or "")
+
+    if upload and str(upload.filename or "").strip():
+        original_filename, stored_filename, image_url = save_upload_file(
+            upload,
+            folder_path=SPECIALS_ROOT,
+            folder_name="specials",
+            allowed_exts={".png", ".jpg", ".jpeg", ".webp"},
+            max_bytes=12 * 1024 * 1024,
+        )
+        remove_uploaded_file(SPECIALS_ROOT, existing.get("stored_filename"))
+    elif upload:
+        upload.file.close()
+
+    db_execute(
+        """
+        UPDATE specials
+        SET title = ?, tag = ?, original_filename = ?, stored_filename = ?, image_url = ?
+        WHERE id = ?
+        """,
+        (resolved_title, resolved_tag, original_filename, stored_filename, image_url, int(special_id)),
+    )
+    row = get_special_row(special_id)
+    if not row:
+        raise HTTPException(status_code=500, detail="failed to update special")
+    return special_out(row)
+
+
 @app.on_event("startup")
 def on_startup() -> None:
     init_db()
@@ -2175,6 +2225,18 @@ def post_special(
 ) -> SpecialOut:
     require_admin(x_admin_token)
     return create_special(title, tag, file)
+
+
+@app.put("/api/admin/specials/{special_id}", response_model=SpecialOut)
+def put_special(
+    special_id: int,
+    title: str = Form(default=""),
+    tag: str = Form(default=""),
+    file: Optional[UploadFile] = File(default=None),
+    x_admin_token: Optional[str] = Header(default=None),
+) -> SpecialOut:
+    require_admin(x_admin_token)
+    return update_special(special_id, title, tag, file)
 
 
 @app.post("/api/admin/service-drive/notes", response_model=ServiceDriveNoteOut)

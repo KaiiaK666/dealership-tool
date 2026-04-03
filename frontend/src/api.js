@@ -124,6 +124,8 @@ export const createTrafficPdf = (token, formData) =>
   request("/api/admin/traffic/pdfs", { method: "POST", body: formData, headers: adminHeaders(token), timeout: 60000 });
 export const createSpecial = (token, formData) =>
   request("/api/admin/specials", { method: "POST", body: formData, headers: adminHeaders(token), timeout: 60000 });
+export const updateSpecial = (token, id, formData) =>
+  request(`/api/admin/specials/${id}`, { method: "PUT", body: formData, headers: adminHeaders(token), timeout: 60000 });
 export const createServiceDriveNote = (token, payload) =>
   request("/api/admin/service-drive/notes", { method: "POST", body: payload, headers: adminHeaders(token) });
 export const updateServiceDriveNote = (token, id, payload) =>

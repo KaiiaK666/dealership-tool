@@ -23,6 +23,7 @@ import {
   replaceAdminDaysOffMonth,
   updateBdcAgent,
   updateSalesperson,
+  updateSpecial,
   updateServiceDriveAssignment,
   updateServiceDriveTraffic,
   uploadServiceDriveTrafficImages,
@@ -331,7 +332,7 @@ export default function App() {
   const [trafficRowUploadFiles, setTrafficRowUploadFiles] = useState({});
   const [trafficRowUploadKeys, setTrafficRowUploadKeys] = useState({});
   const [trafficPdfForm, setTrafficPdfForm] = useState({ title: "", file: null });
-  const [specialForm, setSpecialForm] = useState({ title: "", tag: "", file: null });
+  const [specialForm, setSpecialForm] = useState({ editingId: null, title: "", tag: "", file: null });
   const [trafficUploadKey, setTrafficUploadKey] = useState(0);
   const [specialUploadKey, setSpecialUploadKey] = useState(0);
 
@@ -943,7 +944,7 @@ export default function App() {
 
   async function uploadSpecial(event) {
     event.preventDefault();
-    if (!specialForm.file) {
+    if (!specialForm.editingId && !specialForm.file) {
       setError("Choose a specials image first.");
       return;
     }
@@ -953,9 +954,18 @@ export default function App() {
       const formData = new FormData();
       formData.append("title", specialForm.title);
       formData.append("tag", specialForm.tag);
-      formData.append("file", specialForm.file);
-      const created = await createSpecial(adminToken, formData);
-      setSpecialForm({ title: "", tag: "", file: null });
+      if (specialForm.file) {
+        formData.append("file", specialForm.file);
+      }
+      const created = specialForm.editingId
+        ? await updateSpecial(adminToken, specialForm.editingId, formData)
+        : await createSpecial(adminToken, formData);
+      setSpecialForm({
+        editingId: created.id,
+        title: created.title,
+        tag: created.tag,
+        file: null,
+      });
       setSpecialUploadKey((current) => current + 1);
       await refreshSpecials();
       setSelectedSpecialId(created.id);
@@ -964,6 +974,22 @@ export default function App() {
     } finally {
       setBusy("");
     }
+  }
+
+  function resetSpecialForm() {
+    setSpecialForm({ editingId: null, title: "", tag: "", file: null });
+    setSpecialUploadKey((current) => current + 1);
+  }
+
+  function beginSpecialEdit(item) {
+    setSelectedSpecialId(item.id);
+    setSpecialForm({
+      editingId: item.id,
+      title: item.title,
+      tag: item.tag,
+      file: null,
+    });
+    setSpecialUploadKey((current) => current + 1);
   }
 
   async function assignLead() {
@@ -2745,8 +2771,18 @@ export default function App() {
                   <>
                     <div className="admin-grid">
                       <div className="panel">
-                        <span className="eyebrow">Upload special</span>
+                        <span className="eyebrow">{specialForm.editingId ? "Edit special" : "Upload special"}</span>
                         <h3>1080 x 1080 offer tile</h3>
+                        {specialForm.editingId && selectedSpecial ? (
+                          <div className="asset-card">
+                            <strong>Editing: {selectedSpecial.title}</strong>
+                            <p>
+                              Tag: {selectedSpecial.tag}
+                              <br />
+                              Leave the image field empty if you only want to change the title or tag.
+                            </p>
+                          </div>
+                        ) : null}
                         <form className="form" onSubmit={uploadSpecial}>
                           <label>
                             <span>Title</span>
@@ -2775,15 +2811,29 @@ export default function App() {
                               }
                             />
                           </label>
-                          <button type="submit" disabled={busy === "upload-special"}>
-                            {busy === "upload-special" ? "Uploading..." : "Upload Special"}
-                          </button>
+                          <div className="controls">
+                            <button type="submit" disabled={busy === "upload-special"}>
+                              {busy === "upload-special"
+                                ? specialForm.editingId
+                                  ? "Saving..."
+                                  : "Uploading..."
+                                : specialForm.editingId
+                                  ? "Save Changes"
+                                  : "Upload Special"}
+                            </button>
+                            {specialForm.editingId ? (
+                              <button type="button" className="secondary" onClick={resetSpecialForm}>
+                                Create New Tile
+                              </button>
+                            ) : null}
+                          </div>
                         </form>
                       </div>
 
                       <div className="panel">
                         <span className="eyebrow">Live specials</span>
                         <h3>Current uploaded graphics</h3>
+                        <p className="admin-note">Click any tile to edit its title, tag, or replace the image.</p>
                         <div className="specials-grid specials-grid--admin">
                           {specials.length ? (
                             specials.map((item) => (
@@ -2791,7 +2841,7 @@ export default function App() {
                                 key={`admin-special-${item.id}`}
                                 type="button"
                                 className={`special-card ${selectedSpecial?.id === item.id ? "is-active" : ""}`}
-                                onClick={() => setSelectedSpecialId(item.id)}
+                                onClick={() => beginSpecialEdit(item)}
                               >
                                 <img src={assetUrl(item.image_url)} alt={item.title} />
                                 <div className="special-card__copy">
