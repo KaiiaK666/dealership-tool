@@ -325,6 +325,10 @@ label span,
   overflow-x: hidden;
 }
 
+.calendar-print-header {
+  display: none;
+}
+
 .calendar-board__weekdays,
 .calendar-grid {
   width: 100%;
@@ -1659,6 +1663,187 @@ button.special-card:hover:not(:disabled) {
   border: 1px dashed rgba(31, 37, 43, 0.16);
   color: var(--muted);
   background: rgba(255, 255, 255, 0.56);
+}
+
+@media print {
+  @page {
+    size: landscape;
+    margin: 0.45in;
+  }
+
+  html,
+  body,
+  #root {
+    min-height: auto;
+    background: #fff;
+  }
+
+  body {
+    background: #fff !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  .app {
+    width: 100%;
+    max-width: none;
+    padding: 0;
+    gap: 0.18in;
+  }
+
+  .hero,
+  .tabs,
+  .notice,
+  .stats,
+  .service-calendar-toolbar,
+  .calendar-day__traffic,
+  .assignment__select {
+    display: none !important;
+  }
+
+  .service-calendar-section {
+    gap: 0.18in;
+  }
+
+  .calendar-print-header {
+    display: grid;
+    gap: 4px;
+  }
+
+  .calendar-print-header .eyebrow {
+    margin-bottom: 0;
+    color: #25303b;
+  }
+
+  .calendar-print-header h1 {
+    margin: 0;
+    font-size: 24pt;
+    line-height: 1;
+    letter-spacing: -0.04em;
+  }
+
+  .calendar-print-header p {
+    margin: 0;
+    color: #4b5560;
+    font-size: 10pt;
+  }
+
+  .calendar-board {
+    padding: 0.12in;
+    border-radius: 0;
+    border-color: rgba(31, 37, 43, 0.2);
+    background: #fff;
+    box-shadow: none;
+    overflow: visible;
+  }
+
+  .calendar-board__weekdays,
+  .calendar-grid {
+    gap: 0.08in;
+  }
+
+  .calendar-board__weekdays span {
+    padding-left: 0;
+    font-size: 7.5pt;
+    letter-spacing: 0.12em;
+    color: #44515d;
+  }
+
+  .calendar-blank {
+    min-height: 1.12in;
+  }
+
+  .calendar-day {
+    min-height: 1.12in;
+    padding: 0.08in;
+    gap: 0.06in;
+    border-radius: 0.18in;
+    border-color: rgba(31, 37, 43, 0.16);
+    background: #fff;
+    box-shadow: none;
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+
+  .calendar-day.is-weekend {
+    background: rgba(250, 246, 239, 0.72);
+  }
+
+  .calendar-day.is-today {
+    transform: none;
+    box-shadow:
+      0 0 0 2px rgba(31, 94, 255, 0.2),
+      inset 0 0 0 1px rgba(31, 94, 255, 0.12);
+  }
+
+  .calendar-day.is-today::before {
+    height: 5px;
+  }
+
+  .calendar-day__header {
+    gap: 0.06in;
+  }
+
+  .calendar-day__weekday {
+    font-size: 6.8pt;
+    letter-spacing: 0.14em;
+  }
+
+  .calendar-day__today {
+    padding: 3pt 6pt;
+    font-size: 6.2pt;
+    box-shadow: none;
+  }
+
+  .calendar-day__stamp {
+    min-width: 0.72in;
+    padding: 5pt 7pt;
+    border-radius: 0.14in;
+    gap: 1pt;
+  }
+
+  .calendar-day__stamp strong {
+    font-size: 16pt;
+  }
+
+  .calendar-day__stamp small {
+    font-size: 7pt;
+  }
+
+  .calendar-day__assignments {
+    gap: 0.05in;
+  }
+
+  .assignment {
+    padding: 6pt 7pt;
+    gap: 4pt;
+    border-radius: 0.14in;
+    background: rgba(255, 255, 255, 0.94);
+    box-shadow: none;
+  }
+
+  .calendar-day.is-today .assignment {
+    background: rgba(246, 250, 255, 0.98);
+  }
+
+  .assignment__brand {
+    font-size: 6.8pt;
+    letter-spacing: 0.14em;
+  }
+
+  .assignment__summary {
+    gap: 2pt;
+  }
+
+  .assignment__summary strong {
+    font-size: 8.8pt;
+    line-height: 1.2;
+  }
+
+  .assignment__summary small {
+    font-size: 7.2pt;
+    color: #56616c;
+  }
 }
 
 @media (max-width: 1120px) {

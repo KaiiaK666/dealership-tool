@@ -770,6 +770,12 @@ export default function App() {
     setTab("serviceNotes");
   }
 
+  function printServiceCalendar() {
+    if (typeof window !== "undefined") {
+      window.print();
+    }
+  }
+
   function patchTrafficEntry(entryId, patch) {
     setServiceTrafficData((current) => ({
       ...current,
@@ -1004,14 +1010,23 @@ export default function App() {
         {loading ? <div className="notice">Loading...</div> : null}
 
         {tab === "serviceCalendar" ? (
-          <section className="stack">
-            <div className="panel row">
+          <section className="stack service-calendar-section">
+            <div className="calendar-print-header">
+              <span className="eyebrow">Service drive calendar</span>
+              <h1>{monthLabel(month)}</h1>
+              <p>Kia and Mazda assignments by day.</p>
+            </div>
+
+            <div className="panel row service-calendar-toolbar">
               <div>
                 <span className="eyebrow">Service drive month</span>
                 <h2>{monthLabel(month)}</h2>
               </div>
               <div className="controls">
                 <input type="month" value={month} onChange={(event) => setMonth(event.target.value)} />
+                <button type="button" className="secondary" onClick={printServiceCalendar}>
+                  Print PDF
+                </button>
                 {adminSession ? (
                   <>
                     <button type="button" onClick={() => buildMonth(false)} disabled={busy === "fill-month"}>
