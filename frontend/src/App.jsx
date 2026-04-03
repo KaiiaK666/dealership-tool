@@ -352,11 +352,11 @@ export default function App() {
   const activeLeadStoreSales = activeSales.filter((person) => person.dealership === leadForm.leadStore);
   const serviceEligible = activeSales.filter((person) => person.dealership !== "Outlet");
   const activeBdc = bdcAgents.filter((agent) => agent.active);
+  const today = todayDateValue();
   const bdcClosedToday = isSundayDate(today);
   const serviceCalendarCells = buildCalendarCells(serviceMonth?.days || []);
   const serviceCalendarPrintCells = buildPrintCalendarCells(serviceMonth?.days || []);
   const daysOffMonthCells = buildMonthDateCells(daysOffMonth);
-  const today = todayDateValue();
   const dealershipColumns = DEALERSHIP_ORDER.map((dealership) => ({
     dealership,
     people: salespeople.filter((person) => person.dealership === dealership),
