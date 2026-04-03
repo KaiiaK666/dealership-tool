@@ -143,6 +143,7 @@ class ServiceDayOut(BaseModel):
     day_label: str
     kia: ServiceSlotOut
     mazda: ServiceSlotOut
+    people_off: List[str] = []
 
 
 class ServiceMonthOut(BaseModel):
@@ -1302,6 +1303,7 @@ def generate_service_schedule(month_key: str, overwrite: bool = False) -> None:
 
 def fetch_service_month(month_key: str) -> ServiceMonthOut:
     ensure_month_slots(month_key)
+    month_days = month_dates(month_key)
     rows = db_query_all(
         """
         SELECT
@@ -1335,12 +1337,25 @@ def fetch_service_month(month_key: str) -> ServiceMonthOut:
             (month_key,),
         )
 
+    active_salespeople = fetch_salespeople(include_inactive=False)
+    off_lookup = fetch_days_off_lookup(month_days[0], month_days[-1]) if month_days else set()
+
     slots_by_day: Dict[str, Dict[str, ServiceSlotOut]] = {}
-    for service_day in month_dates(month_key):
+    people_off_by_day: Dict[str, List[str]] = {}
+    for service_day in month_days:
         slots_by_day[service_day.isoformat()] = {
             "Kia": ServiceSlotOut(brand="Kia"),
             "Mazda": ServiceSlotOut(brand="Mazda"),
         }
+        off_names = [
+            person.name
+            for person in active_salespeople
+            if (person.id, service_day.isoformat()) in off_lookup
+        ]
+        people_off_by_day[service_day.isoformat()] = sorted(
+            off_names,
+            key=lambda value: value.lower(),
+        )
 
     for row in rows:
         service_date = str(row.get("schedule_date") or "")
@@ -1354,7 +1369,7 @@ def fetch_service_month(month_key: str) -> ServiceMonthOut:
 
     days: List[ServiceDayOut] = []
     assigned_slots = 0
-    for service_day in month_dates(month_key):
+    for service_day in month_days:
         service_date = service_day.isoformat()
         kia = slots_by_day[service_date]["Kia"]
         mazda = slots_by_day[service_date]["Mazda"]
@@ -1368,6 +1383,7 @@ def fetch_service_month(month_key: str) -> ServiceMonthOut:
                 day_label=service_day.strftime("%a"),
                 kia=kia,
                 mazda=mazda,
+                people_off=people_off_by_day.get(service_date, []),
             )
         )
 

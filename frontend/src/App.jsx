@@ -1214,13 +1214,17 @@ export default function App() {
                         <small>{parts.monthShort}</small>
                       </div>
                       <div className="calendar-print-cell__assignments">
-                        <div className="calendar-print-assignment calendar-print-assignment--kia">
-                          <span>Kia</span>
+                        <div className="calendar-print-line calendar-print-line--kia">
+                          <span>Kia Service Drive:</span>
                           <b>{shortPersonName(day.kia?.salesperson_name)}</b>
                         </div>
-                        <div className="calendar-print-assignment calendar-print-assignment--mazda">
-                          <span>Mazda</span>
+                        <div className="calendar-print-line calendar-print-line--mazda">
+                          <span>Mazda Service Drive:</span>
                           <b>{shortPersonName(day.mazda?.salesperson_name)}</b>
+                        </div>
+                        <div className="calendar-print-line calendar-print-line--off">
+                          <span>Off:</span>
+                          <b>{day.people_off?.length ? day.people_off.map((name) => shortPersonName(name)).join(", ") : "None"}</b>
                         </div>
                       </div>
                     </article>
