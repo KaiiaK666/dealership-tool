@@ -1668,7 +1668,7 @@ button.special-card:hover:not(:disabled) {
 @media print {
   @page {
     size: landscape;
-    margin: 0.45in;
+    margin: 0.25in;
   }
 
   html,
@@ -1688,7 +1688,7 @@ button.special-card:hover:not(:disabled) {
     width: 100%;
     max-width: none;
     padding: 0;
-    gap: 0.18in;
+    gap: 0.08in;
   }
 
   .hero,
@@ -1702,12 +1702,12 @@ button.special-card:hover:not(:disabled) {
   }
 
   .service-calendar-section {
-    gap: 0.18in;
+    gap: 0.08in;
   }
 
   .calendar-print-header {
     display: grid;
-    gap: 4px;
+    gap: 2px;
   }
 
   .calendar-print-header .eyebrow {
@@ -1717,19 +1717,17 @@ button.special-card:hover:not(:disabled) {
 
   .calendar-print-header h1 {
     margin: 0;
-    font-size: 24pt;
+    font-size: 19pt;
     line-height: 1;
     letter-spacing: -0.04em;
   }
 
   .calendar-print-header p {
-    margin: 0;
-    color: #4b5560;
-    font-size: 10pt;
+    display: none;
   }
 
   .calendar-board {
-    padding: 0.12in;
+    padding: 0.06in;
     border-radius: 0;
     border-color: rgba(31, 37, 43, 0.2);
     background: #fff;
@@ -1739,25 +1737,25 @@ button.special-card:hover:not(:disabled) {
 
   .calendar-board__weekdays,
   .calendar-grid {
-    gap: 0.08in;
+    gap: 0.04in;
   }
 
   .calendar-board__weekdays span {
     padding-left: 0;
-    font-size: 7.5pt;
-    letter-spacing: 0.12em;
+    font-size: 6.2pt;
+    letter-spacing: 0.1em;
     color: #44515d;
   }
 
   .calendar-blank {
-    min-height: 1.12in;
+    min-height: 0.86in;
   }
 
   .calendar-day {
-    min-height: 1.12in;
-    padding: 0.08in;
-    gap: 0.06in;
-    border-radius: 0.18in;
+    min-height: 0.86in;
+    padding: 0.05in;
+    gap: 0.03in;
+    border-radius: 0.14in;
     border-color: rgba(31, 37, 43, 0.16);
     background: #fff;
     box-shadow: none;
@@ -1777,47 +1775,45 @@ button.special-card:hover:not(:disabled) {
   }
 
   .calendar-day.is-today::before {
-    height: 5px;
+    height: 4px;
   }
 
   .calendar-day__header {
-    gap: 0.06in;
+    gap: 0.03in;
+    align-items: flex-start;
   }
 
   .calendar-day__weekday {
-    font-size: 6.8pt;
-    letter-spacing: 0.14em;
+    display: none;
   }
 
   .calendar-day__today {
-    padding: 3pt 6pt;
-    font-size: 6.2pt;
-    box-shadow: none;
+    display: none;
   }
 
   .calendar-day__stamp {
-    min-width: 0.72in;
-    padding: 5pt 7pt;
-    border-radius: 0.14in;
+    min-width: 0.54in;
+    padding: 3pt 5pt;
+    border-radius: 0.1in;
     gap: 1pt;
   }
 
   .calendar-day__stamp strong {
-    font-size: 16pt;
+    font-size: 12.5pt;
   }
 
   .calendar-day__stamp small {
-    font-size: 7pt;
+    font-size: 5.8pt;
   }
 
   .calendar-day__assignments {
-    gap: 0.05in;
+    gap: 0.03in;
   }
 
   .assignment {
-    padding: 6pt 7pt;
-    gap: 4pt;
-    border-radius: 0.14in;
+    padding: 4pt 5pt;
+    gap: 2pt;
+    border-radius: 0.1in;
     background: rgba(255, 255, 255, 0.94);
     box-shadow: none;
   }
@@ -1827,22 +1823,21 @@ button.special-card:hover:not(:disabled) {
   }
 
   .assignment__brand {
-    font-size: 6.8pt;
-    letter-spacing: 0.14em;
+    font-size: 5.8pt;
+    letter-spacing: 0.1em;
   }
 
   .assignment__summary {
-    gap: 2pt;
+    gap: 1pt;
   }
 
   .assignment__summary strong {
-    font-size: 8.8pt;
-    line-height: 1.2;
+    font-size: 7.3pt;
+    line-height: 1.1;
   }
 
   .assignment__summary small {
-    font-size: 7.2pt;
-    color: #56616c;
+    display: none;
   }
 }
 
