@@ -295,6 +295,7 @@ export default function App() {
   const [selectedTrafficDate, setSelectedTrafficDate] = useState(todayDateValue());
   const [selectedTrafficSalesId, setSelectedTrafficSalesId] = useState("");
   const [selectedTrafficBrandFilter, setSelectedTrafficBrandFilter] = useState("All");
+  const [expandedTrafficEntryId, setExpandedTrafficEntryId] = useState(null);
   const [salespeople, setSalespeople] = useState([]);
   const [bdcAgents, setBdcAgents] = useState([]);
   const [serviceMonth, setServiceMonth] = useState(null);
@@ -551,6 +552,18 @@ export default function App() {
       setSelectedTrafficDate(fallbackDate);
     }
   }, [selectedTrafficDate, today, trafficMonth]);
+
+  useEffect(() => {
+    if (!visibleTrafficEntries.length) {
+      if (expandedTrafficEntryId !== null) {
+        setExpandedTrafficEntryId(null);
+      }
+      return;
+    }
+    if (!visibleTrafficEntries.some((entry) => entry.id === expandedTrafficEntryId)) {
+      setExpandedTrafficEntryId(visibleTrafficEntries[0].id);
+    }
+  }, [expandedTrafficEntryId, visibleTrafficEntries]);
 
   useEffect(() => {
     if (tab === "serviceCalendar" && trafficMonth !== month) {
@@ -1238,16 +1251,45 @@ export default function App() {
               </div>
             </div>
 
-            <div className="notes-list">
+            <div className="notes-list notes-list--accordion">
               {visibleTrafficEntries.length ? (
                 visibleTrafficEntries.map((entry) => {
                   const brandKey = String(entry.brand || "Kia").toLowerCase();
                   const matchesSelectedStore = Boolean(selectedTrafficSalesStore && selectedTrafficSalesStore === entry.brand);
+                  const isExpanded = expandedTrafficEntryId === entry.id;
+                  const vehicleLine = [entry.vehicle_year, entry.model_make].filter(Boolean).join(" ");
                   return (
                     <article
                       key={entry.id}
-                      className={`note-card note-card--${brandKey} ${matchesSelectedStore ? "note-card--store-match" : ""}`}
+                      className={`note-card note-card--accordion note-card--${brandKey} ${
+                        matchesSelectedStore ? "note-card--store-match" : ""
+                      } ${isExpanded ? "is-expanded" : "is-collapsed"}`}
                     >
+                      <button
+                        type="button"
+                        className="note-card__summary"
+                        onClick={() => setExpandedTrafficEntryId(entry.id)}
+                        aria-expanded={isExpanded}
+                      >
+                        <div className="note-card__summary-main">
+                          <div>
+                            <span className="eyebrow">Service drive traffic</span>
+                            <strong>{entry.customer_name || "Unnamed prospect"}</strong>
+                          </div>
+                          <div className="note-card__summary-vehicle">
+                            <span>Vehicle</span>
+                            <strong>{vehicleLine || "Year / model not entered"}</strong>
+                          </div>
+                        </div>
+                        <div className="note-card__summary-side">
+                          <span className={`brand-pill brand-pill--${brandKey}`}>{entry.brand}</span>
+                          <span className="note-card__summary-date">{entry.traffic_date}</span>
+                          <span className="note-card__summary-toggle">{isExpanded ? "Open" : "Expand"}</span>
+                        </div>
+                      </button>
+
+                      {isExpanded ? (
+                        <div className="note-card__details">
                       <div className="note-card__top">
                         <div>
                           <span className="eyebrow">Service drive traffic</span>
@@ -1300,8 +1342,8 @@ export default function App() {
                             : "Saving with no name tag. Select a name above only if you want it attached to the note."}
                           {selectedTrafficSalesStore
                             ? matchesSelectedStore
-                              ? ` • ${entry.brand} is your selected store`
-                              : ` • ${entry.brand} belongs to the other store`
+                                ? ` - ${entry.brand} is your selected store`
+                                  : ` - ${entry.brand} belongs to the other store`
                             : ""}
                         </small>
                         <button
@@ -1319,6 +1361,8 @@ export default function App() {
                           <strong>{entry.sales_note_salesperson_name || "No name tag saved"}</strong>
                         </div>
                       </div>
+                        </div>
+                      ) : null}
                     </article>
                   );
                 })
@@ -2470,7 +2514,7 @@ export default function App() {
                             <div className="note-actions">
                               <small>
                                 {driveTeamText(entry.drive_team)}
-                                {entry.sales_note_salesperson_name ? ` • Latest note by ${entry.sales_note_salesperson_name}` : ""}
+                                {entry.sales_note_salesperson_name ? ` - Latest note by ${entry.sales_note_salesperson_name}` : ""}
                               </small>
                               <button
                                 type="button"
