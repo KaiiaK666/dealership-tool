@@ -1391,15 +1391,6 @@ export default function App() {
 
                       {isExpanded ? (
                         <div className="note-card__details">
-                      <div className="note-card__top">
-                        <div>
-                          <span className="eyebrow">Service drive traffic</span>
-                          <h3>{entry.customer_name}</h3>
-                          <p className="note-card__subtitle">{entry.traffic_date}</p>
-                        </div>
-                        <span className={`brand-pill brand-pill--${brandKey}`}>{entry.brand}</span>
-                      </div>
-
                       <div className="note-meta">
                         <div className={`meta-item meta-item--brand meta-item--${brandKey}`}>
                           <span>Store</span>
@@ -1426,7 +1417,7 @@ export default function App() {
                           <TrafficOfferGallery images={entry.offer_images} brand={entry.brand} />
                         </div>
 
-                        <label className="note-copy__block">
+                        <label className="note-copy__block note-copy__block--editor">
                           <span>Salesperson notes</span>
                           <textarea
                             rows={5}
@@ -1437,16 +1428,21 @@ export default function App() {
                       </div>
 
                       <div className="note-actions">
-                        <small>
-                          {selectedTrafficHasAuthor
-                            ? `Saving with name tag: ${selectedTrafficSalesperson?.name || "selected salesperson"}`
-                            : "Saving with no name tag. Select a name above only if you want it attached to the note."}
-                          {selectedTrafficSalesStore
-                            ? matchesSelectedStore
-                                ? ` - ${entry.brand} is your selected store`
+                        <div className="note-actions__copy">
+                          <small>
+                            {selectedTrafficHasAuthor
+                              ? `Saving with name tag: ${selectedTrafficSalesperson?.name || "selected salesperson"}`
+                              : "Saving with no name tag. Select a name above only if you want it attached to the note."}
+                            {selectedTrafficSalesStore
+                              ? matchesSelectedStore
+                                  ? ` - ${entry.brand} is your selected store`
                                   : ` - ${entry.brand} belongs to the other store`
-                            : ""}
-                        </small>
+                              : ""}
+                          </small>
+                          <small className="note-actions__meta">
+                            Latest note by: {entry.sales_note_salesperson_name || "No name tag saved"}
+                          </small>
+                        </div>
                         <button
                           type="button"
                           onClick={() => saveTrafficSalesNotes(entry)}
@@ -1454,13 +1450,6 @@ export default function App() {
                         >
                           {busy === `traffic-sales-${entry.id}` ? "Saving..." : "Save Notes"}
                         </button>
-                      </div>
-
-                      <div className="note-meta note-meta--notes">
-                        <div className="meta-item">
-                          <span>Latest note by</span>
-                          <strong>{entry.sales_note_salesperson_name || "No name tag saved"}</strong>
-                        </div>
                       </div>
                         </div>
                       ) : null}
