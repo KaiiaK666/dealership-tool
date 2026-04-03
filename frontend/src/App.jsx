@@ -3,6 +3,7 @@ import {
   apiBase,
   adminLogin,
   assignBdcLead,
+  clearBdcHistory,
   createBdcAgent,
   createSalesperson,
   createServiceDriveTraffic,
@@ -1034,6 +1035,27 @@ export default function App() {
     }
   }
 
+  async function handleClearBdcHistory() {
+    if (!adminSession || !adminToken) return;
+    if (
+      typeof window !== "undefined" &&
+      !window.confirm("Clear all BDC assigned lead history? This only removes BDC lead history and reports.")
+    ) {
+      return;
+    }
+    setBusy("clear-bdc-history");
+    setError("");
+    try {
+      await clearBdcHistory(adminToken);
+      setLastAssignment(null);
+      await refresh();
+    } catch (errorValue) {
+      setError(errText(errorValue));
+    } finally {
+      setBusy("");
+    }
+  }
+
   return (
     <div className="shell">
       <main className="app">
@@ -1717,6 +1739,22 @@ export default function App() {
                 <small>{bdcLog.total} total assignments</small>
               </div>
               <LogTable entries={bdcLog.entries.slice(0, 25)} empty="No BDC assignments yet." />
+              {adminSession ? (
+                <div className="admin-danger-zone">
+                  <div>
+                    <strong>Admin only</strong>
+                    <small>Clears only the BDC assigned-lead history and BDC reports. Service-drive data stays untouched.</small>
+                  </div>
+                  <button
+                    type="button"
+                    className="button-danger"
+                    onClick={handleClearBdcHistory}
+                    disabled={busy === "clear-bdc-history"}
+                  >
+                    {busy === "clear-bdc-history" ? "Clearing..." : "Clear BDC History"}
+                  </button>
+                </div>
+              ) : null}
             </div>
           </section>
         ) : null}

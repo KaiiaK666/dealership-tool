@@ -156,3 +156,5 @@ export const getBdcReport = (params = {}) =>
     start_date: params.startDate,
     end_date: params.endDate,
   })}`);
+export const clearBdcHistory = (token) =>
+  request("/api/admin/bdc/history", { method: "DELETE", headers: adminHeaders(token) });

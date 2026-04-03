@@ -220,6 +220,10 @@ class BdcReportOut(BaseModel):
     rows: List[BdcReportRowOut]
 
 
+class BdcHistoryClearOut(BaseModel):
+    cleared: int
+
+
 class ServiceDriveNoteIn(BaseModel):
     appointment_at: str
     brand: str
@@ -1674,6 +1678,13 @@ def fetch_bdc_report(
     )
 
 
+def clear_bdc_history() -> BdcHistoryClearOut:
+    count_row = db_query_one("SELECT COUNT(*) AS count FROM bdc_assignment_log") or {}
+    cleared = int(count_row.get("count") or 0)
+    db_execute("DELETE FROM bdc_assignment_log")
+    return BdcHistoryClearOut(cleared=cleared)
+
+
 def build_service_notes_filter(
     salesperson_id: Optional[int] = None,
     start_date: Optional[str] = None,
@@ -2368,3 +2379,9 @@ def get_bdc_report(
         start_date=start_date,
         end_date=end_date,
     )
+
+
+@app.delete("/api/admin/bdc/history", response_model=BdcHistoryClearOut)
+def delete_bdc_history(x_admin_token: Optional[str] = Header(default=None)) -> BdcHistoryClearOut:
+    require_admin(x_admin_token)
+    return clear_bdc_history()
