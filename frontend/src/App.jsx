@@ -122,6 +122,13 @@ function buildCalendarCells(days) {
   return [...Array.from({ length: firstOffset }, () => null), ...days];
 }
 
+function buildPrintCalendarCells(days) {
+  const cells = buildCalendarCells(days);
+  const rowCount = Math.max(5, Math.ceil(cells.length / 7));
+  const targetLength = rowCount * 7;
+  return [...cells, ...Array.from({ length: Math.max(0, targetLength - cells.length) }, () => null)];
+}
+
 function toggleDate(list, value) {
   return list.includes(value) ? list.filter((item) => item !== value) : [...list, value].sort();
 }
@@ -341,6 +348,7 @@ export default function App() {
   const serviceEligible = activeSales.filter((person) => person.dealership !== "Outlet");
   const activeBdc = bdcAgents.filter((agent) => agent.active);
   const serviceCalendarCells = buildCalendarCells(serviceMonth?.days || []);
+  const serviceCalendarPrintCells = buildPrintCalendarCells(serviceMonth?.days || []);
   const daysOffMonthCells = buildMonthDateCells(daysOffMonth);
   const today = todayDateValue();
   const dealershipColumns = DEALERSHIP_ORDER.map((dealership) => ({
@@ -1168,6 +1176,52 @@ export default function App() {
                             ) : null}
                           </div>
                         ))}
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+            </div>
+
+            <div className="calendar-print-sheet">
+              <div className="calendar-print-sheet__title">
+                <span className="eyebrow">Service drive calendar</span>
+                <h2>{monthLabel(month)}</h2>
+              </div>
+              <div className="calendar-print-sheet__weekdays">
+                {CALENDAR_WEEKDAYS.map((label) => (
+                  <span key={`print-${label}`}>{label}</span>
+                ))}
+              </div>
+              <div
+                className={`calendar-print-grid ${
+                  serviceCalendarPrintCells.length > 35 ? "calendar-print-grid--six-rows" : "calendar-print-grid--five-rows"
+                }`}
+              >
+                {serviceCalendarPrintCells.map((day, index) => {
+                  if (!day) {
+                    return <div key={`print-blank-${index}`} className="calendar-print-cell calendar-print-cell--blank" aria-hidden="true" />;
+                  }
+
+                  const parts = dateParts(day.date);
+                  return (
+                    <article
+                      key={`print-${day.date}`}
+                      className={`calendar-print-cell ${day.date === today ? "is-today" : ""}`}
+                    >
+                      <div className="calendar-print-cell__header">
+                        <strong>{parts.dayNumber}</strong>
+                        <small>{parts.monthShort}</small>
+                      </div>
+                      <div className="calendar-print-cell__assignments">
+                        <div className="calendar-print-assignment calendar-print-assignment--kia">
+                          <span>Kia</span>
+                          <b>{shortPersonName(day.kia?.salesperson_name)}</b>
+                        </div>
+                        <div className="calendar-print-assignment calendar-print-assignment--mazda">
+                          <span>Mazda</span>
+                          <b>{shortPersonName(day.mazda?.salesperson_name)}</b>
+                        </div>
                       </div>
                     </article>
                   );
