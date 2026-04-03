@@ -265,6 +265,7 @@ class ServiceDriveTrafficIn(BaseModel):
     traffic_date: str
     brand: str = "Kia"
     customer_name: str
+    customer_phone: str = ""
     vehicle_year: str = ""
     model_make: str = ""
     offer_idea: str = ""
@@ -287,6 +288,7 @@ class ServiceDriveTrafficOut(BaseModel):
     traffic_date: str
     brand: str
     customer_name: str
+    customer_phone: str
     vehicle_year: str
     model_make: str
     offer_idea: str
@@ -718,6 +720,7 @@ def init_db() -> None:
             traffic_date TEXT NOT NULL,
             brand TEXT NOT NULL DEFAULT 'Kia',
             customer_name TEXT NOT NULL,
+            customer_phone TEXT NOT NULL DEFAULT '',
             vehicle_year TEXT NOT NULL DEFAULT '',
             model_make TEXT NOT NULL DEFAULT '',
             offer_idea TEXT NOT NULL DEFAULT '',
@@ -728,6 +731,7 @@ def init_db() -> None:
         """
     )
     ensure_column("service_drive_traffic_entries", "brand", "TEXT NOT NULL DEFAULT 'Kia'")
+    ensure_column("service_drive_traffic_entries", "customer_phone", "TEXT NOT NULL DEFAULT ''")
     ensure_column("service_drive_traffic_entries", "sales_note_salesperson_id", "INTEGER")
     ensure_column("service_drive_traffic_entries", "sales_note_salesperson_name", "TEXT NOT NULL DEFAULT ''")
     db_execute(
@@ -953,6 +957,7 @@ def service_drive_traffic_out(
         traffic_date=traffic_date,
         brand=normalize_brand(str(row.get("brand") or "Kia")),
         customer_name=str(row.get("customer_name") or ""),
+        customer_phone=str(row.get("customer_phone") or ""),
         vehicle_year=str(row.get("vehicle_year") or ""),
         model_make=str(row.get("model_make") or ""),
         offer_idea=str(row.get("offer_idea") or ""),
@@ -1849,6 +1854,7 @@ def create_service_drive_traffic_entry(payload: ServiceDriveTrafficIn) -> Servic
     traffic_date = parse_iso_date(payload.traffic_date, "traffic_date").isoformat()
     brand = normalize_brand(payload.brand)
     customer_name = normalize_name(payload.customer_name, "customer_name")
+    customer_phone = normalize_short_text(payload.customer_phone, "customer_phone", max_len=40)
     vehicle_year = normalize_short_text(payload.vehicle_year, "vehicle_year", max_len=16)
     model_make = normalize_short_text(payload.model_make, "model_make", max_len=120)
     offer_idea = normalize_notes(payload.offer_idea, "offer_idea", max_len=1000)
@@ -1856,10 +1862,10 @@ def create_service_drive_traffic_entry(payload: ServiceDriveTrafficIn) -> Servic
     created_id = db_insert(
         """
         INSERT INTO service_drive_traffic_entries (
-            traffic_date, brand, customer_name, vehicle_year, model_make, offer_idea, sales_notes, created_ts, updated_ts
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            traffic_date, brand, customer_name, customer_phone, vehicle_year, model_make, offer_idea, sales_notes, created_ts, updated_ts
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (traffic_date, brand, customer_name, vehicle_year, model_make, offer_idea, "", now_ts, now_ts),
+        (traffic_date, brand, customer_name, customer_phone, vehicle_year, model_make, offer_idea, "", now_ts, now_ts),
     )
     row = get_service_drive_traffic_row(created_id)
     if not row:
@@ -1878,16 +1884,17 @@ def update_service_drive_traffic_entry(traffic_id: int, payload: ServiceDriveTra
     traffic_date = parse_iso_date(payload.traffic_date, "traffic_date").isoformat()
     brand = normalize_brand(payload.brand)
     customer_name = normalize_name(payload.customer_name, "customer_name")
+    customer_phone = normalize_short_text(payload.customer_phone, "customer_phone", max_len=40)
     vehicle_year = normalize_short_text(payload.vehicle_year, "vehicle_year", max_len=16)
     model_make = normalize_short_text(payload.model_make, "model_make", max_len=120)
     offer_idea = normalize_notes(payload.offer_idea, "offer_idea", max_len=1000)
     db_execute(
         """
         UPDATE service_drive_traffic_entries
-        SET traffic_date = ?, brand = ?, customer_name = ?, vehicle_year = ?, model_make = ?, offer_idea = ?, updated_ts = ?
+        SET traffic_date = ?, brand = ?, customer_name = ?, customer_phone = ?, vehicle_year = ?, model_make = ?, offer_idea = ?, updated_ts = ?
         WHERE id = ?
         """,
-        (traffic_date, brand, customer_name, vehicle_year, model_make, offer_idea, time.time(), traffic_id),
+        (traffic_date, brand, customer_name, customer_phone, vehicle_year, model_make, offer_idea, time.time(), traffic_id),
     )
     row = get_service_drive_traffic_row(traffic_id)
     if not row:

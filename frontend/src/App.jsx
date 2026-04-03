@@ -335,6 +335,7 @@ export default function App() {
   const [trafficEntryForm, setTrafficEntryForm] = useState({
     brand: "Kia",
     customerName: "",
+    customerPhone: "",
     vehicleYear: "",
     modelMake: "",
     offerIdea: "",
@@ -815,6 +816,7 @@ export default function App() {
     setTrafficEntryForm({
       brand: "Kia",
       customerName: "",
+      customerPhone: "",
       vehicleYear: "",
       modelMake: "",
       offerIdea: "",
@@ -859,6 +861,7 @@ export default function App() {
         traffic_date: selectedTrafficDate,
         brand: trafficEntryForm.brand,
         customer_name: trafficEntryForm.customerName,
+        customer_phone: trafficEntryForm.customerPhone,
         vehicle_year: trafficEntryForm.vehicleYear,
         model_make: trafficEntryForm.modelMake,
         offer_idea: trafficEntryForm.offerIdea,
@@ -884,6 +887,7 @@ export default function App() {
         traffic_date: entry.traffic_date,
         brand: entry.brand,
         customer_name: entry.customer_name,
+        customer_phone: entry.customer_phone,
         vehicle_year: entry.vehicle_year,
         model_make: entry.model_make,
         offer_idea: entry.offer_idea,
@@ -1372,14 +1376,18 @@ export default function App() {
                         onClick={() => setExpandedTrafficEntryId(entry.id)}
                         aria-expanded={isExpanded}
                       >
-                        <div className="note-card__summary-main">
-                          <div>
-                            <span className="eyebrow">Service drive traffic</span>
-                            <strong>{entry.customer_name || "Unnamed prospect"}</strong>
-                          </div>
-                          <div className="note-card__summary-vehicle">
-                            <span>Vehicle</span>
-                            <strong>{vehicleLine || "Year / model not entered"}</strong>
+                          <div className="note-card__summary-main">
+                            <div>
+                              <span className="eyebrow">Service drive traffic</span>
+                              <strong>{entry.customer_name || "Unnamed prospect"}</strong>
+                            </div>
+                            <div className="note-card__summary-phone">
+                              <span>Phone</span>
+                              <strong>{entry.customer_phone || "No phone entered"}</strong>
+                            </div>
+                            <div className="note-card__summary-vehicle">
+                              <span>Vehicle</span>
+                              <strong>{vehicleLine || "Year / model not entered"}</strong>
                           </div>
                         </div>
                         <div className="note-card__summary-side">
@@ -1395,6 +1403,10 @@ export default function App() {
                         <div className={`meta-item meta-item--brand meta-item--${brandKey}`}>
                           <span>Store</span>
                           <strong>{entry.brand}</strong>
+                        </div>
+                        <div className="meta-item">
+                          <span>Phone</span>
+                          <strong>{entry.customer_phone || "No phone entered"}</strong>
                         </div>
                         <div className="meta-item">
                           <span>Year</span>
@@ -2458,6 +2470,16 @@ export default function App() {
                                 />
                               </label>
                               <label>
+                                <span>Phone number</span>
+                                <input
+                                  value={trafficEntryForm.customerPhone}
+                                  onChange={(event) =>
+                                    setTrafficEntryForm((current) => ({ ...current, customerPhone: event.target.value }))
+                                  }
+                                  placeholder="956-555-1212"
+                                />
+                              </label>
+                              <label>
                                 <span>Year</span>
                                 <input
                                   value={trafficEntryForm.vehicleYear}
@@ -2550,6 +2572,13 @@ export default function App() {
                                 <input
                                   value={entry.customer_name}
                                   onChange={(event) => patchTrafficEntry(entry.id, { customer_name: event.target.value })}
+                                />
+                              </label>
+                              <label>
+                                <span>Phone number</span>
+                                <input
+                                  value={entry.customer_phone || ""}
+                                  onChange={(event) => patchTrafficEntry(entry.id, { customer_phone: event.target.value })}
                                 />
                               </label>
                               <label>

@@ -1255,23 +1255,26 @@ button.note-card__summary:hover:not(:disabled) {
 .note-card__summary-main {
   min-width: 0;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(180px, 0.9fr);
+  grid-template-columns: minmax(0, 1fr) minmax(180px, 0.78fr) minmax(200px, 0.95fr);
   gap: 14px;
   align-items: center;
 }
 
 .note-card__summary-main strong,
+.note-card__summary-phone strong,
 .note-card__summary-vehicle strong {
   display: block;
   line-height: 1.15;
 }
 
+.note-card__summary-phone,
 .note-card__summary-vehicle,
 .note-card__summary-side {
   display: grid;
   gap: 4px;
 }
 
+.note-card__summary-phone span,
 .note-card__summary-vehicle span,
 .note-card__summary-date,
 .note-card__summary-toggle {
@@ -1282,6 +1285,7 @@ button.note-card__summary:hover:not(:disabled) {
   text-transform: uppercase;
 }
 
+.note-card__summary-phone span,
 .note-card__summary-vehicle span,
 .note-card__summary-date {
   color: var(--muted);
@@ -1399,7 +1403,7 @@ button.note-card__summary:hover:not(:disabled) {
 }
 
 .note-meta {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
 }
 
 .note-meta--notes {
