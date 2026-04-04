@@ -1,61 +1,91 @@
-function inferApiBase() {
+const PUBLIC_API_BASES = ["https://api.bertogden123.com", "https://dealership-tool-api.onrender.com"];
+
+function uniqueBases(values) {
+  return Array.from(new Set(values.filter(Boolean)));
+}
+
+function inferApiBases() {
   if (typeof window === "undefined") {
-    return import.meta.env.VITE_API_BASE || "";
+    return uniqueBases([import.meta.env.VITE_API_BASE || ""]);
   }
 
   const { hostname, protocol } = window.location;
+  const envBase = import.meta.env.VITE_API_BASE || "";
 
   if (hostname === "localhost" || hostname === "127.0.0.1") {
-    return import.meta.env.VITE_API_BASE || "http://localhost:8108";
+    return uniqueBases([envBase, "http://localhost:8108"]);
   }
 
-  if (hostname === "app.bertogden123.com") {
-    return "https://api.bertogden123.com";
+  if (hostname === "app.bertogden123.com" || hostname === "bertogden123.com" || hostname === "www.bertogden123.com") {
+    return uniqueBases(["https://api.bertogden123.com", "https://dealership-tool-api.onrender.com", envBase]);
   }
 
   if (hostname === "dealership-tool-web.onrender.com") {
-    return "https://dealership-tool-api.onrender.com";
+    return uniqueBases(["https://dealership-tool-api.onrender.com", "https://api.bertogden123.com", envBase]);
   }
 
-  if (import.meta.env.VITE_API_BASE) {
-    return import.meta.env.VITE_API_BASE;
-  }
+  const bases = [];
+  if (envBase) bases.push(envBase);
 
   if (hostname.startsWith("app.")) {
-    return `${protocol}//api.${hostname.slice(4)}`;
+    bases.push(`${protocol}//api.${hostname.slice(4)}`);
   }
 
-  return "";
+  bases.push(...PUBLIC_API_BASES);
+  return uniqueBases(bases);
 }
 
-const API_BASE = inferApiBase();
+const API_BASES = inferApiBases();
+const API_BASE = API_BASES[0] || "";
 
-function buildUrl(path) {
-  return `${API_BASE}${path}`;
+function buildUrl(base, path) {
+  return `${base}${path}`;
 }
 
 async function request(path, { method = "GET", body, headers = {}, timeout = 10000 } = {}) {
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), timeout);
   const isFormData = typeof FormData !== "undefined" && body instanceof FormData;
-  try {
-    const response = await fetch(buildUrl(path), {
-      method,
-      headers: {
-        ...(!isFormData && body ? { "Content-Type": "application/json" } : {}),
-        ...headers,
-      },
-      body: body ? (isFormData ? body : JSON.stringify(body)) : undefined,
-      signal: controller.signal,
-    });
-    if (!response.ok) {
-      const detail = await response.text().catch(() => "");
-      throw new Error(`HTTP ${response.status} ${response.statusText}${detail ? ` - ${detail}` : ""}`);
+  const bases = API_BASES.length ? API_BASES : [""];
+  let lastError = null;
+
+  for (let index = 0; index < bases.length; index += 1) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeout);
+    try {
+      const response = await fetch(buildUrl(bases[index], path), {
+        method,
+        headers: {
+          ...(!isFormData && body ? { "Content-Type": "application/json" } : {}),
+          ...headers,
+        },
+        body: body ? (isFormData ? body : JSON.stringify(body)) : undefined,
+        signal: controller.signal,
+      });
+      if (!response.ok) {
+        const detail = await response.text().catch(() => "");
+        const httpError = new Error(`HTTP ${response.status} ${response.statusText}${detail ? ` - ${detail}` : ""}`);
+        if (response.status >= 500 && index < bases.length - 1) {
+          lastError = httpError;
+          continue;
+        }
+        throw httpError;
+      }
+      return await response.json();
+    } catch (error) {
+      lastError = error;
+      const isNetworkFailure =
+        error?.name === "AbortError" ||
+        error instanceof TypeError ||
+        /Failed to fetch/i.test(String(error?.message || ""));
+      if (isNetworkFailure && index < bases.length - 1) {
+        continue;
+      }
+      throw error;
+    } finally {
+      clearTimeout(timeoutId);
     }
-    return await response.json();
-  } finally {
-    clearTimeout(timeoutId);
   }
+
+  throw lastError || new Error("Failed to fetch");
 }
 
 function qs(params = {}) {
