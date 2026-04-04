@@ -326,6 +326,11 @@ class ServiceDriveTrafficImportOut(BaseModel):
     dates: List[str]
 
 
+class ServiceDriveTrafficImportUndoOut(BaseModel):
+    deleted: int
+    preserved_with_notes: int = 0
+
+
 class TrafficPdfOut(BaseModel):
     id: int
     title: str
@@ -967,8 +972,17 @@ def fetch_drive_team_map(date_values: List[str]) -> Dict[str, List[ServiceDriveT
                 salesperson_name=str(row.get("salesperson_name") or "") or None,
                 salesperson_dealership=str(row.get("salesperson_dealership") or "") or None,
             )
-        )
+    )
     return grouped
+
+
+def offer_idea_line_value(text: str, label: str) -> str:
+    prefix = f"{label}:"
+    for line in str(text or "").splitlines():
+        stripped = line.strip()
+        if stripped.lower().startswith(prefix.lower()):
+            return stripped[len(prefix) :].strip()
+    return ""
 
 
 def service_drive_traffic_out(
@@ -979,18 +993,30 @@ def service_drive_traffic_out(
     traffic_date = str(row.get("traffic_date") or "")
     team = (drive_team_map or {}).get(traffic_date, [])
     traffic_id = int(row.get("id") or 0)
+    offer_idea = str(row.get("offer_idea") or "")
+    appointment_label = str(row.get("appointment_label") or "")
+    appointment_ts = float(row.get("appointment_ts") or 0.0)
+    if not appointment_label:
+        imported_appointment = offer_idea_line_value(offer_idea, "Appointment")
+        parsed_appointment = parse_reynolds_datetime_text(imported_appointment)
+        if parsed_appointment:
+            appointment_label = format_clock_label(parsed_appointment)
+            appointment_ts = parsed_appointment.replace(tzinfo=ZoneInfo(RULES_TIMEZONE)).timestamp()
+    odometer = str(row.get("odometer") or "")
+    if not odometer:
+        odometer = offer_idea_line_value(offer_idea, "Odometer")
     return ServiceDriveTrafficOut(
         id=traffic_id,
         traffic_date=traffic_date,
         brand=normalize_brand(str(row.get("brand") or "Kia")),
         customer_name=str(row.get("customer_name") or ""),
         customer_phone=str(row.get("customer_phone") or ""),
-        appointment_label=str(row.get("appointment_label") or ""),
-        appointment_ts=float(row.get("appointment_ts") or 0.0),
+        appointment_label=appointment_label,
+        appointment_ts=appointment_ts,
         vehicle_year=str(row.get("vehicle_year") or ""),
-        odometer=str(row.get("odometer") or ""),
+        odometer=odometer,
         model_make=str(row.get("model_make") or ""),
-        offer_idea=str(row.get("offer_idea") or ""),
+        offer_idea=offer_idea,
         offer_images=(offer_image_map or {}).get(traffic_id, []),
         sales_notes=str(row.get("sales_notes") or ""),
         sales_note_salesperson_id=int(row["sales_note_salesperson_id"])
@@ -2148,6 +2174,41 @@ def import_reynolds_service_traffic(file: UploadFile) -> ServiceDriveTrafficImpo
     )
 
 
+def undo_reynolds_service_traffic_import() -> ServiceDriveTrafficImportUndoOut:
+    preserved_row = db_query_one(
+        """
+        SELECT COUNT(*) AS count
+        FROM service_drive_traffic_entries
+        WHERE source_system = ?
+          AND (TRIM(sales_notes) <> '' OR TRIM(sales_note_salesperson_name) <> '')
+        """,
+        ("reynolds_csv",),
+    ) or {}
+    deleted_row = db_query_one(
+        """
+        SELECT COUNT(*) AS count
+        FROM service_drive_traffic_entries
+        WHERE source_system = ?
+          AND TRIM(sales_notes) = ''
+          AND TRIM(sales_note_salesperson_name) = ''
+        """,
+        ("reynolds_csv",),
+    ) or {}
+    deleted = int(deleted_row.get("count") or 0)
+    preserved_with_notes = int(preserved_row.get("count") or 0)
+    if deleted:
+        db_execute(
+            """
+            DELETE FROM service_drive_traffic_entries
+            WHERE source_system = ?
+              AND TRIM(sales_notes) = ''
+              AND TRIM(sales_note_salesperson_name) = ''
+            """,
+            ("reynolds_csv",),
+        )
+    return ServiceDriveTrafficImportUndoOut(deleted=deleted, preserved_with_notes=preserved_with_notes)
+
+
 def create_service_drive_traffic_entry(payload: ServiceDriveTrafficIn) -> ServiceDriveTrafficOut:
     traffic_date = parse_iso_date(payload.traffic_date, "traffic_date").isoformat()
     brand = normalize_brand(payload.brand)
@@ -2549,6 +2610,14 @@ def post_service_drive_traffic_reynolds_import(
 ) -> ServiceDriveTrafficImportOut:
     require_admin(x_admin_token)
     return import_reynolds_service_traffic(file)
+
+
+@app.delete("/api/admin/service-drive/traffic/import/reynolds", response_model=ServiceDriveTrafficImportUndoOut)
+def delete_service_drive_traffic_reynolds_import(
+    x_admin_token: Optional[str] = Header(default=None),
+) -> ServiceDriveTrafficImportUndoOut:
+    require_admin(x_admin_token)
+    return undo_reynolds_service_traffic_import()
 
 
 @app.post("/api/admin/service-drive/traffic/{traffic_id}/images", response_model=ServiceDriveTrafficOut)

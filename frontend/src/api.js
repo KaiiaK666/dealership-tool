@@ -150,6 +150,11 @@ export const importReynoldsServiceDriveTraffic = (token, formData) =>
     headers: adminHeaders(token),
     timeout: 60000,
   });
+export const undoReynoldsServiceDriveTrafficImport = (token) =>
+  request("/api/admin/service-drive/traffic/import/reynolds", {
+    method: "DELETE",
+    headers: adminHeaders(token),
+  });
 export const uploadServiceDriveTrafficImages = (token, id, formData) =>
   request(`/api/admin/service-drive/traffic/${id}/images`, {
     method: "POST",

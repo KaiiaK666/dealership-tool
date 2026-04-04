@@ -23,6 +23,7 @@ import {
   getTrafficPdfs,
   importReynoldsServiceDriveTraffic,
   replaceAdminDaysOffMonth,
+  undoReynoldsServiceDriveTrafficImport,
   updateBdcAgent,
   updateSalesperson,
   updateSpecial,
@@ -367,6 +368,7 @@ export default function App() {
   const [reynoldsImportFile, setReynoldsImportFile] = useState(null);
   const [reynoldsImportFileKey, setReynoldsImportFileKey] = useState(0);
   const [reynoldsImportResult, setReynoldsImportResult] = useState(null);
+  const [reynoldsUndoResult, setReynoldsUndoResult] = useState(null);
   const [trafficRowUploadFiles, setTrafficRowUploadFiles] = useState({});
   const [trafficRowUploadKeys, setTrafficRowUploadKeys] = useState({});
   const [trafficPdfForm, setTrafficPdfForm] = useState({ title: "", file: null });
@@ -920,6 +922,7 @@ export default function App() {
     setBusy("import-traffic-csv");
     setError("");
     setReynoldsImportResult(null);
+    setReynoldsUndoResult(null);
     try {
       const formData = new FormData();
       formData.append("file", reynoldsImportFile);
@@ -932,6 +935,32 @@ export default function App() {
       if (focusMonth) setTrafficMonth(focusMonth);
       if (focusDate) setSelectedTrafficDate(focusDate);
       await refreshServiceTraffic(focusMonth, focusDate);
+    } catch (errorValue) {
+      setError(errText(errorValue));
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function undoTrafficCsvImport() {
+    if (
+      typeof window !== "undefined" &&
+      !window.confirm(
+        "Undo the Reynolds CSV import? This removes Reynolds-imported traffic rows, keeps manual rows alone, and leaves any imported rows with saved salesperson notes in place."
+      )
+    ) {
+      return;
+    }
+    setBusy("undo-traffic-csv");
+    setError("");
+    setReynoldsImportResult(null);
+    setReynoldsUndoResult(null);
+    try {
+      const result = await undoReynoldsServiceDriveTrafficImport(adminToken);
+      await refreshServiceTraffic(trafficMonth, selectedTrafficDate);
+      setExpandedTrafficEntryId(null);
+      setReynoldsUndoResult(result);
+      setError(result.deleted || result.preserved_with_notes ? "" : "No Reynolds-imported rows were found to remove.");
     } catch (errorValue) {
       setError(errText(errorValue));
     } finally {
@@ -2562,6 +2591,17 @@ export default function App() {
                               {reynoldsImportResult.dates.length} date{reynoldsImportResult.dates.length === 1 ? "" : "s"}.
                             </div>
                           ) : null}
+                          {reynoldsUndoResult ? (
+                            <div className="notice success">
+                              Removed {reynoldsUndoResult.deleted} Reynolds-imported row
+                              {reynoldsUndoResult.deleted === 1 ? "" : "s"}
+                              {reynoldsUndoResult.preserved_with_notes
+                                ? ` and kept ${reynoldsUndoResult.preserved_with_notes} row${
+                                    reynoldsUndoResult.preserved_with_notes === 1 ? "" : "s"
+                                  } with saved salesperson notes.`
+                                : "."}
+                            </div>
+                          ) : null}
                           <form className="form compact" onSubmit={importTrafficCsv}>
                             <label>
                               <span>CSV file</span>
@@ -2578,6 +2618,14 @@ export default function App() {
                             </label>
                             <button type="submit" disabled={busy === "import-traffic-csv"}>
                               {busy === "import-traffic-csv" ? "Importing..." : "Import Reynolds CSV"}
+                            </button>
+                            <button
+                              type="button"
+                              className="secondary"
+                              onClick={undoTrafficCsvImport}
+                              disabled={busy === "undo-traffic-csv"}
+                            >
+                              {busy === "undo-traffic-csv" ? "Undoing..." : "Undo Reynolds Import"}
                             </button>
                           </form>
                         </div>
