@@ -295,7 +295,10 @@ class ServiceDriveTrafficOut(BaseModel):
     brand: str
     customer_name: str
     customer_phone: str
+    appointment_label: str = ""
+    appointment_ts: float = 0.0
     vehicle_year: str
+    odometer: str = ""
     model_make: str
     offer_idea: str
     offer_images: List[ServiceDriveTrafficImageOut]
@@ -735,7 +738,10 @@ def init_db() -> None:
             brand TEXT NOT NULL DEFAULT 'Kia',
             customer_name TEXT NOT NULL,
             customer_phone TEXT NOT NULL DEFAULT '',
+            appointment_label TEXT NOT NULL DEFAULT '',
+            appointment_ts REAL NOT NULL DEFAULT 0,
             vehicle_year TEXT NOT NULL DEFAULT '',
+            odometer TEXT NOT NULL DEFAULT '',
             model_make TEXT NOT NULL DEFAULT '',
             offer_idea TEXT NOT NULL DEFAULT '',
             sales_notes TEXT NOT NULL DEFAULT '',
@@ -748,6 +754,9 @@ def init_db() -> None:
     )
     ensure_column("service_drive_traffic_entries", "brand", "TEXT NOT NULL DEFAULT 'Kia'")
     ensure_column("service_drive_traffic_entries", "customer_phone", "TEXT NOT NULL DEFAULT ''")
+    ensure_column("service_drive_traffic_entries", "appointment_label", "TEXT NOT NULL DEFAULT ''")
+    ensure_column("service_drive_traffic_entries", "appointment_ts", "REAL NOT NULL DEFAULT 0")
+    ensure_column("service_drive_traffic_entries", "odometer", "TEXT NOT NULL DEFAULT ''")
     ensure_column("service_drive_traffic_entries", "sales_note_salesperson_id", "INTEGER")
     ensure_column("service_drive_traffic_entries", "sales_note_salesperson_name", "TEXT NOT NULL DEFAULT ''")
     ensure_column("service_drive_traffic_entries", "source_system", "TEXT NOT NULL DEFAULT ''")
@@ -976,7 +985,10 @@ def service_drive_traffic_out(
         brand=normalize_brand(str(row.get("brand") or "Kia")),
         customer_name=str(row.get("customer_name") or ""),
         customer_phone=str(row.get("customer_phone") or ""),
+        appointment_label=str(row.get("appointment_label") or ""),
+        appointment_ts=float(row.get("appointment_ts") or 0.0),
         vehicle_year=str(row.get("vehicle_year") or ""),
+        odometer=str(row.get("odometer") or ""),
         model_make=str(row.get("model_make") or ""),
         offer_idea=str(row.get("offer_idea") or ""),
         offer_images=(offer_image_map or {}).get(traffic_id, []),
@@ -1861,7 +1873,10 @@ def fetch_service_drive_traffic(
         SELECT *
         FROM service_drive_traffic_entries
         WHERE traffic_date >= ? AND traffic_date < ?
-        ORDER BY traffic_date ASC, created_ts ASC, id ASC
+        ORDER BY traffic_date ASC,
+                 CASE WHEN appointment_ts > 0 THEN appointment_ts ELSE 32503680000 END ASC,
+                 created_ts ASC,
+                 id ASC
         """,
         (start_date, end_date_exclusive),
     )
@@ -1909,6 +1924,10 @@ def parse_reynolds_datetime_text(value: str) -> Optional[datetime]:
         except ValueError:
             continue
     return None
+
+
+def format_clock_label(value: datetime) -> str:
+    return value.strftime("%I:%M %p").lstrip("0")
 
 
 def reynolds_brand(row: Dict[str, Any]) -> Optional[str]:
@@ -2044,7 +2063,10 @@ def import_reynolds_service_traffic(file: UploadFile) -> ServiceDriveTrafficImpo
                     "customer_phone",
                     max_len=40,
                 )
+                appointment_label = normalize_short_text(format_clock_label(appointment_dt), "appointment_label", max_len=24)
+                appointment_ts = appointment_dt.replace(tzinfo=ZoneInfo(RULES_TIMEZONE)).timestamp()
                 vehicle_year = normalize_short_text(reynolds_text(row, "Year"), "vehicle_year", max_len=16)
+                odometer = normalize_short_text(reynolds_text(row, "Odometer"), "odometer", max_len=32)
                 model_make = normalize_short_text(reynolds_model_make(row, brand), "model_make", max_len=120)
                 offer_idea = reynolds_offer_idea(row)
 
@@ -2057,8 +2079,8 @@ def import_reynolds_service_traffic(file: UploadFile) -> ServiceDriveTrafficImpo
                     conn.execute(
                         """
                         UPDATE service_drive_traffic_entries
-                        SET traffic_date = ?, brand = ?, customer_name = ?, customer_phone = ?, vehicle_year = ?,
-                            model_make = ?, offer_idea = ?, updated_ts = ?
+                        SET traffic_date = ?, brand = ?, customer_name = ?, customer_phone = ?, appointment_label = ?,
+                            appointment_ts = ?, vehicle_year = ?, odometer = ?, model_make = ?, offer_idea = ?, updated_ts = ?
                         WHERE id = ?
                         """,
                         (
@@ -2066,7 +2088,10 @@ def import_reynolds_service_traffic(file: UploadFile) -> ServiceDriveTrafficImpo
                             brand,
                             customer_name,
                             customer_phone,
+                            appointment_label,
+                            appointment_ts,
                             vehicle_year,
+                            odometer,
                             model_make,
                             offer_idea,
                             now_ts,
@@ -2078,16 +2103,20 @@ def import_reynolds_service_traffic(file: UploadFile) -> ServiceDriveTrafficImpo
                     conn.execute(
                         """
                         INSERT INTO service_drive_traffic_entries (
-                            traffic_date, brand, customer_name, customer_phone, vehicle_year, model_make, offer_idea,
-                            sales_notes, source_system, source_key, created_ts, updated_ts
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            traffic_date, brand, customer_name, customer_phone, appointment_label, appointment_ts,
+                            vehicle_year, odometer, model_make, offer_idea, sales_notes, source_system, source_key,
+                            created_ts, updated_ts
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
                             traffic_date,
                             brand,
                             customer_name,
                             customer_phone,
+                            appointment_label,
+                            appointment_ts,
                             vehicle_year,
+                            odometer,
                             model_make,
                             offer_idea,
                             "",

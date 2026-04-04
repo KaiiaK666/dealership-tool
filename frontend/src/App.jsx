@@ -188,6 +188,26 @@ function isSundayDate(value) {
   return dateParts(value).weekdayIndex === 0;
 }
 
+function odometerLabel(value) {
+  const text = String(value || "").trim();
+  if (!text) return "Miles n/a";
+  return text.toLowerCase().includes("mi") ? text : `${text} mi`;
+}
+
+function sortTrafficEntries(entries) {
+  return [...(entries || [])].sort((left, right) => {
+    const leftTs = Number(left?.appointment_ts || 0);
+    const rightTs = Number(right?.appointment_ts || 0);
+    const leftRank = leftTs > 0 ? leftTs : Number.MAX_SAFE_INTEGER;
+    const rightRank = rightTs > 0 ? rightTs : Number.MAX_SAFE_INTEGER;
+    if (leftRank !== rightRank) return leftRank - rightRank;
+    const leftName = String(left?.customer_name || "").toLowerCase();
+    const rightName = String(right?.customer_name || "").toLowerCase();
+    if (leftName !== rightName) return leftName.localeCompare(rightName);
+    return Number(left?.id || 0) - Number(right?.id || 0);
+  });
+}
+
 function LogTable({ entries, empty }) {
   if (!entries.length) return <div className="empty">{empty}</div>;
   return (
@@ -399,10 +419,11 @@ export default function App() {
   const focusTrafficKia = driveTeamMember(focusTrafficTeam, "Kia");
   const focusTrafficMazda = driveTeamMember(focusTrafficTeam, "Mazda");
   const selectedTrafficHasAuthor = Boolean(selectedTrafficSalesId);
-  const visibleTrafficEntries =
+  const visibleTrafficEntries = sortTrafficEntries(
     selectedTrafficBrandFilter === "All"
       ? serviceTrafficData.entries
-      : serviceTrafficData.entries.filter((entry) => entry.brand === selectedTrafficBrandFilter);
+      : serviceTrafficData.entries.filter((entry) => entry.brand === selectedTrafficBrandFilter)
+  );
   const visibleTrafficCount = visibleTrafficEntries.length;
   const selectedTrafficFilterLabel =
     selectedTrafficBrandFilter === "All" ? "All Franchises" : `${selectedTrafficBrandFilter} Only`;
@@ -1422,7 +1443,7 @@ export default function App() {
                   const brandKey = String(entry.brand || "Kia").toLowerCase();
                   const matchesSelectedStore = Boolean(selectedTrafficSalesStore && selectedTrafficSalesStore === entry.brand);
                   const isExpanded = expandedTrafficEntryId === entry.id;
-                  const vehicleLine = [entry.vehicle_year, entry.model_make].filter(Boolean).join(" ");
+                  const vehicleLine = entry.model_make || "Model not entered";
                   return (
                     <article
                       key={entry.id}
@@ -1448,11 +1469,21 @@ export default function App() {
                             <div className="note-card__summary-vehicle">
                               <span>Vehicle</span>
                               <strong>{vehicleLine || "Year / model not entered"}</strong>
+                              <div className="note-card__summary-metrics">
+                                <span className="note-metric-chip note-metric-chip--year">
+                                  {entry.vehicle_year || "Year n/a"}
+                                </span>
+                                <span className="note-metric-chip note-metric-chip--odometer">
+                                  {odometerLabel(entry.odometer)}
+                                </span>
+                              </div>
+                            </div>
                           </div>
-                        </div>
                         <div className="note-card__summary-side">
                           <span className={`brand-pill brand-pill--${brandKey}`}>{entry.brand}</span>
-                          <span className="note-card__summary-date">{entry.traffic_date}</span>
+                          <span className="note-card__summary-date">
+                            {entry.appointment_label ? `Appt ${entry.appointment_label}` : entry.traffic_date}
+                          </span>
                           <span className="note-card__summary-toggle">{isExpanded ? "Open" : "Expand"}</span>
                         </div>
                       </button>
@@ -1465,12 +1496,20 @@ export default function App() {
                           <strong>{entry.brand}</strong>
                         </div>
                         <div className="meta-item">
+                          <span>Appointment</span>
+                          <strong>{entry.appointment_label || "No time entered"}</strong>
+                        </div>
+                        <div className="meta-item">
                           <span>Phone</span>
                           <strong>{entry.customer_phone || "No phone entered"}</strong>
                         </div>
                         <div className="meta-item">
-                          <span>Year</span>
+                          <span>Vehicle year</span>
                           <strong>{entry.vehicle_year || "N/A"}</strong>
+                        </div>
+                        <div className="meta-item meta-item--emphasis">
+                          <span>Odometer</span>
+                          <strong>{odometerLabel(entry.odometer)}</strong>
                         </div>
                         <div className="meta-item">
                           <span>Model / Make</span>
