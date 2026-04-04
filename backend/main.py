@@ -1,4 +1,6 @@
 import calendar
+import csv
+import io
 import os
 import secrets
 import sqlite3
@@ -311,6 +313,14 @@ class ServiceDriveTrafficListOut(BaseModel):
     total: int
     counts_by_date: Dict[str, int]
     entries: List[ServiceDriveTrafficOut]
+
+
+class ServiceDriveTrafficImportOut(BaseModel):
+    total_rows: int
+    created: int
+    updated: int
+    skipped: int
+    dates: List[str]
 
 
 class TrafficPdfOut(BaseModel):
@@ -729,6 +739,8 @@ def init_db() -> None:
             model_make TEXT NOT NULL DEFAULT '',
             offer_idea TEXT NOT NULL DEFAULT '',
             sales_notes TEXT NOT NULL DEFAULT '',
+            source_system TEXT NOT NULL DEFAULT '',
+            source_key TEXT NOT NULL DEFAULT '',
             created_ts REAL NOT NULL,
             updated_ts REAL NOT NULL
         )
@@ -738,6 +750,8 @@ def init_db() -> None:
     ensure_column("service_drive_traffic_entries", "customer_phone", "TEXT NOT NULL DEFAULT ''")
     ensure_column("service_drive_traffic_entries", "sales_note_salesperson_id", "INTEGER")
     ensure_column("service_drive_traffic_entries", "sales_note_salesperson_name", "TEXT NOT NULL DEFAULT ''")
+    ensure_column("service_drive_traffic_entries", "source_system", "TEXT NOT NULL DEFAULT ''")
+    ensure_column("service_drive_traffic_entries", "source_key", "TEXT NOT NULL DEFAULT ''")
     db_execute(
         """
         CREATE TABLE IF NOT EXISTS service_drive_traffic_images (
@@ -1826,6 +1840,13 @@ def get_service_drive_traffic_row(traffic_id: int) -> Optional[Dict[str, Any]]:
     return db_query_one("SELECT * FROM service_drive_traffic_entries WHERE id = ?", (int(traffic_id),))
 
 
+def get_service_drive_traffic_row_by_source(source_system: str, source_key: str) -> Optional[Dict[str, Any]]:
+    return db_query_one(
+        "SELECT * FROM service_drive_traffic_entries WHERE source_system = ? AND source_key = ?",
+        (source_system, source_key),
+    )
+
+
 def fetch_service_drive_traffic(
     *,
     month_key: Optional[str] = None,
@@ -1858,6 +1879,243 @@ def fetch_service_drive_traffic(
         total=len(selected_rows),
         counts_by_date=counts_by_date,
         entries=[service_drive_traffic_out(row, drive_team_map, offer_image_map) for row in selected_rows],
+    )
+
+
+def reynolds_text(row: Dict[str, Any], key: str) -> str:
+    return str(row.get(key) or "").strip()
+
+
+def first_nonempty(*values: str) -> str:
+    for value in values:
+        text = str(value or "").strip()
+        if text:
+            return text
+    return ""
+
+
+def parse_reynolds_datetime_text(value: str) -> Optional[datetime]:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    for fmt in (
+        "%m/%d/%y %H:%M",
+        "%m/%d/%y %I:%M",
+        "%m/%d/%y %I:%M %p",
+        "%m/%d/%y %I:%M:%S %p",
+    ):
+        try:
+            return datetime.strptime(text, fmt)
+        except ValueError:
+            continue
+    return None
+
+
+def reynolds_brand(row: Dict[str, Any]) -> Optional[str]:
+    make_code = reynolds_text(row, "Make").upper()
+    mapping = {
+        "K1": "Kia",
+        "KIA": "Kia",
+        "MA": "Mazda",
+        "MAZDA": "Mazda",
+    }
+    if make_code in mapping:
+        return mapping[make_code]
+    if make_code.startswith("K"):
+        return "Kia"
+    if make_code.startswith("MA"):
+        return "Mazda"
+    model = reynolds_text(row, "Model").lower()
+    if "mazda" in model or model.startswith("cx-"):
+        return "Mazda"
+    if model:
+        return "Kia"
+    return None
+
+
+def reynolds_model_make(row: Dict[str, Any], brand: str) -> str:
+    model = first_nonempty(reynolds_text(row, "Model"), reynolds_text(row, "Style"))
+    if not model:
+        return ""
+    if brand.lower() in model.lower():
+        return model
+    return f"{brand} {model}"
+
+
+def reynolds_source_key(row: Dict[str, Any], traffic_date: str, brand: str) -> str:
+    ro_appt = first_nonempty(reynolds_text(row, "RO#/Appt#"), reynolds_text(row, "Tag#"))
+    customer_name = reynolds_text(row, "Customer Name")
+    appointment_text = first_nonempty(reynolds_text(row, "Appt Date/Time"), reynolds_text(row, "Date/Time"))
+    if ro_appt:
+        return f"reynolds:{brand}:{ro_appt}:{traffic_date}"
+    return f"reynolds:{brand}:{traffic_date}:{customer_name}:{appointment_text}"
+
+
+def reynolds_offer_idea(row: Dict[str, Any]) -> str:
+    details = [
+        ("Imported", "Reynolds SERVICEAPPTS.csv"),
+        ("Record type", reynolds_text(row, "Record Type")),
+        ("Appointment", first_nonempty(reynolds_text(row, "Appt Date/Time"), reynolds_text(row, "Date/Time"))),
+        ("Promise", reynolds_text(row, "Promise Date/Time")),
+        ("Status", reynolds_text(row, "Status")),
+        ("Overall status", reynolds_text(row, "Overall Status")),
+        ("Advisor", reynolds_text(row, "Advisor Name")),
+        ("Appointment taker", reynolds_text(row, "Appointment Taker Name")),
+        ("Greeter", reynolds_text(row, "Greeter Name")),
+        ("RO / Appt #", reynolds_text(row, "RO#/Appt#")),
+        ("Transportation", reynolds_text(row, "Transportation Type")),
+        ("Odometer", reynolds_text(row, "Odometer")),
+        ("Stock #", reynolds_text(row, "Stock#")),
+        ("VIN", reynolds_text(row, "VIN")),
+        ("Email", reynolds_text(row, "Email")),
+        ("City / State", reynolds_text(row, "City, State")),
+        ("Address", reynolds_text(row, "Address")),
+    ]
+    lines = [f"{label}: {value}" for label, value in details if str(value or "").strip()]
+    return normalize_notes("\n".join(lines), "offer_idea", max_len=4000)
+
+
+def import_reynolds_service_traffic(file: UploadFile) -> ServiceDriveTrafficImportOut:
+    raw = file.file.read()
+    if not raw:
+        raise HTTPException(status_code=400, detail="csv file is empty")
+
+    decoded: Optional[str] = None
+    for encoding in ("utf-8-sig", "utf-8", "latin-1"):
+        try:
+            decoded = raw.decode(encoding)
+            break
+        except UnicodeDecodeError:
+            continue
+    if decoded is None:
+        raise HTTPException(status_code=400, detail="could not decode csv file")
+
+    rows = list(csv.DictReader(io.StringIO(decoded)))
+    if not rows:
+        raise HTTPException(status_code=400, detail="csv file did not contain any rows")
+
+    created = 0
+    updated = 0
+    skipped = 0
+    imported_dates: List[str] = []
+    seen_keys: set[str] = set()
+    now_ts = time.time()
+
+    with db_lock:
+        conn = get_db()
+        try:
+            for row in rows:
+                department = reynolds_text(row, "Department").upper()
+                if department and department != "SERVICE":
+                    skipped += 1
+                    continue
+
+                appointment_dt = parse_reynolds_datetime_text(
+                    first_nonempty(reynolds_text(row, "Appt Date/Time"), reynolds_text(row, "Date/Time"))
+                )
+                if not appointment_dt:
+                    skipped += 1
+                    continue
+                traffic_date = appointment_dt.strftime("%Y-%m-%d")
+
+                brand = reynolds_brand(row)
+                if not brand:
+                    skipped += 1
+                    continue
+
+                customer_name_raw = reynolds_text(row, "Customer Name")
+                if not customer_name_raw:
+                    skipped += 1
+                    continue
+
+                source_key = reynolds_source_key(row, traffic_date, brand)
+                if source_key in seen_keys:
+                    skipped += 1
+                    continue
+                seen_keys.add(source_key)
+
+                customer_name = normalize_name(customer_name_raw, "customer_name")
+                customer_phone = normalize_short_text(
+                    first_nonempty(
+                        reynolds_text(row, "Cell Phone"),
+                        reynolds_text(row, "Home Phone"),
+                        reynolds_text(row, "Business Phone"),
+                    ),
+                    "customer_phone",
+                    max_len=40,
+                )
+                vehicle_year = normalize_short_text(reynolds_text(row, "Year"), "vehicle_year", max_len=16)
+                model_make = normalize_short_text(reynolds_model_make(row, brand), "model_make", max_len=120)
+                offer_idea = reynolds_offer_idea(row)
+
+                existing = conn.execute(
+                    "SELECT id FROM service_drive_traffic_entries WHERE source_system = ? AND source_key = ?",
+                    ("reynolds_csv", source_key),
+                ).fetchone()
+
+                if existing:
+                    conn.execute(
+                        """
+                        UPDATE service_drive_traffic_entries
+                        SET traffic_date = ?, brand = ?, customer_name = ?, customer_phone = ?, vehicle_year = ?,
+                            model_make = ?, offer_idea = ?, updated_ts = ?
+                        WHERE id = ?
+                        """,
+                        (
+                            traffic_date,
+                            brand,
+                            customer_name,
+                            customer_phone,
+                            vehicle_year,
+                            model_make,
+                            offer_idea,
+                            now_ts,
+                            int(existing["id"]),
+                        ),
+                    )
+                    updated += 1
+                else:
+                    conn.execute(
+                        """
+                        INSERT INTO service_drive_traffic_entries (
+                            traffic_date, brand, customer_name, customer_phone, vehicle_year, model_make, offer_idea,
+                            sales_notes, source_system, source_key, created_ts, updated_ts
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            traffic_date,
+                            brand,
+                            customer_name,
+                            customer_phone,
+                            vehicle_year,
+                            model_make,
+                            offer_idea,
+                            "",
+                            "reynolds_csv",
+                            source_key,
+                            now_ts,
+                            now_ts,
+                        ),
+                    )
+                    created += 1
+
+                if traffic_date not in imported_dates:
+                    imported_dates.append(traffic_date)
+
+            conn.commit()
+        except HTTPException:
+            conn.rollback()
+            raise
+        except Exception as exc:
+            conn.rollback()
+            raise HTTPException(status_code=400, detail=f"failed to import reynolds csv: {exc}") from exc
+
+    return ServiceDriveTrafficImportOut(
+        total_rows=len(rows),
+        created=created,
+        updated=updated,
+        skipped=skipped,
+        dates=sorted(imported_dates),
     )
 
 
@@ -2253,6 +2511,15 @@ def put_service_drive_traffic(
 ) -> ServiceDriveTrafficOut:
     require_admin(x_admin_token)
     return update_service_drive_traffic_entry(traffic_id, payload)
+
+
+@app.post("/api/admin/service-drive/traffic/import/reynolds", response_model=ServiceDriveTrafficImportOut)
+def post_service_drive_traffic_reynolds_import(
+    file: UploadFile = File(...),
+    x_admin_token: Optional[str] = Header(default=None),
+) -> ServiceDriveTrafficImportOut:
+    require_admin(x_admin_token)
+    return import_reynolds_service_traffic(file)
 
 
 @app.post("/api/admin/service-drive/traffic/{traffic_id}/images", response_model=ServiceDriveTrafficOut)

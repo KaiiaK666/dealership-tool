@@ -113,6 +113,13 @@ export const createServiceDriveTraffic = (token, payload) =>
   request("/api/admin/service-drive/traffic", { method: "POST", body: payload, headers: adminHeaders(token) });
 export const updateServiceDriveTraffic = (token, id, payload) =>
   request(`/api/admin/service-drive/traffic/${id}`, { method: "PUT", body: payload, headers: adminHeaders(token) });
+export const importReynoldsServiceDriveTraffic = (token, formData) =>
+  request("/api/admin/service-drive/traffic/import/reynolds", {
+    method: "POST",
+    body: formData,
+    headers: adminHeaders(token),
+    timeout: 60000,
+  });
 export const uploadServiceDriveTrafficImages = (token, id, formData) =>
   request(`/api/admin/service-drive/traffic/${id}/images`, {
     method: "POST",

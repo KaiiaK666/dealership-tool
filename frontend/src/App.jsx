@@ -21,6 +21,7 @@ import {
   getServiceDrive,
   getServiceDriveTraffic,
   getTrafficPdfs,
+  importReynoldsServiceDriveTraffic,
   replaceAdminDaysOffMonth,
   updateBdcAgent,
   updateSalesperson,
@@ -343,6 +344,9 @@ export default function App() {
   });
   const [trafficEntryFiles, setTrafficEntryFiles] = useState([]);
   const [trafficEntryFileKey, setTrafficEntryFileKey] = useState(0);
+  const [reynoldsImportFile, setReynoldsImportFile] = useState(null);
+  const [reynoldsImportFileKey, setReynoldsImportFileKey] = useState(0);
+  const [reynoldsImportResult, setReynoldsImportResult] = useState(null);
   const [trafficRowUploadFiles, setTrafficRowUploadFiles] = useState({});
   const [trafficRowUploadKeys, setTrafficRowUploadKeys] = useState({});
   const [trafficPdfForm, setTrafficPdfForm] = useState({ title: "", file: null });
@@ -826,6 +830,11 @@ export default function App() {
     setTrafficEntryFileKey((current) => current + 1);
   }
 
+  function resetReynoldsImportForm() {
+    setReynoldsImportFile(null);
+    setReynoldsImportFileKey((current) => current + 1);
+  }
+
   function setTrafficRowFiles(entryId, files) {
     setTrafficRowUploadFiles((current) => ({
       ...current,
@@ -857,6 +866,7 @@ export default function App() {
     event.preventDefault();
     setBusy("add-traffic-entry");
     setError("");
+    setReynoldsImportResult(null);
     try {
       let saved = await createServiceDriveTraffic(adminToken, {
         traffic_date: selectedTrafficDate,
@@ -873,6 +883,34 @@ export default function App() {
       patchTrafficEntry(saved.id, saved);
       resetTrafficEntryForm();
       await refreshServiceTraffic();
+    } catch (errorValue) {
+      setError(errText(errorValue));
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function importTrafficCsv(event) {
+    event.preventDefault();
+    if (!reynoldsImportFile) {
+      setError("Choose a Reynolds SERVICEAPPTS.csv file first.");
+      return;
+    }
+    setBusy("import-traffic-csv");
+    setError("");
+    setReynoldsImportResult(null);
+    try {
+      const formData = new FormData();
+      formData.append("file", reynoldsImportFile);
+      const result = await importReynoldsServiceDriveTraffic(adminToken, formData);
+      const focusDate = result.dates?.[0] || selectedTrafficDate;
+      const focusMonth = focusDate ? focusDate.slice(0, 7) : trafficMonth;
+      setReynoldsImportResult(result);
+      resetReynoldsImportForm();
+      setExpandedTrafficEntryId(null);
+      if (focusMonth) setTrafficMonth(focusMonth);
+      if (focusDate) setSelectedTrafficDate(focusDate);
+      await refreshServiceTraffic(focusMonth, focusDate);
     } catch (errorValue) {
       setError(errText(errorValue));
     } finally {
@@ -2461,6 +2499,48 @@ export default function App() {
                               <small>{selectedTrafficMazda.salesperson_dealership || "No assignment"}</small>
                             </div>
                           </div>
+                        </div>
+
+                        <div className="panel">
+                          <div className="row">
+                            <div>
+                              <span className="eyebrow">Reynolds import</span>
+                              <h3>SERVICEAPPTS.csv</h3>
+                            </div>
+                            <button type="button" className="secondary" onClick={resetReynoldsImportForm}>
+                              Clear File
+                            </button>
+                          </div>
+                          <p className="admin-note">
+                            Upload a Reynolds service appointment export and convert it into traffic rows for the notes
+                            page. The importer maps appointment date, store, customer, phone, year, model, and service
+                            context automatically.
+                          </p>
+                          {reynoldsImportResult ? (
+                            <div className="notice success">
+                              Imported {reynoldsImportResult.total_rows} rows: {reynoldsImportResult.created} created,{" "}
+                              {reynoldsImportResult.updated} updated, {reynoldsImportResult.skipped} skipped across{" "}
+                              {reynoldsImportResult.dates.length} date{reynoldsImportResult.dates.length === 1 ? "" : "s"}.
+                            </div>
+                          ) : null}
+                          <form className="form compact" onSubmit={importTrafficCsv}>
+                            <label>
+                              <span>CSV file</span>
+                              <input
+                                key={reynoldsImportFileKey}
+                                type="file"
+                                accept=".csv,text/csv"
+                                onChange={(event) => setReynoldsImportFile(event.target.files?.[0] || null)}
+                              />
+                              <small>
+                                Best with the Reynolds `SERVICEAPPTS.csv` export. Re-importing the same appointment rows
+                                updates them instead of duplicating them.
+                              </small>
+                            </label>
+                            <button type="submit" disabled={busy === "import-traffic-csv"}>
+                              {busy === "import-traffic-csv" ? "Importing..." : "Import Reynolds CSV"}
+                            </button>
+                          </form>
                         </div>
 
                         <div className="panel">
