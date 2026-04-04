@@ -1303,31 +1303,38 @@ button.note-card__summary:hover:not(:disabled) {
 .note-card__summary-metrics {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 2px;
+  gap: 10px;
+  margin-top: 6px;
+  align-items: center;
 }
 
 .note-metric-chip {
   display: inline-flex;
   align-items: center;
-  min-height: 30px;
-  padding: 0 10px;
+  justify-content: center;
+  min-height: 34px;
+  padding: 0 14px;
   border-radius: 999px;
   font-family: "IBM Plex Mono", monospace;
-  font-size: 0.74rem;
+  font-size: 0.8rem;
   font-weight: 700;
-  letter-spacing: 0.04em;
+  line-height: 1;
+  letter-spacing: 0.08em;
+  box-shadow: 0 8px 18px rgba(32, 39, 50, 0.08);
+  white-space: nowrap;
 }
 
 .note-metric-chip--year {
   color: #fff;
-  background: linear-gradient(135deg, #25303b, #40505f);
+  background: linear-gradient(135deg, #243140, #111b27);
+  border: 1px solid rgba(17, 27, 39, 0.5);
 }
 
 .note-metric-chip--odometer {
-  color: #7d3d18;
-  background: rgba(196, 102, 52, 0.16);
-  border: 1px solid rgba(196, 102, 52, 0.22);
+  color: #7e340f;
+  background: linear-gradient(135deg, #fffaf1, #ffe2c8);
+  border: 1px solid rgba(191, 92, 44, 0.45);
+  box-shadow: 0 8px 18px rgba(191, 92, 44, 0.12);
 }
 
 .note-card__details {
