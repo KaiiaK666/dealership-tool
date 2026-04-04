@@ -1473,6 +1473,7 @@ export default function App() {
                   const matchesSelectedStore = Boolean(selectedTrafficSalesStore && selectedTrafficSalesStore === entry.brand);
                   const isExpanded = expandedTrafficEntryId === entry.id;
                   const vehicleLine = entry.model_make || "Model not entered";
+                  const hasSavedNotes = Boolean(String(entry.sales_notes || "").trim());
                   return (
                     <article
                       key={entry.id}
@@ -1512,6 +1513,16 @@ export default function App() {
                           <span className={`brand-pill brand-pill--${brandKey}`}>{entry.brand}</span>
                           <span className="note-card__summary-date">
                             {entry.appointment_label ? `Appt ${entry.appointment_label}` : entry.traffic_date}
+                          </span>
+                          <span
+                            className={`note-card__summary-status ${
+                              hasSavedNotes ? "note-card__summary-status--saved" : "note-card__summary-status--pending"
+                            }`}
+                          >
+                            <span className="note-card__summary-status-icon" aria-hidden="true">
+                              {hasSavedNotes ? "✓" : "•"}
+                            </span>
+                            {hasSavedNotes ? "Notes Saved" : "Pending"}
                           </span>
                           <span className="note-card__summary-toggle">{isExpanded ? "Open" : "Expand"}</span>
                         </div>

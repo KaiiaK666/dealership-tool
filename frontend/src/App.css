@@ -1300,6 +1300,57 @@ button.note-card__summary:hover:not(:disabled) {
   color: var(--accent-deep);
 }
 
+.note-card__summary-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 32px;
+  padding: 0 12px;
+  border-radius: 999px;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  justify-self: end;
+  white-space: nowrap;
+}
+
+.note-card__summary-status-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 999px;
+  font-size: 0.9rem;
+  line-height: 1;
+}
+
+.note-card__summary-status--saved {
+  color: #8b5b00;
+  background: linear-gradient(135deg, #fff6cc, #ffe493);
+  border: 1px solid rgba(190, 144, 19, 0.42);
+  box-shadow: 0 8px 18px rgba(185, 142, 24, 0.16);
+}
+
+.note-card__summary-status--saved .note-card__summary-status-icon {
+  color: #fff;
+  background: linear-gradient(135deg, #b98911, #e0ac1f);
+  box-shadow: 0 4px 10px rgba(185, 137, 17, 0.28);
+}
+
+.note-card__summary-status--pending {
+  color: #637182;
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(99, 113, 130, 0.22);
+}
+
+.note-card__summary-status--pending .note-card__summary-status-icon {
+  color: #fff;
+  background: #94a0af;
+}
+
 .note-card__summary-metrics {
   display: flex;
   flex-wrap: wrap;
