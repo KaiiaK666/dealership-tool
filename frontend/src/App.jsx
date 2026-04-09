@@ -1905,6 +1905,11 @@ export default function App() {
                     ? "Lead store still logs the source, but assignments rotate through all active salespeople."
                     : "Choose the source store first, then assign the lead only within that store's salesperson pool."}
                 </p>
+                <div className="mode-pill-row">
+                  <span className={`mode-pill ${isBdcGlobal ? "mode-pill--global" : "mode-pill--franchise"}`}>
+                    Distribution: {isBdcGlobal ? "Global round robin" : "Franchise specific"}
+                  </span>
+                </div>
               </div>
               <div className="assign-card">
                 <label>
@@ -1926,6 +1931,7 @@ export default function App() {
                   <select
                     value={leadForm.leadStore}
                     onChange={(event) => setLeadForm((current) => ({ ...current, leadStore: event.target.value }))}
+                    disabled={isBdcGlobal}
                   >
                     {DEALERSHIP_ORDER.map((dealership) => (
                       <option key={`lead-store-${dealership}`} value={dealership}>
@@ -1933,7 +1939,7 @@ export default function App() {
                       </option>
                     ))}
                   </select>
-                  {isBdcGlobal ? <small>Distribution mode is global; this store is for logging only.</small> : null}
+                  {isBdcGlobal ? <small>Global mode: store selection is locked.</small> : null}
                 </label>
                 <label>
                   <span>Customer name</span>

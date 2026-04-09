@@ -1044,6 +1044,35 @@ button.traffic-day-tile:hover:not(:disabled) {
   max-width: 48ch;
 }
 
+.mode-pill-row {
+  margin-top: 10px;
+}
+
+.mode-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 12px;
+  border-radius: 999px;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.72rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  border: 1px solid rgba(210, 198, 182, 0.6);
+  background: rgba(255, 255, 255, 0.85);
+}
+
+.mode-pill--global {
+  color: #0b2b3a;
+  border-color: rgba(42, 124, 153, 0.5);
+  background: linear-gradient(135deg, rgba(197, 243, 255, 0.9), rgba(182, 224, 255, 0.9));
+}
+
+.mode-pill--franchise {
+  color: #3b1e0c;
+  border-color: rgba(196, 102, 52, 0.6);
+  background: linear-gradient(135deg, rgba(255, 232, 212, 0.9), rgba(255, 198, 150, 0.9));
+}
+
 .assign-card {
   padding: 18px;
   display: grid;
