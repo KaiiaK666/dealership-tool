@@ -123,8 +123,10 @@ export const updateBdcAgent = (token, id, payload) =>
   request(`/api/admin/bdc/agents/${id}`, { method: "PUT", body: payload, headers: adminHeaders(token) });
 export const updateBdcDistribution = (token, payload) =>
   request("/api/admin/bdc/distribution", { method: "POST", body: payload, headers: adminHeaders(token) });
-export const undoLastBdcAssign = (token) =>
-  request("/api/admin/bdc/assign/last", { method: "DELETE", headers: adminHeaders(token) });
+export const undoLastBdcAssign = (payload) =>
+  request("/api/bdc/assign/last", { method: "DELETE", body: payload });
+export const updateBdcUndoSettings = (token, payload) =>
+  request("/api/admin/bdc/undo/settings", { method: "POST", body: payload, headers: adminHeaders(token) });
 export const getServiceDrive = ({ month } = {}) => request(`/api/service-drive${qs({ month })}`);
 export const getServiceDriveTraffic = (params = {}) =>
   request(`/api/service-drive/traffic${qs({
@@ -135,6 +137,7 @@ export const getTrafficPdfs = () => request("/api/traffic/pdfs");
 export const getSpecials = () => request("/api/specials");
 export const getQuoteRates = () => request("/api/quote/rates");
 export const getBdcDistribution = () => request("/api/bdc/distribution");
+export const getBdcUndoSettings = () => request("/api/bdc/undo/settings");
 export const getServiceDriveNotes = (params = {}) =>
   request(`/api/service-drive/notes${qs({
     salesperson_id: params.salespersonId,

@@ -17,6 +17,7 @@ import {
   getBdcReport,
   getBdcState,
   getBdcDistribution,
+  getBdcUndoSettings,
   getQuoteRates,
   getSalespeople,
   getSpecials,
@@ -29,6 +30,7 @@ import {
   updateBdcAgent,
   updateBdcDistribution,
   undoLastBdcAssign,
+  updateBdcUndoSettings,
   updateQuoteRates,
   updateSalesperson,
   updateSpecial,
@@ -378,6 +380,8 @@ export default function App() {
   const [selectedSpecialId, setSelectedSpecialId] = useState(null);
   const [bdcState, setBdcState] = useState(null);
   const [bdcDistribution, setBdcDistribution] = useState({ mode: "franchise" });
+  const [bdcUndoSettings, setBdcUndoSettings] = useState({ require_password: true, password_hint: "" });
+  const [bdcUndoPassword, setBdcUndoPassword] = useState("");
   const [bdcLog, setBdcLog] = useState({ total: 0, entries: [] });
   const [bdcReport, setBdcReport] = useState(null);
   const [daysOffData, setDaysOffData] = useState({ month: currentMonth(), entries: [] });
@@ -525,7 +529,7 @@ export default function App() {
   const quoteTotalInterest = Math.max(0, quoteTotalPaid - quotePrincipal);
 
   async function loadAll(nextMonth = month, nextFilters = filters) {
-    const [sales, bdc, service, log, report, distribution] = await Promise.all([
+    const [sales, bdc, service, log, report, distribution, undoSettings] = await Promise.all([
       getSalespeople({ includeInactive: true }),
       getBdcAgents({ includeInactive: true }),
       getServiceDrive({ month: nextMonth }),
@@ -543,6 +547,7 @@ export default function App() {
         endDate: nextFilters.endDate || undefined,
       }),
       getBdcDistribution(),
+      getBdcUndoSettings(),
     ]);
     setSalespeople(sales);
     setBdcAgents(bdc);
@@ -550,6 +555,7 @@ export default function App() {
     setBdcLog(log);
     setBdcReport(report);
     setBdcDistribution(distribution);
+    setBdcUndoSettings(undoSettings);
   }
 
   async function refreshBdcState(nextLeadStore = leadForm.leadStore) {
@@ -564,6 +570,23 @@ export default function App() {
       const updated = await updateBdcDistribution(adminToken, { mode });
       setBdcDistribution(updated);
       await refreshBdcState(leadForm.leadStore);
+    } catch (errorValue) {
+      setError(errText(errorValue));
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function saveBdcUndoSettings() {
+    setBusy("bdc-undo-settings");
+    setError("");
+    try {
+      const updated = await updateBdcUndoSettings(adminToken, {
+        require_password: bdcUndoSettings.require_password,
+        password: bdcUndoPassword || "bdc",
+      });
+      setBdcUndoSettings(updated);
+      setBdcUndoPassword("");
     } catch (errorValue) {
       setError(errText(errorValue));
     } finally {
@@ -1306,14 +1329,21 @@ export default function App() {
   }
 
   async function handleUndoLastBdcAssign() {
-    if (!adminSession || !adminToken) return;
     if (typeof window !== "undefined" && !window.confirm("Undo the most recent BDC assignment?")) {
       return;
     }
     setBusy("undo-assign");
     setError("");
     try {
-      const result = await undoLastBdcAssign(adminToken);
+      let password = "";
+      if (bdcUndoSettings.require_password) {
+        password = window.prompt("Enter undo password", "") || "";
+        if (!password) {
+          setBusy("");
+          return;
+        }
+      }
+      const result = await undoLastBdcAssign({ password });
       if (result?.removed) setLastAssignment(null);
       await refresh();
     } catch (errorValue) {
@@ -2044,16 +2074,14 @@ export default function App() {
                 >
                   {busy === "assign" ? "Assigning..." : "Assign Next Lead"}
                 </button>
-                {adminSession ? (
-                  <button
-                    type="button"
-                    className="secondary"
-                    onClick={handleUndoLastBdcAssign}
-                    disabled={busy === "undo-assign"}
-                  >
-                    {busy === "undo-assign" ? "Undoing..." : "Undo Last Assignment"}
-                  </button>
-                ) : null}
+                <button
+                  type="button"
+                  className="secondary"
+                  onClick={handleUndoLastBdcAssign}
+                  disabled={busy === "undo-assign"}
+                >
+                  {busy === "undo-assign" ? "Undoing..." : "Undo Last Assignment"}
+                </button>
               </div>
             </div>
 
@@ -2139,11 +2167,18 @@ export default function App() {
                     onChange={(event) => setFilters((current) => ({ ...current, leadStore: event.target.value }))}
                   >
                     <option value="">All stores</option>
-                    {DEALERSHIP_ORDER.map((dealership) => (
-                      <option key={`report-store-${dealership}`} value={dealership}>
-                        {dealership}
-                      </option>
-                    ))}
+                    {isBdcUniversal ? (
+                      <>
+                        <option value="Kia/Mazda">Kia/Mazda</option>
+                        <option value="Outlet">Outlet</option>
+                      </>
+                    ) : (
+                      DEALERSHIP_ORDER.map((dealership) => (
+                        <option key={`report-store-${dealership}`} value={dealership}>
+                          {dealership}
+                        </option>
+                      ))
+                    )}
                   </select>
                 </label>
                 <label>
@@ -3340,6 +3375,38 @@ export default function App() {
                           ? "Kia and Mazda leads share one rotation. Outlet stays separate."
                           : "Leads will rotate only within the selected lead store's salespeople."}
                     </div>
+                  </div>
+                ) : null}
+
+                {adminSection === "bdcDistribution" ? (
+                  <div className="panel">
+                    <span className="eyebrow">Undo assignment security</span>
+                    <h3>Require password for BDC undo</h3>
+                    <label className="checkbox">
+                      <input
+                        type="checkbox"
+                        checked={bdcUndoSettings.require_password}
+                        onChange={(event) =>
+                          setBdcUndoSettings((current) => ({ ...current, require_password: event.target.checked }))
+                        }
+                      />
+                      <span>Require password for Undo Last Assignment</span>
+                    </label>
+                    {bdcUndoSettings.require_password ? (
+                      <label>
+                        <span>Undo password</span>
+                        <input
+                          type="password"
+                          placeholder="bdc"
+                          value={bdcUndoPassword}
+                          onChange={(event) => setBdcUndoPassword(event.target.value)}
+                        />
+                        <small>Leave blank to keep the current password.</small>
+                      </label>
+                    ) : null}
+                    <button type="button" onClick={saveBdcUndoSettings} disabled={busy === "bdc-undo-settings"}>
+                      {busy === "bdc-undo-settings" ? "Saving..." : "Save Undo Settings"}
+                    </button>
                   </div>
                 ) : null}
 

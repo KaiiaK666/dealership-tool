@@ -37,6 +37,8 @@ SERVICE_BRANDS = ("Kia", "Mazda")
 QUOTE_BRANDS = ("Kia New", "Mazda New", "Used")
 BDC_DISTRIBUTION_MODES = ("franchise", "global", "universal")
 BDC_DISTRIBUTION_META_KEY = "bdc:distribution"
+BDC_UNDO_REQUIRE_META_KEY = "bdc:undo:require_password"
+BDC_UNDO_PASSWORD_META_KEY = "bdc:undo:password"
 DEFAULT_CORS_ORIGINS = [
     "http://localhost:4183",
     "http://127.0.0.1:4183",
@@ -240,6 +242,20 @@ class BdcHistoryClearOut(BaseModel):
 class BdcUndoOut(BaseModel):
     removed: Optional[BdcAssignmentOut] = None
     pointer: int = 0
+
+
+class BdcUndoSettingsOut(BaseModel):
+    require_password: bool = True
+    password_hint: str = ""
+
+
+class BdcUndoSettingsIn(BaseModel):
+    require_password: bool = True
+    password: str = ""
+
+
+class BdcUndoRequest(BaseModel):
+    password: str = ""
 
 
 class ServiceDriveNoteIn(BaseModel):
@@ -474,6 +490,21 @@ def get_bdc_distribution_mode() -> str:
         return normalize_bdc_distribution(saved)
     except HTTPException:
         return "franchise"
+
+
+def get_bdc_undo_settings() -> BdcUndoSettingsOut:
+    require_value = str(get_meta(BDC_UNDO_REQUIRE_META_KEY) or "1").strip().lower()
+    require_password = require_value not in ("0", "false", "no", "off")
+    password_hint = str(get_meta(BDC_UNDO_PASSWORD_META_KEY) or "bdc")
+    return BdcUndoSettingsOut(require_password=require_password, password_hint="*" * len(password_hint))
+
+
+def set_bdc_undo_settings(settings: BdcUndoSettingsIn) -> BdcUndoSettingsOut:
+    require_password = bool(settings.require_password)
+    password = str(settings.password or "").strip() or "bdc"
+    set_meta(BDC_UNDO_REQUIRE_META_KEY, "1" if require_password else "0")
+    set_meta(BDC_UNDO_PASSWORD_META_KEY, password)
+    return get_bdc_undo_settings()
 
 
 def normalize_bdc_lead_store(value: str) -> str:
@@ -1743,10 +1774,11 @@ def build_log_filter(
         clauses.append("salesperson_id = ?")
         params.append(int(salesperson_id))
 
-    normalized_store = normalize_optional_dealership(lead_store)
-    if normalized_store:
-        clauses.append("lead_store = ?")
-        params.append(normalized_store)
+    if lead_store:
+        normalized_store = normalize_bdc_lead_store(lead_store)
+        if normalized_store:
+            clauses.append("lead_store = ?")
+            params.append(normalized_store)
 
     where_sql = f" WHERE {' AND '.join(clauses)}" if clauses else ""
     return where_sql, tuple(params), start_norm, end_norm
@@ -1872,6 +1904,15 @@ def undo_last_bdc_assignment() -> BdcUndoOut:
         set_meta(bdc_pointer_key(pool_key), str(pointer))
     db_execute("DELETE FROM bdc_assignment_log WHERE id = ?", (int(row.get("id") or 0),))
     return BdcUndoOut(removed=removed, pointer=pointer)
+
+
+def ensure_bdc_undo_authorized(password: str) -> None:
+    settings = get_bdc_undo_settings()
+    if not settings.require_password:
+        return
+    expected = str(get_meta(BDC_UNDO_PASSWORD_META_KEY) or "bdc")
+    if str(password or "").strip() != expected:
+        raise HTTPException(status_code=403, detail="invalid undo password")
 
 
 def build_service_notes_filter(
@@ -2902,6 +2943,11 @@ def get_bdc_distribution() -> BdcDistributionOut:
     return BdcDistributionOut(mode=get_bdc_distribution_mode())
 
 
+@app.get("/api/bdc/undo/settings", response_model=BdcUndoSettingsOut)
+def get_bdc_undo_settings_public() -> BdcUndoSettingsOut:
+    return get_bdc_undo_settings()
+
+
 @app.post("/api/bdc/assign", response_model=BdcAssignmentOut)
 def post_bdc_assign(payload: BdcLeadAssignIn) -> BdcAssignmentOut:
     return assign_next_lead(payload)
@@ -2949,6 +2995,21 @@ def delete_bdc_history(x_admin_token: Optional[str] = Header(default=None)) -> B
 def delete_last_bdc_assign(x_admin_token: Optional[str] = Header(default=None)) -> BdcUndoOut:
     require_admin(x_admin_token)
     return undo_last_bdc_assignment()
+
+
+@app.delete("/api/bdc/assign/last", response_model=BdcUndoOut)
+def delete_last_bdc_assign_public(payload: BdcUndoRequest) -> BdcUndoOut:
+    ensure_bdc_undo_authorized(payload.password)
+    return undo_last_bdc_assignment()
+
+
+@app.post("/api/admin/bdc/undo/settings", response_model=BdcUndoSettingsOut)
+def post_bdc_undo_settings(
+    payload: BdcUndoSettingsIn,
+    x_admin_token: Optional[str] = Header(default=None),
+) -> BdcUndoSettingsOut:
+    require_admin(x_admin_token)
+    return set_bdc_undo_settings(payload)
 
 
 @app.post("/api/admin/bdc/distribution", response_model=BdcDistributionOut)
