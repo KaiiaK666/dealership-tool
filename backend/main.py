@@ -34,6 +34,7 @@ ADMIN_PASSWORD = os.getenv("DEALER_ADMIN_PASSWORD", "admin123").strip() or "admi
 SESSION_SECONDS = max(900, int(os.getenv("DEALER_ADMIN_SESSION_SECONDS", "43200") or 43200))
 DEALERSHIPS = ("Kia", "Mazda", "Outlet")
 SERVICE_BRANDS = ("Kia", "Mazda")
+QUOTE_BRANDS = ("Kia New", "Mazda New", "Used")
 DEFAULT_CORS_ORIGINS = [
     "http://localhost:4183",
     "http://127.0.0.1:4183",
@@ -331,6 +332,20 @@ class ServiceDriveTrafficImportUndoOut(BaseModel):
     preserved_with_notes: int = 0
 
 
+class QuoteRateOut(BaseModel):
+    brand: str
+    tier: str
+    apr: float
+
+
+class QuoteRateListOut(BaseModel):
+    entries: List[QuoteRateOut]
+
+
+class QuoteRatesIn(BaseModel):
+    rates: List[QuoteRateOut]
+
+
 class TrafficPdfOut(BaseModel):
     id: int
     title: str
@@ -414,6 +429,14 @@ def normalize_brand(value: str) -> str:
     normalized = mapping.get(str(value or "").strip().lower())
     if not normalized:
         raise HTTPException(status_code=400, detail="brand must be Kia or Mazda")
+    return normalized
+
+
+def normalize_quote_brand(value: str) -> str:
+    mapping = {item.lower(): item for item in QUOTE_BRANDS}
+    normalized = mapping.get(str(value or "").strip().lower())
+    if not normalized:
+        raise HTTPException(status_code=400, detail="quote brand must be Kia New, Mazda New, or Used")
     return normalized
 
 
@@ -800,6 +823,16 @@ def init_db() -> None:
             stored_filename TEXT NOT NULL,
             image_url TEXT NOT NULL,
             created_ts REAL NOT NULL
+        )
+        """
+    )
+    db_execute(
+        """
+        CREATE TABLE IF NOT EXISTS quote_rate_tiers (
+            brand TEXT NOT NULL,
+            tier TEXT NOT NULL,
+            apr REAL NOT NULL DEFAULT 0,
+            PRIMARY KEY (brand, tier)
         )
         """
     )
@@ -1923,6 +1956,42 @@ def fetch_service_drive_traffic(
     )
 
 
+def fetch_quote_rates() -> List[QuoteRateOut]:
+    rows = db_query_all("SELECT brand, tier, apr FROM quote_rate_tiers ORDER BY brand, tier")
+    return [
+        QuoteRateOut(
+            brand=str(row.get("brand") or ""),
+            tier=str(row.get("tier") or ""),
+            apr=float(row.get("apr") or 0.0),
+        )
+        for row in rows
+    ]
+
+
+def upsert_quote_rates(rates: List[QuoteRateOut]) -> None:
+    if not rates:
+        return
+    with db_lock:
+        conn = get_db()
+        try:
+            for rate in rates:
+                brand = normalize_quote_brand(rate.brand)
+                tier = normalize_short_text(rate.tier, "tier", max_len=12)
+                apr = float(rate.apr or 0.0)
+                conn.execute(
+                    """
+                    INSERT INTO quote_rate_tiers (brand, tier, apr)
+                    VALUES (?, ?, ?)
+                    ON CONFLICT(brand, tier) DO UPDATE SET apr = excluded.apr
+                    """,
+                    (brand, tier, apr),
+                )
+            conn.commit()
+        except Exception as exc:
+            conn.rollback()
+            raise HTTPException(status_code=400, detail=f"failed to save quote rates: {exc}") from exc
+
+
 def reynolds_text(row: Dict[str, Any], key: str) -> str:
     return str(row.get(key) or "").strip()
 
@@ -2559,6 +2628,11 @@ def get_specials() -> SpecialsListOut:
     return fetch_specials()
 
 
+@app.get("/api/quote/rates", response_model=QuoteRateListOut)
+def get_quote_rates() -> QuoteRateListOut:
+    return QuoteRateListOut(entries=fetch_quote_rates())
+
+
 @app.get("/api/service-drive/notes", response_model=ServiceDriveNotesOut)
 def get_service_drive_notes(
     salesperson_id: Optional[int] = None,
@@ -2618,6 +2692,16 @@ def delete_service_drive_traffic_reynolds_import(
 ) -> ServiceDriveTrafficImportUndoOut:
     require_admin(x_admin_token)
     return undo_reynolds_service_traffic_import()
+
+
+@app.post("/api/admin/quote/rates", response_model=QuoteRateListOut)
+def post_quote_rates(
+    payload: QuoteRatesIn,
+    x_admin_token: Optional[str] = Header(default=None),
+) -> QuoteRateListOut:
+    require_admin(x_admin_token)
+    upsert_quote_rates(payload.rates)
+    return QuoteRateListOut(entries=fetch_quote_rates())
 
 
 @app.post("/api/admin/service-drive/traffic/{traffic_id}/images", response_model=ServiceDriveTrafficOut)

@@ -16,6 +16,7 @@ import {
   getBdcLog,
   getBdcReport,
   getBdcState,
+  getQuoteRates,
   getSalespeople,
   getSpecials,
   getServiceDrive,
@@ -25,6 +26,7 @@ import {
   replaceAdminDaysOffMonth,
   undoReynoldsServiceDriveTrafficImport,
   updateBdcAgent,
+  updateQuoteRates,
   updateSalesperson,
   updateSpecial,
   updateServiceDriveAssignment,
@@ -40,6 +42,7 @@ const TABS = [
   { id: "bdc", label: "BDC Assign" },
   { id: "reports", label: "BDC Reports" },
   { id: "traffic", label: "Service Drive Traffic" },
+  { id: "quote", label: "Quote Tool" },
   { id: "specials", label: "Specials" },
   { id: "admin", label: "Admin" },
 ];
@@ -48,11 +51,20 @@ const ADMIN_SECTIONS = [
   { id: "staff", label: "Staff Setup" },
   { id: "daysOff", label: "Days Off" },
   { id: "trafficLog", label: "Traffic Log" },
+  { id: "quoteRates", label: "Quote Rates" },
   { id: "specials", label: "Specials" },
 ];
 
 const DEALERSHIP_ORDER = ["Kia", "Mazda", "Outlet"];
 const TRAFFIC_BRANDS = ["Kia", "Mazda"];
+const QUOTE_BRANDS = ["Kia New", "Mazda New", "Used"];
+const CREDIT_TIERS = [
+  { label: "400s", min: 400, max: 499 },
+  { label: "500s", min: 500, max: 599 },
+  { label: "600s", min: 600, max: 699 },
+  { label: "700s", min: 700, max: 799 },
+  { label: "800s", min: 800, max: 899 },
+];
 const TRAFFIC_URL = "https://bokbbui-production.up.railway.app/";
 const CALENDAR_WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
@@ -193,6 +205,27 @@ function odometerLabel(value) {
   const text = String(value || "").trim();
   if (!text) return "Miles n/a";
   return text.toLowerCase().includes("mi") ? text : `${text} mi`;
+}
+
+function numericValue(value) {
+  const cleaned = String(value || "").replace(/[^0-9.-]/g, "");
+  const parsed = Number.parseFloat(cleaned);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function creditTierFromScore(scoreValue) {
+  const score = Math.round(numericValue(scoreValue));
+  if (!score) return "";
+  for (const tier of CREDIT_TIERS) {
+    if (score >= tier.min && score <= tier.max) return tier.label;
+  }
+  if (score < CREDIT_TIERS[0].min) return CREDIT_TIERS[0].label;
+  return CREDIT_TIERS[CREDIT_TIERS.length - 1].label;
+}
+
+function formatMoney(value) {
+  if (!Number.isFinite(value)) return "$0.00";
+  return value.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 2 });
 }
 
 function sortTrafficEntries(entries) {
@@ -369,6 +402,16 @@ export default function App() {
   const [reynoldsImportFileKey, setReynoldsImportFileKey] = useState(0);
   const [reynoldsImportResult, setReynoldsImportResult] = useState(null);
   const [reynoldsUndoResult, setReynoldsUndoResult] = useState(null);
+  const [quoteRates, setQuoteRates] = useState([]);
+  const [quoteRateDraft, setQuoteRateDraft] = useState({});
+  const [quoteForm, setQuoteForm] = useState({
+    brand: "Kia New",
+    msrp: "",
+    creditScore: "",
+    tradeEquity: "",
+    downPayment: "",
+    months: "72",
+  });
   const [trafficRowUploadFiles, setTrafficRowUploadFiles] = useState({});
   const [trafficRowUploadKeys, setTrafficRowUploadKeys] = useState({});
   const [trafficPdfForm, setTrafficPdfForm] = useState({ title: "", file: null });
@@ -439,6 +482,27 @@ export default function App() {
     date: value,
     people: activeSales.filter((person) => (daysOffEntriesBySalesperson.get(person.id) || []).includes(value)),
   }));
+  const quoteRateMap = quoteRates.reduce((acc, rate) => {
+    if (!acc[rate.brand]) acc[rate.brand] = {};
+    acc[rate.brand][rate.tier] = Number(rate.apr || 0);
+    return acc;
+  }, {});
+  const selectedQuoteTier = creditTierFromScore(quoteForm.creditScore);
+  const selectedQuoteApr = selectedQuoteTier ? quoteRateMap?.[quoteForm.brand]?.[selectedQuoteTier] ?? 0 : 0;
+  const quoteMsrp = numericValue(quoteForm.msrp);
+  const quoteTrade = numericValue(quoteForm.tradeEquity);
+  const quoteDown = numericValue(quoteForm.downPayment);
+  const quoteMonths = Math.max(0, Math.round(numericValue(quoteForm.months)));
+  const quotePrincipal = Math.max(0, quoteMsrp - quoteTrade - quoteDown);
+  const quoteMonthlyRate = selectedQuoteApr ? selectedQuoteApr / 100 / 12 : 0;
+  const quotePayment =
+    quoteMonths > 0
+      ? quoteMonthlyRate > 0
+        ? (quotePrincipal * quoteMonthlyRate) / (1 - Math.pow(1 + quoteMonthlyRate, -quoteMonths))
+        : quotePrincipal / quoteMonths
+      : 0;
+  const quoteTotalPaid = quotePayment * quoteMonths;
+  const quoteTotalInterest = Math.max(0, quoteTotalPaid - quotePrincipal);
 
   async function loadAll(nextMonth = month, nextFilters = filters) {
     const [sales, bdc, service, log, report] = await Promise.all([
@@ -489,6 +553,55 @@ export default function App() {
     setSpecials(data.entries || []);
   }
 
+  async function refreshQuoteRates() {
+    const data = await getQuoteRates();
+    const entries = data.entries || [];
+    setQuoteRates(entries);
+    const draft = {};
+    for (const brand of QUOTE_BRANDS) {
+      draft[brand] = {};
+      for (const tier of CREDIT_TIERS) {
+        draft[brand][tier.label] = "";
+      }
+    }
+    for (const entry of entries) {
+      if (!draft[entry.brand]) draft[entry.brand] = {};
+      draft[entry.brand][entry.tier] = String(entry.apr ?? "");
+    }
+    setQuoteRateDraft(draft);
+  }
+
+  function updateQuoteRateDraft(brand, tier, value) {
+    setQuoteRateDraft((prev) => ({
+      ...prev,
+      [brand]: {
+        ...(prev[brand] || {}),
+        [tier]: value,
+      },
+    }));
+  }
+
+  async function saveQuoteRates() {
+    setBusy("quote-rates");
+    setError("");
+    try {
+      const rates = [];
+      for (const brand of QUOTE_BRANDS) {
+        for (const tier of CREDIT_TIERS) {
+          const raw = quoteRateDraft?.[brand]?.[tier.label];
+          const aprValue = Number.parseFloat(String(raw ?? "").trim());
+          rates.push({ brand, tier: tier.label, apr: Number.isFinite(aprValue) ? aprValue : 0 });
+        }
+      }
+      await updateQuoteRates(adminToken, { rates });
+      await refreshQuoteRates();
+    } catch (errorValue) {
+      setError(errText(errorValue));
+    } finally {
+      setBusy("");
+    }
+  }
+
   useEffect(() => {
     let active = true;
     const run = async () => {
@@ -496,6 +609,7 @@ export default function App() {
       setError("");
       try {
         await loadAll(month, filters);
+        await refreshQuoteRates();
       } catch (errorValue) {
         if (active) setError(errText(errorValue));
       } finally {
@@ -2049,6 +2163,111 @@ export default function App() {
           </section>
         ) : null}
 
+        {tab === "quote" ? (
+          <section className="stack quote-section">
+            <div className="panel quote-hero">
+              <span className="eyebrow">Quote Tool</span>
+              <h2>Payment estimate on the fly</h2>
+              <p>
+                This calculator uses the standard amortization formula to estimate a monthly payment based on MSRP,
+                trade equity, down payment, term, and the APR from your credit tier. It does not include tax, title,
+                fees, warranties, or backend products.
+              </p>
+            </div>
+
+            <div className="panel quote-grid">
+              <div className="quote-form">
+                <label>
+                  <span>Brand</span>
+                  <select
+                    value={quoteForm.brand}
+                    onChange={(event) => setQuoteForm((current) => ({ ...current, brand: event.target.value }))}
+                  >
+                    {QUOTE_BRANDS.map((brand) => (
+                      <option key={brand} value={brand}>
+                        {brand}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  <span>MSRP</span>
+                  <input
+                    inputMode="decimal"
+                    placeholder="45,000"
+                    value={quoteForm.msrp}
+                    onChange={(event) => setQuoteForm((current) => ({ ...current, msrp: event.target.value }))}
+                  />
+                </label>
+                <label>
+                  <span>Estimated credit score</span>
+                  <input
+                    inputMode="numeric"
+                    placeholder="720"
+                    value={quoteForm.creditScore}
+                    onChange={(event) => setQuoteForm((current) => ({ ...current, creditScore: event.target.value }))}
+                  />
+                </label>
+                <label>
+                  <span>Trade-in equity</span>
+                  <input
+                    inputMode="decimal"
+                    placeholder="5,000"
+                    value={quoteForm.tradeEquity}
+                    onChange={(event) => setQuoteForm((current) => ({ ...current, tradeEquity: event.target.value }))}
+                  />
+                </label>
+                <label>
+                  <span>Down payment</span>
+                  <input
+                    inputMode="decimal"
+                    placeholder="2,500"
+                    value={quoteForm.downPayment}
+                    onChange={(event) => setQuoteForm((current) => ({ ...current, downPayment: event.target.value }))}
+                  />
+                </label>
+                <label>
+                  <span>Term (months)</span>
+                  <input
+                    inputMode="numeric"
+                    placeholder="72"
+                    value={quoteForm.months}
+                    onChange={(event) => setQuoteForm((current) => ({ ...current, months: event.target.value }))}
+                  />
+                </label>
+              </div>
+
+              <div className="quote-result">
+                <div>
+                  <span className="eyebrow">Estimated payment</span>
+                  <h2>{quoteMonths > 0 ? formatMoney(quotePayment) : "$0.00"}</h2>
+                </div>
+                <div className="quote-metrics">
+                  <div className="quote-metric">
+                    <span>Credit tier</span>
+                    <strong>{selectedQuoteTier || "Enter score"}</strong>
+                  </div>
+                  <div className="quote-metric">
+                    <span>APR</span>
+                    <strong>{selectedQuoteTier ? `${selectedQuoteApr.toFixed(2)}%` : "Set score"}</strong>
+                  </div>
+                  <div className="quote-metric">
+                    <span>Amount financed</span>
+                    <strong>{formatMoney(quotePrincipal)}</strong>
+                  </div>
+                  <div className="quote-metric">
+                    <span>Total interest</span>
+                    <strong>{formatMoney(quoteTotalInterest)}</strong>
+                  </div>
+                </div>
+                <p className="quote-footnote">
+                  Rates are controlled by Admin &gt; Quote Rates. Update tiers there to match lender guidance.
+                </p>
+              </div>
+            </div>
+          </section>
+        ) : null}
+
         {tab === "specials" ? (
           <section className="stack">
             <div className="panel">
@@ -2870,6 +3089,37 @@ export default function App() {
                       )}
                     </div>
                   </>
+                ) : null}
+
+                {adminSection === "quoteRates" ? (
+                  <div className="panel">
+                    <span className="eyebrow">Quote rates</span>
+                    <h3>APR by credit tier</h3>
+                    <p className="admin-note">
+                      Set the APR that should be used for each credit tier and brand. These rates power the Quote Tool.
+                    </p>
+                    <div className="quote-rate-grid">
+                      {QUOTE_BRANDS.map((brand) => (
+                        <div key={brand} className="quote-rate-card">
+                          <h4>{brand}</h4>
+                          {CREDIT_TIERS.map((tier) => (
+                            <label key={`${brand}-${tier.label}`} className="quote-rate-input">
+                              <span>{tier.label}</span>
+                              <input
+                                inputMode="decimal"
+                                placeholder="7.99"
+                                value={quoteRateDraft?.[brand]?.[tier.label] ?? ""}
+                                onChange={(event) => updateQuoteRateDraft(brand, tier.label, event.target.value)}
+                              />
+                            </label>
+                          ))}
+                        </div>
+                      ))}
+                    </div>
+                    <button type="button" onClick={saveQuoteRates} disabled={busy === "quote-rates"}>
+                      {busy === "quote-rates" ? "Saving..." : "Save Quote Rates"}
+                    </button>
+                  </div>
                 ) : null}
 
                 {false && adminSection === "serviceNotes" ? (

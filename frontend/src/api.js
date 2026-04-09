@@ -129,6 +129,7 @@ export const getServiceDriveTraffic = (params = {}) =>
   })}`);
 export const getTrafficPdfs = () => request("/api/traffic/pdfs");
 export const getSpecials = () => request("/api/specials");
+export const getQuoteRates = () => request("/api/quote/rates");
 export const getServiceDriveNotes = (params = {}) =>
   request(`/api/service-drive/notes${qs({
     salesperson_id: params.salespersonId,
@@ -168,6 +169,8 @@ export const createSpecial = (token, formData) =>
   request("/api/admin/specials", { method: "POST", body: formData, headers: adminHeaders(token), timeout: 60000 });
 export const updateSpecial = (token, id, formData) =>
   request(`/api/admin/specials/${id}`, { method: "PUT", body: formData, headers: adminHeaders(token), timeout: 60000 });
+export const updateQuoteRates = (token, payload) =>
+  request("/api/admin/quote/rates", { method: "POST", body: payload, headers: adminHeaders(token) });
 export const createServiceDriveNote = (token, payload) =>
   request("/api/admin/service-drive/notes", { method: "POST", body: payload, headers: adminHeaders(token) });
 export const updateServiceDriveNote = (token, id, payload) =>
