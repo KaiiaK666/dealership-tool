@@ -28,6 +28,7 @@ import {
   undoReynoldsServiceDriveTrafficImport,
   updateBdcAgent,
   updateBdcDistribution,
+  undoLastBdcAssign,
   updateQuoteRates,
   updateSalesperson,
   updateSpecial,
@@ -429,9 +430,12 @@ export default function App() {
 
   const activeSales = salespeople.filter((person) => person.active);
   const isBdcGlobal = bdcDistribution.mode === "global";
+  const isBdcUniversal = bdcDistribution.mode === "universal";
   const leadPoolSales = isBdcGlobal
     ? activeSales
-    : activeSales.filter((person) => person.dealership === leadForm.leadStore);
+    : isBdcUniversal
+      ? activeSales.filter((person) => (leadForm.leadStore === "Outlet" ? person.dealership === "Outlet" : person.dealership !== "Outlet"))
+      : activeSales.filter((person) => person.dealership === leadForm.leadStore);
   const serviceEligible = activeSales.filter((person) => person.dealership !== "Outlet");
   const activeBdc = bdcAgents.filter((agent) => agent.active);
   const today = todayDateValue();
@@ -760,6 +764,17 @@ export default function App() {
       setTrafficMonth(month);
     }
   }, [month, tab, trafficMonth]);
+
+  useEffect(() => {
+    if (isBdcUniversal) {
+      setLeadForm((current) => ({
+        ...current,
+        leadStore: current.leadStore === "Outlet" ? "Outlet" : "Kia/Mazda",
+      }));
+    } else if (!isBdcGlobal && leadForm.leadStore === "Kia/Mazda") {
+      setLeadForm((current) => ({ ...current, leadStore: "Kia" }));
+    }
+  }, [isBdcUniversal, isBdcGlobal]);
 
   useEffect(() => {
     if ((tab === "serviceNotes" || (tab === "admin" && adminSection === "trafficLog")) && month !== trafficMonth) {
@@ -1282,6 +1297,24 @@ export default function App() {
     try {
       await clearBdcHistory(adminToken);
       setLastAssignment(null);
+      await refresh();
+    } catch (errorValue) {
+      setError(errText(errorValue));
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function handleUndoLastBdcAssign() {
+    if (!adminSession || !adminToken) return;
+    if (typeof window !== "undefined" && !window.confirm("Undo the most recent BDC assignment?")) {
+      return;
+    }
+    setBusy("undo-assign");
+    setError("");
+    try {
+      const result = await undoLastBdcAssign(adminToken);
+      if (result?.removed) setLastAssignment(null);
       await refresh();
     } catch (errorValue) {
       setError(errText(errorValue));
@@ -1912,11 +1945,18 @@ export default function App() {
                 <p>
                   {isBdcGlobal
                     ? "Lead store still logs the source, but assignments rotate through all active salespeople."
-                    : "Choose the source store first, then assign the lead only within that store's salesperson pool."}
+                    : isBdcUniversal
+                      ? "Kia and Mazda leads share one rotation. Outlet stays separate."
+                      : "Choose the source store first, then assign the lead only within that store's salesperson pool."}
                 </p>
                 <div className="mode-pill-row">
-                  <span className={`mode-pill ${isBdcGlobal ? "mode-pill--global" : "mode-pill--franchise"}`}>
-                    Distribution: {isBdcGlobal ? "Global round robin" : "Franchise specific"}
+                  <span
+                    className={`mode-pill ${
+                      isBdcGlobal ? "mode-pill--global" : isBdcUniversal ? "mode-pill--universal" : "mode-pill--franchise"
+                    }`}
+                  >
+                    Distribution:{" "}
+                    {isBdcGlobal ? "Global round robin" : isBdcUniversal ? "Universal (Kia/Mazda shared)" : "Franchise specific"}
                   </span>
                 </div>
               </div>
@@ -1942,11 +1982,18 @@ export default function App() {
                     onChange={(event) => setLeadForm((current) => ({ ...current, leadStore: event.target.value }))}
                     disabled={isBdcGlobal}
                   >
-                    {DEALERSHIP_ORDER.map((dealership) => (
-                      <option key={`lead-store-${dealership}`} value={dealership}>
-                        {dealership}
-                      </option>
-                    ))}
+                    {isBdcUniversal ? (
+                      <>
+                        <option value="Kia/Mazda">Kia/Mazda</option>
+                        <option value="Outlet">Outlet</option>
+                      </>
+                    ) : (
+                      DEALERSHIP_ORDER.map((dealership) => (
+                        <option key={`lead-store-${dealership}`} value={dealership}>
+                          {dealership}
+                        </option>
+                      ))
+                    )}
                   </select>
                   {isBdcGlobal ? <small>Global mode: store selection is locked.</small> : null}
                 </label>
@@ -1976,9 +2023,17 @@ export default function App() {
                         (leadPoolSales.length
                           ? isBdcGlobal
                             ? "Everyone is scheduled off today"
+                            : isBdcUniversal && leadForm.leadStore === "Outlet"
+                              ? "Everyone in Outlet is scheduled off today"
+                              : isBdcUniversal
+                                ? "Everyone in Kia/Mazda is scheduled off today"
                             : `Everyone in ${leadForm.leadStore} is scheduled off today`
                           : isBdcGlobal
                             ? "No active salespeople"
+                            : isBdcUniversal && leadForm.leadStore === "Outlet"
+                              ? "No active Outlet salespeople"
+                              : isBdcUniversal
+                                ? "No active Kia/Mazda salespeople"
                             : `No active ${leadForm.leadStore} salespeople`)}
                   </small>
                 </div>
@@ -1989,6 +2044,16 @@ export default function App() {
                 >
                   {busy === "assign" ? "Assigning..." : "Assign Next Lead"}
                 </button>
+                {adminSession ? (
+                  <button
+                    type="button"
+                    className="secondary"
+                    onClick={handleUndoLastBdcAssign}
+                    disabled={busy === "undo-assign"}
+                  >
+                    {busy === "undo-assign" ? "Undoing..." : "Undo Last Assignment"}
+                  </button>
+                ) : null}
               </div>
             </div>
 
@@ -2004,7 +2069,11 @@ export default function App() {
               <div className="notice">
                 {isBdcGlobal
                   ? "Nobody is eligible in the global round robin today because every active salesperson is scheduled off."
-                  : `Nobody is eligible in the ${leadForm.leadStore} round robin today because every active salesperson in that store is scheduled off.`}
+                  : isBdcUniversal
+                    ? leadForm.leadStore === "Outlet"
+                      ? "Nobody is eligible in the Outlet round robin today because every active Outlet salesperson is scheduled off."
+                      : "Nobody is eligible in the Kia/Mazda round robin today because every active salesperson in those stores is scheduled off."
+                    : `Nobody is eligible in the ${leadForm.leadStore} round robin today because every active salesperson in that store is scheduled off.`}
               </div>
             ) : null}
 
@@ -3255,11 +3324,21 @@ export default function App() {
                       >
                         Global round robin
                       </button>
+                      <button
+                        type="button"
+                        className={`pill ${bdcDistribution.mode === "universal" ? "is-active" : ""}`}
+                        onClick={() => saveBdcDistribution("universal")}
+                        disabled={busy === "bdc-distribution"}
+                      >
+                        Universal (Kia/Mazda shared)
+                      </button>
                     </div>
                     <div className="notice">
                       {bdcDistribution.mode === "global"
                         ? "Leads will rotate through all active salespeople across Kia, Mazda, and Outlet."
-                        : "Leads will rotate only within the selected lead store's salespeople."}
+                        : bdcDistribution.mode === "universal"
+                          ? "Kia and Mazda leads share one rotation. Outlet stays separate."
+                          : "Leads will rotate only within the selected lead store's salespeople."}
                     </div>
                   </div>
                 ) : null}
