@@ -414,6 +414,10 @@ export default function App() {
     creditScore: "",
     tradeEquity: "",
     downPayment: "",
+    taxRate: "8.25",
+    fees: "0",
+    vapIncluded: false,
+    vapAmount: "0",
     months: "72",
   });
   const [trafficRowUploadFiles, setTrafficRowUploadFiles] = useState({});
@@ -499,8 +503,13 @@ export default function App() {
   const quoteMsrp = numericValue(quoteForm.msrp);
   const quoteTrade = numericValue(quoteForm.tradeEquity);
   const quoteDown = numericValue(quoteForm.downPayment);
+  const quoteTaxRate = Math.max(0, numericValue(quoteForm.taxRate));
+  const quoteFees = Math.max(0, numericValue(quoteForm.fees));
+  const quoteVap = quoteForm.vapIncluded ? Math.max(0, numericValue(quoteForm.vapAmount)) : 0;
   const quoteMonths = Math.max(0, Math.round(numericValue(quoteForm.months)));
-  const quotePrincipal = Math.max(0, quoteMsrp - quoteTrade - quoteDown);
+  const quoteTaxableBase = Math.max(0, quoteMsrp - quoteTrade);
+  const quoteTax = quoteTaxableBase * (quoteTaxRate / 100);
+  const quotePrincipal = Math.max(0, quoteMsrp + quoteFees + quoteVap + quoteTax - quoteTrade - quoteDown);
   const quoteMonthlyRate = selectedQuoteApr ? selectedQuoteApr / 100 / 12 : 0;
   const quotePayment =
     quoteMonths > 0
@@ -2209,72 +2218,123 @@ export default function App() {
               <span className="eyebrow">Quote Tool</span>
               <h2>Payment estimate on the fly</h2>
               <p>
-                This calculator uses the standard amortization formula to estimate a monthly payment based on MSRP,
-                trade equity, down payment, term, and the APR from your credit tier. It does not include tax, title,
-                fees, warranties, or backend products.
+                This calculator uses the standard amortization formula to estimate a monthly payment. It includes MSRP,
+                trade equity, down payment, taxes, fees, term, optional VAP, and the APR from your credit tier.
               </p>
             </div>
 
             <div className="panel quote-grid">
               <div className="quote-form">
-                <label>
-                  <span>Brand</span>
-                  <select
-                    value={quoteForm.brand}
-                    onChange={(event) => setQuoteForm((current) => ({ ...current, brand: event.target.value }))}
-                  >
-                    {QUOTE_BRANDS.map((brand) => (
-                      <option key={brand} value={brand}>
-                        {brand}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <label>
-                  <span>MSRP</span>
-                  <input
-                    inputMode="decimal"
-                    placeholder="45,000"
-                    value={quoteForm.msrp}
-                    onChange={(event) => setQuoteForm((current) => ({ ...current, msrp: event.target.value }))}
-                  />
-                </label>
-                <label>
-                  <span>Estimated credit score</span>
-                  <input
-                    inputMode="numeric"
-                    placeholder="720"
-                    value={quoteForm.creditScore}
-                    onChange={(event) => setQuoteForm((current) => ({ ...current, creditScore: event.target.value }))}
-                  />
-                </label>
-                <label>
-                  <span>Trade-in equity</span>
-                  <input
-                    inputMode="decimal"
-                    placeholder="5,000"
-                    value={quoteForm.tradeEquity}
-                    onChange={(event) => setQuoteForm((current) => ({ ...current, tradeEquity: event.target.value }))}
-                  />
-                </label>
-                <label>
-                  <span>Down payment</span>
-                  <input
-                    inputMode="decimal"
-                    placeholder="2,500"
-                    value={quoteForm.downPayment}
-                    onChange={(event) => setQuoteForm((current) => ({ ...current, downPayment: event.target.value }))}
-                  />
-                </label>
-                <label>
-                  <span>Term (months)</span>
-                  <input
-                    inputMode="numeric"
-                    placeholder="72"
-                    value={quoteForm.months}
-                    onChange={(event) => setQuoteForm((current) => ({ ...current, months: event.target.value }))}
-                  />
-                </label>
+                <div className="quote-form__section">
+                  <span className="eyebrow">Vehicle</span>
+                  <label>
+                    <span>Brand</span>
+                    <select
+                      value={quoteForm.brand}
+                      onChange={(event) => setQuoteForm((current) => ({ ...current, brand: event.target.value }))}
+                    >
+                      {QUOTE_BRANDS.map((brand) => (
+                        <option key={brand} value={brand}>
+                          {brand}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    <span>MSRP</span>
+                    <input
+                      inputMode="decimal"
+                      placeholder="45,000"
+                      value={quoteForm.msrp}
+                      onChange={(event) => setQuoteForm((current) => ({ ...current, msrp: event.target.value }))}
+                    />
+                  </label>
+                </div>
+
+                <div className="quote-form__section">
+                  <span className="eyebrow">Customer</span>
+                  <label>
+                    <span>Estimated credit score</span>
+                    <input
+                      inputMode="numeric"
+                      placeholder="720"
+                      value={quoteForm.creditScore}
+                      onChange={(event) => setQuoteForm((current) => ({ ...current, creditScore: event.target.value }))}
+                    />
+                  </label>
+                  <label>
+                    <span>Trade-in equity</span>
+                    <input
+                      inputMode="decimal"
+                      placeholder="5,000"
+                      value={quoteForm.tradeEquity}
+                      onChange={(event) => setQuoteForm((current) => ({ ...current, tradeEquity: event.target.value }))}
+                    />
+                  </label>
+                  <label>
+                    <span>Down payment</span>
+                    <input
+                      inputMode="decimal"
+                      placeholder="2,500"
+                      value={quoteForm.downPayment}
+                      onChange={(event) => setQuoteForm((current) => ({ ...current, downPayment: event.target.value }))}
+                    />
+                  </label>
+                </div>
+
+                <div className="quote-form__section">
+                  <span className="eyebrow">Taxes & Fees</span>
+                  <label>
+                    <span>Tax rate (%)</span>
+                    <input
+                      inputMode="decimal"
+                      placeholder="8.25"
+                      value={quoteForm.taxRate}
+                      onChange={(event) => setQuoteForm((current) => ({ ...current, taxRate: event.target.value }))}
+                    />
+                  </label>
+                  <label>
+                    <span>Fees (total)</span>
+                    <input
+                      inputMode="decimal"
+                      placeholder="1,250"
+                      value={quoteForm.fees}
+                      onChange={(event) => setQuoteForm((current) => ({ ...current, fees: event.target.value }))}
+                    />
+                  </label>
+                  <label className="checkbox">
+                    <input
+                      type="checkbox"
+                      checked={quoteForm.vapIncluded}
+                      onChange={(event) => setQuoteForm((current) => ({ ...current, vapIncluded: event.target.checked }))}
+                    />
+                    <span>VAP package included</span>
+                  </label>
+                  {quoteForm.vapIncluded ? (
+                    <label>
+                      <span>VAP amount</span>
+                      <input
+                        inputMode="decimal"
+                        placeholder="1,995"
+                        value={quoteForm.vapAmount}
+                        onChange={(event) => setQuoteForm((current) => ({ ...current, vapAmount: event.target.value }))}
+                      />
+                    </label>
+                  ) : null}
+                </div>
+
+                <div className="quote-form__section">
+                  <span className="eyebrow">Term</span>
+                  <label>
+                    <span>Term (months)</span>
+                    <input
+                      inputMode="numeric"
+                      placeholder="72"
+                      value={quoteForm.months}
+                      onChange={(event) => setQuoteForm((current) => ({ ...current, months: event.target.value }))}
+                    />
+                  </label>
+                </div>
               </div>
 
               <div className="quote-result">
@@ -2299,9 +2359,18 @@ export default function App() {
                     <span>Total interest</span>
                     <strong>{formatMoney(quoteTotalInterest)}</strong>
                   </div>
+                  <div className="quote-metric">
+                    <span>Taxes</span>
+                    <strong>{formatMoney(quoteTax)}</strong>
+                  </div>
+                  <div className="quote-metric">
+                    <span>Fees + VAP</span>
+                    <strong>{formatMoney(quoteFees + quoteVap)}</strong>
+                  </div>
                 </div>
                 <p className="quote-footnote">
-                  Rates are controlled by Admin &gt; Quote Rates. Update tiers there to match lender guidance.
+                  Rates are controlled by Admin &gt; Quote Rates. Tax is applied to MSRP minus trade equity. Adjust if your
+                  lender uses a different taxable base.
                 </p>
               </div>
             </div>
