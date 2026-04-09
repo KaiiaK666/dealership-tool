@@ -35,6 +35,8 @@ SESSION_SECONDS = max(900, int(os.getenv("DEALER_ADMIN_SESSION_SECONDS", "43200"
 DEALERSHIPS = ("Kia", "Mazda", "Outlet")
 SERVICE_BRANDS = ("Kia", "Mazda")
 QUOTE_BRANDS = ("Kia New", "Mazda New", "Used")
+BDC_DISTRIBUTION_MODES = ("franchise", "global")
+BDC_DISTRIBUTION_META_KEY = "bdc:distribution"
 DEFAULT_CORS_ORIGINS = [
     "http://localhost:4183",
     "http://127.0.0.1:4183",
@@ -195,6 +197,14 @@ class BdcStateOut(BaseModel):
     next_index: int
     next_salesperson: Optional[SalespersonOut] = None
     queue: List[SalespersonOut]
+
+
+class BdcDistributionOut(BaseModel):
+    mode: str
+
+
+class BdcDistributionIn(BaseModel):
+    mode: str
 
 
 class BdcLogOut(BaseModel):
@@ -438,6 +448,25 @@ def normalize_quote_brand(value: str) -> str:
     if not normalized:
         raise HTTPException(status_code=400, detail="quote brand must be Kia New, Mazda New, or Used")
     return normalized
+
+
+def normalize_bdc_distribution(value: str) -> str:
+    text = str(value or "").strip().lower()
+    if text in ("franchise", "by_franchise", "store"):
+        return "franchise"
+    if text in ("global", "all", "combined"):
+        return "global"
+    raise HTTPException(status_code=400, detail="distribution mode must be franchise or global")
+
+
+def get_bdc_distribution_mode() -> str:
+    saved = get_meta(BDC_DISTRIBUTION_META_KEY)
+    if not saved:
+        return "franchise"
+    try:
+        return normalize_bdc_distribution(saved)
+    except HTTPException:
+        return "franchise"
 
 
 def normalize_days_off(value: Any) -> List[int]:
@@ -1567,18 +1596,20 @@ def bdc_pointer_key(dealership: Optional[str]) -> str:
 
 
 def build_bdc_state(dealership: Optional[str] = None) -> BdcStateOut:
+    distribution_mode = get_bdc_distribution_mode()
     normalized_store = normalize_optional_dealership(dealership)
-    queue = fetch_round_robin_salespeople(normalized_store)
+    pool_store = None if distribution_mode == "global" else normalized_store
+    queue = fetch_round_robin_salespeople(pool_store)
     if not queue:
-        return BdcStateOut(dealership=normalized_store, next_index=0, next_salesperson=None, queue=[])
+        return BdcStateOut(dealership=pool_store, next_index=0, next_salesperson=None, queue=[])
     try:
-        pointer = int(get_meta(bdc_pointer_key(normalized_store)) or 0)
+        pointer = int(get_meta(bdc_pointer_key(pool_store)) or 0)
     except Exception:
         pointer = 0
     next_index = pointer % len(queue)
     picked, _, available_queue = pick_round_robin_person(queue, now_local().date(), pointer)
     return BdcStateOut(
-        dealership=normalized_store,
+        dealership=pool_store,
         next_index=next_index,
         next_salesperson=picked,
         queue=available_queue,
@@ -1589,16 +1620,20 @@ def assign_next_lead(payload: BdcLeadAssignIn) -> BdcAssignmentOut:
     if is_sunday(now_local().date()):
         raise HTTPException(status_code=400, detail="BDC round robin is closed on Sundays")
     lead_store = normalize_dealership(payload.lead_store or "Kia")
-    salespeople = fetch_round_robin_salespeople(lead_store)
+    distribution_mode = get_bdc_distribution_mode()
+    pool_store = None if distribution_mode == "global" else lead_store
+    salespeople = fetch_round_robin_salespeople(pool_store)
     if not salespeople:
-        raise HTTPException(status_code=400, detail=f"no active {lead_store} salespeople available")
+        store_label = "salespeople" if pool_store is None else f"{lead_store} salespeople"
+        raise HTTPException(status_code=400, detail=f"no active {store_label} available")
     try:
-        pointer = int(get_meta(bdc_pointer_key(lead_store)) or 0)
+        pointer = int(get_meta(bdc_pointer_key(pool_store)) or 0)
     except Exception:
         pointer = 0
     salesperson, next_pointer, _ = pick_round_robin_person(salespeople, now_local().date(), pointer)
     if not salesperson:
-        raise HTTPException(status_code=400, detail=f"no active {lead_store} salespeople available for today's rotation")
+        store_label = "salespeople" if pool_store is None else f"{lead_store} salespeople"
+        raise HTTPException(status_code=400, detail=f"no active {store_label} available for today's rotation")
     bdc_agent_id, bdc_agent_name = resolve_bdc_agent(payload.bdc_agent_id, payload.bdc_agent_name)
     customer_name = normalize_short_text(payload.customer_name, "customer_name")
     customer_phone = normalize_short_text(payload.customer_phone, "customer_phone", max_len=40)
@@ -1622,7 +1657,7 @@ def assign_next_lead(payload: BdcLeadAssignIn) -> BdcAssignmentOut:
             customer_phone,
         ),
     )
-    set_meta(bdc_pointer_key(lead_store), str(next_pointer))
+    set_meta(bdc_pointer_key(pool_store), str(next_pointer))
     row = db_query_one("SELECT * FROM bdc_assignment_log WHERE id = ?", (created_id,))
     if not row:
         raise HTTPException(status_code=500, detail="failed to create assignment log")
@@ -2793,6 +2828,11 @@ def get_bdc_state(dealership: Optional[str] = None) -> BdcStateOut:
     return build_bdc_state(dealership)
 
 
+@app.get("/api/bdc/distribution", response_model=BdcDistributionOut)
+def get_bdc_distribution() -> BdcDistributionOut:
+    return BdcDistributionOut(mode=get_bdc_distribution_mode())
+
+
 @app.post("/api/bdc/assign", response_model=BdcAssignmentOut)
 def post_bdc_assign(payload: BdcLeadAssignIn) -> BdcAssignmentOut:
     return assign_next_lead(payload)
@@ -2834,3 +2874,14 @@ def get_bdc_report(
 def delete_bdc_history(x_admin_token: Optional[str] = Header(default=None)) -> BdcHistoryClearOut:
     require_admin(x_admin_token)
     return clear_bdc_history()
+
+
+@app.post("/api/admin/bdc/distribution", response_model=BdcDistributionOut)
+def post_bdc_distribution(
+    payload: BdcDistributionIn,
+    x_admin_token: Optional[str] = Header(default=None),
+) -> BdcDistributionOut:
+    require_admin(x_admin_token)
+    mode = normalize_bdc_distribution(payload.mode)
+    set_meta(BDC_DISTRIBUTION_META_KEY, mode)
+    return BdcDistributionOut(mode=mode)

@@ -16,6 +16,7 @@ import {
   getBdcLog,
   getBdcReport,
   getBdcState,
+  getBdcDistribution,
   getQuoteRates,
   getSalespeople,
   getSpecials,
@@ -26,6 +27,7 @@ import {
   replaceAdminDaysOffMonth,
   undoReynoldsServiceDriveTrafficImport,
   updateBdcAgent,
+  updateBdcDistribution,
   updateQuoteRates,
   updateSalesperson,
   updateSpecial,
@@ -51,6 +53,7 @@ const ADMIN_SECTIONS = [
   { id: "staff", label: "Staff Setup" },
   { id: "daysOff", label: "Days Off" },
   { id: "trafficLog", label: "Traffic Log" },
+  { id: "bdcDistribution", label: "Lead Distribution Type" },
   { id: "quoteRates", label: "Quote Rates" },
   { id: "specials", label: "Specials" },
 ];
@@ -373,6 +376,7 @@ export default function App() {
   const [specials, setSpecials] = useState([]);
   const [selectedSpecialId, setSelectedSpecialId] = useState(null);
   const [bdcState, setBdcState] = useState(null);
+  const [bdcDistribution, setBdcDistribution] = useState({ mode: "franchise" });
   const [bdcLog, setBdcLog] = useState({ total: 0, entries: [] });
   const [bdcReport, setBdcReport] = useState(null);
   const [daysOffData, setDaysOffData] = useState({ month: currentMonth(), entries: [] });
@@ -420,7 +424,10 @@ export default function App() {
   const [specialUploadKey, setSpecialUploadKey] = useState(0);
 
   const activeSales = salespeople.filter((person) => person.active);
-  const activeLeadStoreSales = activeSales.filter((person) => person.dealership === leadForm.leadStore);
+  const isBdcGlobal = bdcDistribution.mode === "global";
+  const leadPoolSales = isBdcGlobal
+    ? activeSales
+    : activeSales.filter((person) => person.dealership === leadForm.leadStore);
   const serviceEligible = activeSales.filter((person) => person.dealership !== "Outlet");
   const activeBdc = bdcAgents.filter((agent) => agent.active);
   const today = todayDateValue();
@@ -505,7 +512,7 @@ export default function App() {
   const quoteTotalInterest = Math.max(0, quoteTotalPaid - quotePrincipal);
 
   async function loadAll(nextMonth = month, nextFilters = filters) {
-    const [sales, bdc, service, log, report] = await Promise.all([
+    const [sales, bdc, service, log, report, distribution] = await Promise.all([
       getSalespeople({ includeInactive: true }),
       getBdcAgents({ includeInactive: true }),
       getServiceDrive({ month: nextMonth }),
@@ -522,17 +529,33 @@ export default function App() {
         startDate: nextFilters.startDate || undefined,
         endDate: nextFilters.endDate || undefined,
       }),
+      getBdcDistribution(),
     ]);
     setSalespeople(sales);
     setBdcAgents(bdc);
     setServiceMonth(service);
     setBdcLog(log);
     setBdcReport(report);
+    setBdcDistribution(distribution);
   }
 
   async function refreshBdcState(nextLeadStore = leadForm.leadStore) {
     const data = await getBdcState({ dealership: nextLeadStore });
     setBdcState(data);
+  }
+
+  async function saveBdcDistribution(mode) {
+    setBusy("bdc-distribution");
+    setError("");
+    try {
+      const updated = await updateBdcDistribution(adminToken, { mode });
+      setBdcDistribution(updated);
+      await refreshBdcState(leadForm.leadStore);
+    } catch (errorValue) {
+      setError(errText(errorValue));
+    } finally {
+      setBusy("");
+    }
   }
 
   async function refreshServiceTraffic(nextMonth = trafficMonth, nextDate = selectedTrafficDate) {
@@ -1877,7 +1900,11 @@ export default function App() {
               <div>
                 <span className="eyebrow">BDC lead assign</span>
                 <h2>Ask for the next salesperson in the round robin.</h2>
-                <p>Choose the source store first, then assign the lead only within that store's salesperson pool.</p>
+                <p>
+                  {isBdcGlobal
+                    ? "Lead store still logs the source, but assignments rotate through all active salespeople."
+                    : "Choose the source store first, then assign the lead only within that store's salesperson pool."}
+                </p>
               </div>
               <div className="assign-card">
                 <label>
@@ -1906,6 +1933,7 @@ export default function App() {
                       </option>
                     ))}
                   </select>
+                  {isBdcGlobal ? <small>Distribution mode is global; this store is for logging only.</small> : null}
                 </label>
                 <label>
                   <span>Customer name</span>
@@ -1924,15 +1952,19 @@ export default function App() {
                   />
                 </label>
                 <div className="next-up">
-                  <span>Next up for {leadForm.leadStore}</span>
+                  <span>Next up for {isBdcGlobal ? "All stores" : leadForm.leadStore}</span>
                   <strong>{bdcState?.next_salesperson?.name || "No active salesperson"}</strong>
                   <small>
                     {bdcClosedToday
                       ? "Closed on Sundays"
                       : bdcState?.next_salesperson?.dealership ||
-                      (activeLeadStoreSales.length
-                        ? `Everyone in ${leadForm.leadStore} is scheduled off today`
-                        : `No active ${leadForm.leadStore} salespeople`)}
+                        (leadPoolSales.length
+                          ? isBdcGlobal
+                            ? "Everyone is scheduled off today"
+                            : `Everyone in ${leadForm.leadStore} is scheduled off today`
+                          : isBdcGlobal
+                            ? "No active salespeople"
+                            : `No active ${leadForm.leadStore} salespeople`)}
                   </small>
                 </div>
                 <button
@@ -1953,9 +1985,11 @@ export default function App() {
               </div>
             ) : null}
 
-            {!bdcClosedToday && activeLeadStoreSales.length && !bdcState?.next_salesperson ? (
+            {!bdcClosedToday && leadPoolSales.length && !bdcState?.next_salesperson ? (
               <div className="notice">
-                Nobody is eligible in the {leadForm.leadStore} round robin today because every active salesperson in that store is scheduled off.
+                {isBdcGlobal
+                  ? "Nobody is eligible in the global round robin today because every active salesperson is scheduled off."
+                  : `Nobody is eligible in the ${leadForm.leadStore} round robin today because every active salesperson in that store is scheduled off.`}
               </div>
             ) : null}
 
@@ -3119,6 +3153,39 @@ export default function App() {
                     <button type="button" onClick={saveQuoteRates} disabled={busy === "quote-rates"}>
                       {busy === "quote-rates" ? "Saving..." : "Save Quote Rates"}
                     </button>
+                  </div>
+                ) : null}
+
+                {adminSection === "bdcDistribution" ? (
+                  <div className="panel">
+                    <span className="eyebrow">Lead distribution type</span>
+                    <h3>BDC round robin mode</h3>
+                    <p className="admin-note">
+                      Choose whether BDC assignments are store-specific or one combined rotation across all salespeople.
+                    </p>
+                    <div className="distribution-toggle">
+                      <button
+                        type="button"
+                        className={`pill ${bdcDistribution.mode === "franchise" ? "is-active" : ""}`}
+                        onClick={() => saveBdcDistribution("franchise")}
+                        disabled={busy === "bdc-distribution"}
+                      >
+                        Franchise specific
+                      </button>
+                      <button
+                        type="button"
+                        className={`pill ${bdcDistribution.mode === "global" ? "is-active" : ""}`}
+                        onClick={() => saveBdcDistribution("global")}
+                        disabled={busy === "bdc-distribution"}
+                      >
+                        Global round robin
+                      </button>
+                    </div>
+                    <div className="notice">
+                      {bdcDistribution.mode === "global"
+                        ? "Leads will rotate through all active salespeople across Kia, Mazda, and Outlet."
+                        : "Leads will rotate only within the selected lead store's salespeople."}
+                    </div>
                   </div>
                 ) : null}
 
