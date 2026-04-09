@@ -1376,9 +1376,10 @@ button.note-card__summary:hover:not(:disabled) {
 }
 
 .note-metric-chip--year {
-  color: #fff;
-  background: linear-gradient(135deg, #243140, #111b27);
-  border: 1px solid rgba(17, 27, 39, 0.5);
+  color: #0b1a2d;
+  background: linear-gradient(135deg, #e8f0ff, #cfe0ff);
+  border: 1px solid rgba(47, 96, 191, 0.55);
+  box-shadow: 0 8px 18px rgba(47, 96, 191, 0.18);
 }
 
 .note-metric-chip--odometer {
