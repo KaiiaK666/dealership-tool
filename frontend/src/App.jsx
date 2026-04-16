@@ -2364,12 +2364,17 @@ export default function App() {
             <div className="marketplace-grid">
               <div className="panel marketplace-card">
                 <span className="eyebrow">Extension setup</span>
-                <h3>Load the Chrome extension</h3>
+                <h3>Download and load the Chrome extension</h3>
+                <a className="asset-link" href="/facebook-marketplace-extension.zip" download>
+                  Download Extension Zip
+                </a>
                 <ol className="numbered-list">
+                  <li>Download `facebook-marketplace-extension.zip` above</li>
+                  <li>Unzip it anywhere on your computer</li>
                   <li>Open `chrome://extensions`</li>
                   <li>Turn on Developer Mode</li>
                   <li>Click `Load unpacked`</li>
-                  <li>Select the `facebook-marketplace-extension` folder from this project</li>
+                  <li>Select the unzipped `facebook-marketplace-extension` folder</li>
                 </ol>
                 <label>
                   <span>API base for the extension</span>
