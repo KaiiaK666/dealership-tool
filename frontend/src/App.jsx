@@ -18,6 +18,7 @@ import {
   getBdcState,
   getBdcDistribution,
   getBdcUndoSettings,
+  getMarketplaceTemplate,
   getQuoteRates,
   getSalespeople,
   getSpecials,
@@ -31,6 +32,7 @@ import {
   updateBdcDistribution,
   undoLastBdcAssign,
   updateBdcUndoSettings,
+  updateMarketplaceTemplate,
   updateQuoteRates,
   updateSalesperson,
   updateSpecial,
@@ -47,6 +49,7 @@ const TABS = [
   { id: "bdc", label: "BDC Assign" },
   { id: "reports", label: "BDC Reports" },
   { id: "traffic", label: "Service Drive Traffic" },
+  { id: "marketplace", label: "Facebook Marketplace" },
   { id: "quote", label: "Quote Tool" },
   { id: "specials", label: "Specials" },
   { id: "admin", label: "Admin" },
@@ -57,6 +60,7 @@ const ADMIN_SECTIONS = [
   { id: "daysOff", label: "Days Off" },
   { id: "trafficLog", label: "Traffic Log" },
   { id: "bdcDistribution", label: "Lead Distribution Type" },
+  { id: "marketplace", label: "Marketplace" },
   { id: "quoteRates", label: "Quote Rates" },
   { id: "specials", label: "Specials" },
 ];
@@ -413,6 +417,17 @@ export default function App() {
   const [reynoldsUndoResult, setReynoldsUndoResult] = useState(null);
   const [quoteRates, setQuoteRates] = useState([]);
   const [quoteRateDraft, setQuoteRateDraft] = useState({});
+  const [marketplaceTemplate, setMarketplaceTemplate] = useState({
+    title_template: "{year} {make} {model}",
+    description_template:
+      "{year} {make} {model}\n{price_label}: {price}\nMileage: {mileage}\nVIN: {vin}\n{cta_text}\n{url}",
+    price_label: "Bert Ogden Price",
+    cta_text: "Message us for availability and financing options.",
+  });
+  const [marketplaceForm, setMarketplaceForm] = useState({
+    inventoryUrl: "",
+    extensionApiBase: "https://api.bertogden123.com",
+  });
   const [quoteForm, setQuoteForm] = useState({
     brand: "Kia New",
     msrp: "",
@@ -630,6 +645,11 @@ export default function App() {
     setQuoteRateDraft(draft);
   }
 
+  async function refreshMarketplaceTemplate() {
+    const data = await getMarketplaceTemplate();
+    setMarketplaceTemplate(data);
+  }
+
   function updateQuoteRateDraft(brand, tier, value) {
     setQuoteRateDraft((prev) => ({
       ...prev,
@@ -661,6 +681,19 @@ export default function App() {
     }
   }
 
+  async function saveMarketplaceTemplate() {
+    setBusy("marketplace-template");
+    setError("");
+    try {
+      const updated = await updateMarketplaceTemplate(adminToken, marketplaceTemplate);
+      setMarketplaceTemplate(updated);
+    } catch (errorValue) {
+      setError(errText(errorValue));
+    } finally {
+      setBusy("");
+    }
+  }
+
   useEffect(() => {
     let active = true;
     const run = async () => {
@@ -669,6 +702,7 @@ export default function App() {
       try {
         await loadAll(month, filters);
         await refreshQuoteRates();
+        await refreshMarketplaceTemplate();
       } catch (errorValue) {
         if (active) setError(errText(errorValue));
       } finally {
@@ -2316,6 +2350,83 @@ export default function App() {
           </section>
         ) : null}
 
+        {tab === "marketplace" ? (
+          <section className="stack marketplace-section">
+            <div className="panel marketplace-hero">
+              <span className="eyebrow">Facebook Marketplace</span>
+              <h2>Prep in the app, post with the extension</h2>
+              <p>
+                Facebook cannot be embedded in this app. The workable flow is: log into Facebook normally, use the Chrome
+                extension to scrape the inventory URL, then let the extension apply the draft into Marketplace.
+              </p>
+            </div>
+
+            <div className="marketplace-grid">
+              <div className="panel marketplace-card">
+                <span className="eyebrow">Extension setup</span>
+                <h3>Load the Chrome extension</h3>
+                <ol className="numbered-list">
+                  <li>Open `chrome://extensions`</li>
+                  <li>Turn on Developer Mode</li>
+                  <li>Click `Load unpacked`</li>
+                  <li>Select the `facebook-marketplace-extension` folder from this project</li>
+                </ol>
+                <label>
+                  <span>API base for the extension</span>
+                  <input
+                    value={marketplaceForm.extensionApiBase}
+                    onChange={(event) =>
+                      setMarketplaceForm((current) => ({ ...current, extensionApiBase: event.target.value }))
+                    }
+                  />
+                </label>
+                <small>The extension uses this to pull the current admin marketplace template.</small>
+              </div>
+
+              <div className="panel marketplace-card">
+                <span className="eyebrow">How reps use it</span>
+                <h3>Posting flow</h3>
+                <label>
+                  <span>Inventory URL</span>
+                  <input
+                    value={marketplaceForm.inventoryUrl}
+                    onChange={(event) =>
+                      setMarketplaceForm((current) => ({ ...current, inventoryUrl: event.target.value }))
+                    }
+                    placeholder="https://www.bertogdenmissionkia.com/inventory/..."
+                  />
+                </label>
+                <ol className="numbered-list">
+                  <li>Log into Facebook in Chrome</li>
+                  <li>Open Marketplace create listing page in another tab</li>
+                  <li>Open the extension popup</li>
+                  <li>Paste the inventory URL and API base</li>
+                  <li>Generate the draft, then click `Apply Draft` on Facebook</li>
+                </ol>
+              </div>
+            </div>
+
+            <div className="panel marketplace-template-preview">
+              <span className="eyebrow">Current template</span>
+              <h3>Admin-controlled post content</h3>
+              <div className="marketplace-template-grid">
+                <div>
+                  <span className="eyebrow">Title template</span>
+                  <pre>{marketplaceTemplate.title_template}</pre>
+                </div>
+                <div>
+                  <span className="eyebrow">Description template</span>
+                  <pre>{marketplaceTemplate.description_template}</pre>
+                </div>
+              </div>
+              <p className="admin-note">
+                Supported placeholders: `{"{year}"}`, `{"{make}"}`, `{"{model}"}`, `{"{price}"}`, `{"{mileage}"}`, `{"{vin}"}`,
+                `{"{url}"}`, `{"{price_label}"}`, `{"{cta_text}"}`.
+              </p>
+            </div>
+          </section>
+        ) : null}
+
         {tab === "quote" ? (
           <section className="stack quote-section">
             <div className="panel quote-hero">
@@ -3302,6 +3413,58 @@ export default function App() {
                       )}
                     </div>
                   </>
+                ) : null}
+
+                {adminSection === "marketplace" ? (
+                  <div className="panel">
+                    <span className="eyebrow">Marketplace template</span>
+                    <h3>Facebook post content</h3>
+                    <p className="admin-note">
+                      The Chrome extension pulls this template and merges it with the scraped vehicle data from the inventory URL.
+                    </p>
+                    <div className="form">
+                      <label>
+                        <span>Title template</span>
+                        <input
+                          value={marketplaceTemplate.title_template}
+                          onChange={(event) =>
+                            setMarketplaceTemplate((current) => ({ ...current, title_template: event.target.value }))
+                          }
+                        />
+                      </label>
+                      <label>
+                        <span>Description template</span>
+                        <textarea
+                          rows={10}
+                          value={marketplaceTemplate.description_template}
+                          onChange={(event) =>
+                            setMarketplaceTemplate((current) => ({ ...current, description_template: event.target.value }))
+                          }
+                        />
+                      </label>
+                      <label>
+                        <span>Price label</span>
+                        <input
+                          value={marketplaceTemplate.price_label}
+                          onChange={(event) =>
+                            setMarketplaceTemplate((current) => ({ ...current, price_label: event.target.value }))
+                          }
+                        />
+                      </label>
+                      <label>
+                        <span>CTA text</span>
+                        <input
+                          value={marketplaceTemplate.cta_text}
+                          onChange={(event) =>
+                            setMarketplaceTemplate((current) => ({ ...current, cta_text: event.target.value }))
+                          }
+                        />
+                      </label>
+                    </div>
+                    <button type="button" onClick={saveMarketplaceTemplate} disabled={busy === "marketplace-template"}>
+                      {busy === "marketplace-template" ? "Saving..." : "Save Marketplace Template"}
+                    </button>
+                  </div>
                 ) : null}
 
                 {adminSection === "quoteRates" ? (

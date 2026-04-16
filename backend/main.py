@@ -377,6 +377,20 @@ class QuoteRatesIn(BaseModel):
     rates: List[QuoteRateOut]
 
 
+class MarketplaceTemplateOut(BaseModel):
+    title_template: str
+    description_template: str
+    price_label: str = "Bert Ogden Price"
+    cta_text: str = ""
+
+
+class MarketplaceTemplateIn(BaseModel):
+    title_template: str
+    description_template: str
+    price_label: str = "Bert Ogden Price"
+    cta_text: str = ""
+
+
 class TrafficPdfOut(BaseModel):
     id: int
     title: str
@@ -930,6 +944,17 @@ def init_db() -> None:
             stored_filename TEXT NOT NULL,
             image_url TEXT NOT NULL,
             created_ts REAL NOT NULL
+        )
+        """
+    )
+    db_execute(
+        """
+        CREATE TABLE IF NOT EXISTS marketplace_template (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            title_template TEXT NOT NULL,
+            description_template TEXT NOT NULL,
+            price_label TEXT NOT NULL DEFAULT 'Bert Ogden Price',
+            cta_text TEXT NOT NULL DEFAULT ''
         )
         """
     )
@@ -2137,6 +2162,54 @@ def upsert_quote_rates(rates: List[QuoteRateOut]) -> None:
             raise HTTPException(status_code=400, detail=f"failed to save quote rates: {exc}") from exc
 
 
+def default_marketplace_template() -> MarketplaceTemplateOut:
+    return MarketplaceTemplateOut(
+        title_template="{year} {make} {model}",
+        description_template=(
+            "{year} {make} {model}\n"
+            "{price_label}: {price}\n"
+            "Mileage: {mileage}\n"
+            "VIN: {vin}\n"
+            "{cta_text}\n"
+            "{url}"
+        ),
+        price_label="Bert Ogden Price",
+        cta_text="Message us for availability and financing options.",
+    )
+
+
+def fetch_marketplace_template() -> MarketplaceTemplateOut:
+    row = db_query_one("SELECT * FROM marketplace_template WHERE id = 1")
+    if not row:
+        return default_marketplace_template()
+    return MarketplaceTemplateOut(
+        title_template=str(row.get("title_template") or default_marketplace_template().title_template),
+        description_template=str(row.get("description_template") or default_marketplace_template().description_template),
+        price_label=str(row.get("price_label") or default_marketplace_template().price_label),
+        cta_text=str(row.get("cta_text") or default_marketplace_template().cta_text),
+    )
+
+
+def update_marketplace_template(payload: MarketplaceTemplateIn) -> MarketplaceTemplateOut:
+    title_template = normalize_short_text(payload.title_template, "title_template", max_len=200)
+    description_template = normalize_notes(payload.description_template, "description_template", max_len=4000)
+    price_label = normalize_short_text(payload.price_label or "Bert Ogden Price", "price_label", max_len=60)
+    cta_text = normalize_notes(payload.cta_text or "", "cta_text", max_len=500)
+    db_execute(
+        """
+        INSERT INTO marketplace_template (id, title_template, description_template, price_label, cta_text)
+        VALUES (1, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+            title_template = excluded.title_template,
+            description_template = excluded.description_template,
+            price_label = excluded.price_label,
+            cta_text = excluded.cta_text
+        """,
+        (title_template, description_template, price_label, cta_text),
+    )
+    return fetch_marketplace_template()
+
+
 def reynolds_text(row: Dict[str, Any], key: str) -> str:
     return str(row.get(key) or "").strip()
 
@@ -2778,6 +2851,11 @@ def get_quote_rates() -> QuoteRateListOut:
     return QuoteRateListOut(entries=fetch_quote_rates())
 
 
+@app.get("/api/marketplace/template", response_model=MarketplaceTemplateOut)
+def get_marketplace_template() -> MarketplaceTemplateOut:
+    return fetch_marketplace_template()
+
+
 @app.get("/api/service-drive/notes", response_model=ServiceDriveNotesOut)
 def get_service_drive_notes(
     salesperson_id: Optional[int] = None,
@@ -2847,6 +2925,15 @@ def post_quote_rates(
     require_admin(x_admin_token)
     upsert_quote_rates(payload.rates)
     return QuoteRateListOut(entries=fetch_quote_rates())
+
+
+@app.post("/api/admin/marketplace/template", response_model=MarketplaceTemplateOut)
+def post_marketplace_template(
+    payload: MarketplaceTemplateIn,
+    x_admin_token: Optional[str] = Header(default=None),
+) -> MarketplaceTemplateOut:
+    require_admin(x_admin_token)
+    return update_marketplace_template(payload)
 
 
 @app.post("/api/admin/service-drive/traffic/{traffic_id}/images", response_model=ServiceDriveTrafficOut)

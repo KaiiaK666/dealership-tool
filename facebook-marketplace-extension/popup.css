@@ -1,0 +1,86 @@
+body {
+  margin: 0;
+  font-family: Arial, sans-serif;
+  background: #f6efe6;
+  color: #1f2a35;
+}
+
+.app {
+  width: 360px;
+  padding: 16px;
+  display: grid;
+  gap: 12px;
+}
+
+.eyebrow {
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #6d7680;
+}
+
+h1,
+h2,
+p,
+pre {
+  margin: 0;
+}
+
+label {
+  display: grid;
+  gap: 6px;
+}
+
+input {
+  border: 1px solid #d6c7b6;
+  border-radius: 12px;
+  padding: 10px 12px;
+  font-size: 14px;
+}
+
+button {
+  border: 0;
+  border-radius: 12px;
+  padding: 10px 14px;
+  font-weight: 700;
+  background: #d8783a;
+  color: white;
+  cursor: pointer;
+}
+
+button.secondary {
+  background: #314151;
+}
+
+button.wide {
+  width: 100%;
+}
+
+.actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+
+.preview {
+  border: 1px solid #decfbc;
+  border-radius: 16px;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.72);
+  display: grid;
+  gap: 8px;
+}
+
+pre {
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 12px;
+  max-height: 180px;
+  overflow: auto;
+}
+
+.status {
+  min-height: 18px;
+  font-size: 12px;
+  color: #5a6773;
+}

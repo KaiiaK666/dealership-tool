@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Marketplace Helper</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <main class="app">
+      <span class="eyebrow">Marketplace Helper</span>
+      <h1>Build Draft</h1>
+
+      <label>
+        <span>API base</span>
+        <input id="apiBase" type="text" placeholder="https://api.bertogden123.com" />
+      </label>
+
+      <label>
+        <span>Inventory URL</span>
+        <input id="inventoryUrl" type="text" placeholder="https://www.bertogdenmissionkia.com/inventory/..." />
+      </label>
+
+      <div class="actions">
+        <button id="saveSettings" type="button" class="secondary">Save Settings</button>
+        <button id="generateDraft" type="button">Generate Draft</button>
+      </div>
+
+      <button id="openMarketplace" type="button" class="wide">Open Facebook Marketplace</button>
+
+      <section class="preview">
+        <span class="eyebrow">Draft Preview</span>
+        <h2 id="draftTitle">No draft yet</h2>
+        <p id="draftPrice"></p>
+        <pre id="draftDescription"></pre>
+      </section>
+
+      <p id="status" class="status"></p>
+    </main>
+    <script src="popup.js"></script>
+  </body>
+  </html>

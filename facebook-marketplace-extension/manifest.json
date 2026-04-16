@@ -1,0 +1,31 @@
+{
+  "manifest_version": 3,
+  "name": "Dealership Marketplace Helper",
+  "version": "0.1.0",
+  "description": "Scrape dealership inventory pages and prepare Facebook Marketplace drafts.",
+  "action": {
+    "default_popup": "popup.html"
+  },
+  "permissions": [
+    "storage",
+    "activeTab",
+    "tabs"
+  ],
+  "host_permissions": [
+    "https://www.facebook.com/*",
+    "https://facebook.com/*",
+    "https://www.bertogdenmissionkia.com/*",
+    "https://www.bertogdenmissionmazda.com/*",
+    "https://www.bertogdenmission.com/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.facebook.com/marketplace/*",
+        "https://facebook.com/marketplace/*"
+      ],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
