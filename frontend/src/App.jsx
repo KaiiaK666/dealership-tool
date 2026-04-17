@@ -425,7 +425,6 @@ export default function App() {
     cta_text: "Message us for availability and financing options.",
   });
   const [marketplaceForm, setMarketplaceForm] = useState({
-    inventoryUrl: "",
     extensionApiBase: "https://api.bertogden123.com",
   });
   const [quoteForm, setQuoteForm] = useState({
@@ -2354,22 +2353,22 @@ export default function App() {
           <section className="stack marketplace-section">
             <div className="panel marketplace-hero">
               <span className="eyebrow">Facebook Marketplace</span>
-              <h2>Prep in the app, post with the extension</h2>
+              <h2>Simple posting flow for reps</h2>
               <p>
-                Facebook cannot be embedded in this app. The workable flow is: log into Facebook normally, use the Chrome
-                extension to scrape the inventory URL, then let the extension apply the draft into Marketplace.
+                Facebook cannot be embedded in this app. The reliable workflow is: open the vehicle page, capture it with
+                the Chrome extension, then open Facebook Marketplace and let the extension apply the draft.
               </p>
             </div>
 
             <div className="marketplace-grid">
               <div className="panel marketplace-card">
-                <span className="eyebrow">Extension setup</span>
-                <h3>Download and load the Chrome extension</h3>
+                <span className="eyebrow">Step 1</span>
+                <h3>Install the Chrome extension once</h3>
                 <a className="asset-link" href="/facebook-marketplace-extension.zip" download>
                   Download Extension Zip
                 </a>
                 <ol className="numbered-list">
-                  <li>Download `facebook-marketplace-extension.zip` above</li>
+                  <li>Download the zip above</li>
                   <li>Unzip it anywhere on your computer</li>
                   <li>Open `chrome://extensions`</li>
                   <li>Turn on Developer Mode</li>
@@ -2385,29 +2384,41 @@ export default function App() {
                     }
                   />
                 </label>
-                <small>The extension uses this to pull the current admin marketplace template.</small>
+                <small>Most reps should leave this as `https://api.bertogden123.com`.</small>
               </div>
 
               <div className="panel marketplace-card">
-                <span className="eyebrow">How reps use it</span>
-                <h3>Posting flow</h3>
-                <label>
-                  <span>Inventory URL</span>
-                  <input
-                    value={marketplaceForm.inventoryUrl}
-                    onChange={(event) =>
-                      setMarketplaceForm((current) => ({ ...current, inventoryUrl: event.target.value }))
-                    }
-                    placeholder="https://www.bertogdenmissionkia.com/inventory/..."
-                  />
-                </label>
+                <span className="eyebrow">Step 2</span>
+                <h3>How reps use it</h3>
                 <ol className="numbered-list">
-                  <li>Log into Facebook in Chrome</li>
-                  <li>Open Marketplace create listing page in another tab</li>
-                  <li>Open the extension popup</li>
-                  <li>Paste the inventory URL and API base</li>
-                  <li>Generate the draft, then click `Apply Draft` on Facebook</li>
+                  <li>Open the Bert Ogden vehicle page in Chrome</li>
+                  <li>Click the extension and press `Capture This Page`</li>
+                  <li>Click `Open Facebook Marketplace` in the extension</li>
+                  <li>On the Facebook vehicle listing page, click `Apply Draft`</li>
+                  <li>Review the listing and finish the post manually</li>
                 </ol>
+                <div className="marketplace-callout">
+                  <strong>Important</strong>
+                  <span>The extension now reads the vehicle page directly. Reps do not need to paste the inventory URL anymore.</span>
+                </div>
+              </div>
+
+              <div className="panel marketplace-card">
+                <span className="eyebrow">Step 3</span>
+                <h3>What the extension pulls in</h3>
+                <ul className="feature-list">
+                  <li>Year, make, and model</li>
+                  <li>Bert Ogden price when available</li>
+                  <li>Mileage</li>
+                  <li>VIN</li>
+                  <li>Condition and vehicle-focused draft text</li>
+                  <li>Vehicle page URL</li>
+                  <li>Available gallery images from the vehicle page</li>
+                </ul>
+                <div className="marketplace-callout">
+                  <strong>Fallback</strong>
+                  <span>If Facebook changes its form layout, the rep should still review every field before posting.</span>
+                </div>
               </div>
             </div>
 

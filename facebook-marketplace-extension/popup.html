@@ -9,21 +9,31 @@
   <body>
     <main class="app">
       <span class="eyebrow">Marketplace Helper</span>
-      <h1>Build Draft</h1>
+      <h1>Post Vehicle</h1>
+
+      <section class="steps">
+        <div class="step">
+          <strong>1. Open a vehicle page</strong>
+          <span>Go to the Bert Ogden inventory page for the vehicle you want to post.</span>
+        </div>
+        <div class="step">
+          <strong>2. Capture this page</strong>
+          <span>Click the button below while that vehicle tab is open.</span>
+        </div>
+        <div class="step">
+          <strong>3. Open Facebook Marketplace</strong>
+          <span>Then use `Apply Draft` on the Marketplace page.</span>
+        </div>
+      </section>
 
       <label>
         <span>API base</span>
         <input id="apiBase" type="text" placeholder="https://api.bertogden123.com" />
       </label>
 
-      <label>
-        <span>Inventory URL</span>
-        <input id="inventoryUrl" type="text" placeholder="https://www.bertogdenmissionkia.com/inventory/..." />
-      </label>
-
       <div class="actions">
         <button id="saveSettings" type="button" class="secondary">Save Settings</button>
-        <button id="generateDraft" type="button">Generate Draft</button>
+        <button id="captureCurrentTab" type="button">Capture This Page</button>
       </div>
 
       <button id="openMarketplace" type="button" class="wide">Open Facebook Marketplace</button>
@@ -32,6 +42,7 @@
         <span class="eyebrow">Draft Preview</span>
         <h2 id="draftTitle">No draft yet</h2>
         <p id="draftPrice"></p>
+        <p id="draftMeta" class="draft-meta"></p>
         <pre id="draftDescription"></pre>
       </section>
 

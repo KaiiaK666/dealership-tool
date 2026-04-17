@@ -2,39 +2,18 @@ const defaultApiBase = "https://api.bertogden123.com";
 
 const els = {
   apiBase: document.getElementById("apiBase"),
-  inventoryUrl: document.getElementById("inventoryUrl"),
   saveSettings: document.getElementById("saveSettings"),
-  generateDraft: document.getElementById("generateDraft"),
+  captureCurrentTab: document.getElementById("captureCurrentTab"),
   openMarketplace: document.getElementById("openMarketplace"),
   draftTitle: document.getElementById("draftTitle"),
   draftPrice: document.getElementById("draftPrice"),
+  draftMeta: document.getElementById("draftMeta"),
   draftDescription: document.getElementById("draftDescription"),
   status: document.getElementById("status"),
 };
 
 function setStatus(text) {
   els.status.textContent = text || "";
-}
-
-function normalizeText(text) {
-  return String(text || "").replace(/\s+/g, " ").trim();
-}
-
-function firstMatch(html, patterns) {
-  for (const pattern of patterns) {
-    const match = html.match(pattern);
-    if (match?.[1]) return normalizeText(match[1]);
-  }
-  return "";
-}
-
-function parseTitleParts(title) {
-  const clean = normalizeText(title).replace(/\s+[|-].*$/, "");
-  const match = clean.match(/(20\d{2})\s+([A-Za-z]+)\s+(.+)/);
-  if (!match) {
-    return { year: "", make: "", model: clean };
-  }
-  return { year: match[1], make: match[2], model: match[3] };
 }
 
 function fillTemplate(template, data) {
@@ -47,57 +26,31 @@ async function fetchTemplate(apiBase) {
   return response.json();
 }
 
-async function fetchInventoryHtml(url) {
-  const response = await fetch(url, { credentials: "omit" });
-  if (!response.ok) throw new Error("Failed to fetch inventory page");
-  return response.text();
-}
-
-function extractVehicle(html, url, template) {
-  const title =
-    firstMatch(html, [
-      /<meta[^>]+property=["']og:title["'][^>]+content=["']([^"]+)["']/i,
-      /<title>([^<]+)<\/title>/i,
-      /"name":"([^"]+)"/i,
-    ]) || "Vehicle";
-  const price =
-    firstMatch(html, [
-      /Bert Ogden Price[^$0-9]*\$?([0-9,]+)/i,
-      /"price":"?([0-9,]+)"?/i,
-      /itemprop=["']price["'][^>]+content=["']([^"]+)["']/i,
-    ]) || "";
-  const mileage =
-    firstMatch(html, [
-      /Mileage[^0-9]*([0-9,]+)/i,
-      /Odometer[^0-9]*([0-9,]+)/i,
-      /"mileageFromOdometer":[^}]*"value":"?([0-9,]+)"?/i,
-    ]) || "0";
-  const vin = firstMatch(html, [/"vehicleIdentificationNumber":"([^"]+)"/i, /VIN[^A-Z0-9]*([A-HJ-NPR-Z0-9]{11,17})/i]);
-  const parts = parseTitleParts(title);
+function buildDraft(vehicle, template) {
   const draftData = {
-    year: parts.year,
-    make: parts.make,
-    model: parts.model,
-    price: price ? `$${price}` : "",
-    mileage: mileage ? `${mileage} mi` : "",
-    vin,
-    url,
+    year: vehicle.year || "",
+    make: vehicle.make || "",
+    model: vehicle.model || vehicle.title || "",
+    price: vehicle.price ? `$${vehicle.price}` : "",
+    mileage: vehicle.mileage ? `${vehicle.mileage} mi` : "",
+    vin: vehicle.vin || "",
+    url: vehicle.url || "",
     price_label: template.price_label || "Bert Ogden Price",
     cta_text: template.cta_text || "",
   };
   return {
     title: fillTemplate(template.title_template, draftData),
-    price: price.replace(/[^0-9]/g, ""),
+    price: String(vehicle.price || "").replace(/[^0-9]/g, ""),
     description: fillTemplate(template.description_template, draftData),
-    images: [],
+    images: Array.isArray(vehicle.images) ? vehicle.images : [],
     raw: draftData,
+    vehicle,
   };
 }
 
 async function loadSettings() {
-  const saved = await chrome.storage.local.get(["dealerApiBase", "dealerDraft", "dealerInventoryUrl"]);
+  const saved = await chrome.storage.local.get(["dealerApiBase", "dealerDraft"]);
   els.apiBase.value = saved.dealerApiBase || defaultApiBase;
-  els.inventoryUrl.value = saved.dealerInventoryUrl || "";
   if (saved.dealerDraft) {
     renderDraft(saved.dealerDraft);
   }
@@ -106,42 +59,60 @@ async function loadSettings() {
 function renderDraft(draft) {
   els.draftTitle.textContent = draft.title || "No draft yet";
   els.draftPrice.textContent = draft.price ? `Price: $${draft.price}` : "";
+  const meta = [];
+  if (draft.vehicle?.year) meta.push(`Year ${draft.vehicle.year}`);
+  if (draft.vehicle?.mileage) meta.push(`${draft.vehicle.mileage} mi`);
+  if (draft.vehicle?.vin) meta.push(`VIN ${draft.vehicle.vin}`);
+  if (draft.vehicle?.condition) meta.push(draft.vehicle.condition);
+  if (draft.images?.length) meta.push(`${draft.images.length} image${draft.images.length === 1 ? "" : "s"}`);
+  els.draftMeta.textContent = meta.join(" • ");
   els.draftDescription.textContent = draft.description || "";
 }
 
 els.saveSettings.addEventListener("click", async () => {
   await chrome.storage.local.set({
     dealerApiBase: els.apiBase.value.trim() || defaultApiBase,
-    dealerInventoryUrl: els.inventoryUrl.value.trim(),
   });
   setStatus("Settings saved.");
 });
 
-els.generateDraft.addEventListener("click", async () => {
+async function getActiveTab() {
+  const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+  return tabs[0];
+}
+
+els.captureCurrentTab.addEventListener("click", async () => {
   const apiBase = els.apiBase.value.trim() || defaultApiBase;
-  const inventoryUrl = els.inventoryUrl.value.trim();
-  if (!inventoryUrl) {
-    setStatus("Enter an inventory URL first.");
-    return;
-  }
-  setStatus("Building draft...");
+  setStatus("Reading vehicle page...");
   try {
-    const [template, html] = await Promise.all([fetchTemplate(apiBase), fetchInventoryHtml(inventoryUrl)]);
-    const draft = extractVehicle(html, inventoryUrl, template);
+    const activeTab = await getActiveTab();
+    if (!activeTab?.id || !activeTab.url) {
+      throw new Error("Open a vehicle page in Chrome first.");
+    }
+    if (!/bertogden/i.test(activeTab.url)) {
+      throw new Error("Open a Bert Ogden inventory vehicle page first.");
+    }
+    const [template, scrapeResult] = await Promise.all([
+      fetchTemplate(apiBase),
+      chrome.tabs.sendMessage(activeTab.id, { type: "SCRAPE_CURRENT_VEHICLE" }),
+    ]);
+    if (!scrapeResult?.ok || !scrapeResult.vehicle) {
+      throw new Error(scrapeResult?.error || "Could not read the vehicle page.");
+    }
+    const draft = buildDraft(scrapeResult.vehicle, template);
     await chrome.storage.local.set({
       dealerApiBase: apiBase,
-      dealerInventoryUrl: inventoryUrl,
       dealerDraft: draft,
     });
     renderDraft(draft);
-    setStatus("Draft saved. Open Facebook Marketplace and click Apply Draft.");
+    setStatus("Draft ready. Open Facebook Marketplace and click Apply Draft.");
   } catch (error) {
     setStatus(error.message || "Draft build failed.");
   }
 });
 
 els.openMarketplace.addEventListener("click", async () => {
-  await chrome.tabs.create({ url: "https://www.facebook.com/marketplace/create/item" });
+  await chrome.tabs.create({ url: "https://www.facebook.com/marketplace/create/vehicle" });
 });
 
 loadSettings();
