@@ -22,6 +22,7 @@ import {
   getQuoteRates,
   getSalespeople,
   getSpecials,
+  getTabVisibility,
   getServiceDrive,
   getServiceDriveTraffic,
   getTrafficPdfs,
@@ -36,6 +37,7 @@ import {
   updateQuoteRates,
   updateSalesperson,
   updateSpecial,
+  updateTabVisibility,
   updateServiceDriveAssignment,
   updateServiceDriveTraffic,
   uploadServiceDriveTrafficImages,
@@ -60,6 +62,7 @@ const ADMIN_SECTIONS = [
   { id: "daysOff", label: "Days Off" },
   { id: "trafficLog", label: "Traffic Log" },
   { id: "bdcDistribution", label: "Lead Distribution Type" },
+  { id: "tabs", label: "Tab Visibility" },
   { id: "marketplace", label: "Marketplace" },
   { id: "quoteRates", label: "Quote Rates" },
   { id: "specials", label: "Specials" },
@@ -385,6 +388,9 @@ export default function App() {
   const [bdcState, setBdcState] = useState(null);
   const [bdcDistribution, setBdcDistribution] = useState({ mode: "franchise" });
   const [bdcUndoSettings, setBdcUndoSettings] = useState({ require_password: true, password_hint: "" });
+  const [tabVisibility, setTabVisibility] = useState({
+    entries: TABS.filter((item) => item.id !== "admin").map((item) => ({ tab_id: item.id, visible: true })),
+  });
   const [bdcUndoPassword, setBdcUndoPassword] = useState("");
   const [bdcLog, setBdcLog] = useState({ total: 0, entries: [] });
   const [bdcReport, setBdcReport] = useState(null);
@@ -541,9 +547,13 @@ export default function App() {
       : 0;
   const quoteTotalPaid = quotePayment * quoteMonths;
   const quoteTotalInterest = Math.max(0, quoteTotalPaid - quotePrincipal);
+  const visibleTabIds = new Set(
+    (tabVisibility.entries || []).filter((entry) => entry.visible).map((entry) => entry.tab_id)
+  );
+  const tabsToShow = TABS.filter((item) => item.id === "admin" || adminSession || visibleTabIds.has(item.id));
 
   async function loadAll(nextMonth = month, nextFilters = filters) {
-    const [sales, bdc, service, log, report, distribution, undoSettings] = await Promise.all([
+    const [sales, bdc, service, log, report, distribution, undoSettings, tabs] = await Promise.all([
       getSalespeople({ includeInactive: true }),
       getBdcAgents({ includeInactive: true }),
       getServiceDrive({ month: nextMonth }),
@@ -562,6 +572,7 @@ export default function App() {
       }),
       getBdcDistribution(),
       getBdcUndoSettings(),
+      getTabVisibility(),
     ]);
     setSalespeople(sales);
     setBdcAgents(bdc);
@@ -570,6 +581,7 @@ export default function App() {
     setBdcReport(report);
     setBdcDistribution(distribution);
     setBdcUndoSettings(undoSettings);
+    setTabVisibility(tabs);
   }
 
   async function refreshBdcState(nextLeadStore = leadForm.leadStore) {
@@ -693,6 +705,25 @@ export default function App() {
     }
   }
 
+  function setTabVisibilityValue(tabId, visible) {
+    setTabVisibility((current) => ({
+      entries: (current.entries || []).map((entry) => (entry.tab_id === tabId ? { ...entry, visible } : entry)),
+    }));
+  }
+
+  async function saveTabVisibilitySettings() {
+    setBusy("tab-visibility");
+    setError("");
+    try {
+      const updated = await updateTabVisibility(adminToken, tabVisibility);
+      setTabVisibility(updated);
+    } catch (errorValue) {
+      setError(errText(errorValue));
+    } finally {
+      setBusy("");
+    }
+  }
+
   useEffect(() => {
     let active = true;
     const run = async () => {
@@ -766,6 +797,12 @@ export default function App() {
       active = false;
     };
   }, []);
+
+  useEffect(() => {
+    if (!adminSession && tab !== "admin" && !visibleTabIds.has(tab)) {
+      setTab("serviceCalendar");
+    }
+  }, [adminSession, tab, visibleTabIds]);
 
   useEffect(() => {
     if (!selectedSpecialId && specials.length) {
@@ -1403,10 +1440,10 @@ export default function App() {
         </header>
 
         <nav className="tabs">
-          {TABS.map((item) => (
-            <button
-              key={item.id}
-              type="button"
+            {tabsToShow.map((item) => (
+              <button
+                key={item.id}
+                type="button"
               className={`tab ${tab === item.id ? "is-active" : ""}`}
               onClick={() => setTab(item.id)}
             >
@@ -3585,6 +3622,35 @@ export default function App() {
                     ) : null}
                     <button type="button" onClick={saveBdcUndoSettings} disabled={busy === "bdc-undo-settings"}>
                       {busy === "bdc-undo-settings" ? "Saving..." : "Save Undo Settings"}
+                    </button>
+                  </div>
+                ) : null}
+
+                {adminSection === "tabs" ? (
+                  <div className="panel">
+                    <span className="eyebrow">Tab visibility</span>
+                    <h3>Choose which tabs non-admin users can see</h3>
+                    <p className="admin-note">
+                      Hidden tabs stay visible when you are logged in as admin. Everyone else will only see the tabs you
+                      leave enabled here. The Admin tab always stays visible so you can still sign in.
+                    </p>
+                    <div className="editor-list editor-list--two-up">
+                      {TABS.filter((item) => item.id !== "admin").map((item) => {
+                        const visible = (tabVisibility.entries || []).find((entry) => entry.tab_id === item.id)?.visible ?? true;
+                        return (
+                          <label key={item.id} className="checkbox panel inset-panel">
+                            <input
+                              type="checkbox"
+                              checked={visible}
+                              onChange={(event) => setTabVisibilityValue(item.id, event.target.checked)}
+                            />
+                            <span>{item.label}</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                    <button type="button" onClick={saveTabVisibilitySettings} disabled={busy === "tab-visibility"}>
+                      {busy === "tab-visibility" ? "Saving..." : "Save Tab Visibility"}
                     </button>
                   </div>
                 ) : null}

@@ -1,4 +1,5 @@
 import calendar
+import json
 import csv
 import io
 import os
@@ -39,6 +40,17 @@ BDC_DISTRIBUTION_MODES = ("franchise", "global", "universal")
 BDC_DISTRIBUTION_META_KEY = "bdc:distribution"
 BDC_UNDO_REQUIRE_META_KEY = "bdc:undo:require_password"
 BDC_UNDO_PASSWORD_META_KEY = "bdc:undo:password"
+TAB_VISIBILITY_META_KEY = "tabs:visibility"
+TAB_VISIBILITY_IDS = (
+    "serviceCalendar",
+    "serviceNotes",
+    "bdc",
+    "reports",
+    "traffic",
+    "marketplace",
+    "quote",
+    "specials",
+)
 DEFAULT_CORS_ORIGINS = [
     "http://localhost:4183",
     "http://127.0.0.1:4183",
@@ -256,6 +268,19 @@ class BdcUndoSettingsIn(BaseModel):
 
 class BdcUndoRequest(BaseModel):
     password: str = ""
+
+
+class TabVisibilityItem(BaseModel):
+    tab_id: str
+    visible: bool = True
+
+
+class TabVisibilityOut(BaseModel):
+    entries: List[TabVisibilityItem]
+
+
+class TabVisibilityIn(BaseModel):
+    entries: List[TabVisibilityItem]
 
 
 class ServiceDriveNoteIn(BaseModel):
@@ -519,6 +544,39 @@ def set_bdc_undo_settings(settings: BdcUndoSettingsIn) -> BdcUndoSettingsOut:
     set_meta(BDC_UNDO_REQUIRE_META_KEY, "1" if require_password else "0")
     set_meta(BDC_UNDO_PASSWORD_META_KEY, password)
     return get_bdc_undo_settings()
+
+
+def default_tab_visibility() -> TabVisibilityOut:
+    return TabVisibilityOut(entries=[TabVisibilityItem(tab_id=tab_id, visible=True) for tab_id in TAB_VISIBILITY_IDS])
+
+
+def normalize_tab_visibility_entries(entries: List[TabVisibilityItem]) -> TabVisibilityOut:
+    incoming = {str(entry.tab_id): bool(entry.visible) for entry in entries if str(entry.tab_id) in TAB_VISIBILITY_IDS}
+    return TabVisibilityOut(
+        entries=[TabVisibilityItem(tab_id=tab_id, visible=incoming.get(tab_id, True)) for tab_id in TAB_VISIBILITY_IDS]
+    )
+
+
+def get_tab_visibility() -> TabVisibilityOut:
+    raw = str(get_meta(TAB_VISIBILITY_META_KEY) or "").strip()
+    if not raw:
+        return default_tab_visibility()
+    try:
+        parsed = json.loads(raw)
+    except Exception:
+        return default_tab_visibility()
+    if not isinstance(parsed, dict):
+        return default_tab_visibility()
+    return TabVisibilityOut(
+        entries=[TabVisibilityItem(tab_id=tab_id, visible=bool(parsed.get(tab_id, True))) for tab_id in TAB_VISIBILITY_IDS]
+    )
+
+
+def set_tab_visibility(payload: TabVisibilityIn) -> TabVisibilityOut:
+    normalized = normalize_tab_visibility_entries(payload.entries or [])
+    data = {entry.tab_id: entry.visible for entry in normalized.entries}
+    set_meta(TAB_VISIBILITY_META_KEY, json.dumps(data))
+    return normalized
 
 
 def normalize_bdc_lead_store(value: str) -> str:
@@ -3035,6 +3093,11 @@ def get_bdc_undo_settings_public() -> BdcUndoSettingsOut:
     return get_bdc_undo_settings()
 
 
+@app.get("/api/tabs/visibility", response_model=TabVisibilityOut)
+def get_tabs_visibility_public() -> TabVisibilityOut:
+    return get_tab_visibility()
+
+
 @app.post("/api/bdc/assign", response_model=BdcAssignmentOut)
 def post_bdc_assign(payload: BdcLeadAssignIn) -> BdcAssignmentOut:
     return assign_next_lead(payload)
@@ -3108,3 +3171,12 @@ def post_bdc_distribution(
     mode = normalize_bdc_distribution(payload.mode)
     set_meta(BDC_DISTRIBUTION_META_KEY, mode)
     return BdcDistributionOut(mode=mode)
+
+
+@app.post("/api/admin/tabs/visibility", response_model=TabVisibilityOut)
+def post_tabs_visibility(
+    payload: TabVisibilityIn,
+    x_admin_token: Optional[str] = Header(default=None),
+) -> TabVisibilityOut:
+    require_admin(x_admin_token)
+    return set_tab_visibility(payload)

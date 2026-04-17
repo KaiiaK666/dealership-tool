@@ -139,6 +139,7 @@ export const getQuoteRates = () => request("/api/quote/rates");
 export const getMarketplaceTemplate = () => request("/api/marketplace/template");
 export const getBdcDistribution = () => request("/api/bdc/distribution");
 export const getBdcUndoSettings = () => request("/api/bdc/undo/settings");
+export const getTabVisibility = () => request("/api/tabs/visibility");
 export const getServiceDriveNotes = (params = {}) =>
   request(`/api/service-drive/notes${qs({
     salesperson_id: params.salespersonId,
@@ -182,6 +183,8 @@ export const updateQuoteRates = (token, payload) =>
   request("/api/admin/quote/rates", { method: "POST", body: payload, headers: adminHeaders(token) });
 export const updateMarketplaceTemplate = (token, payload) =>
   request("/api/admin/marketplace/template", { method: "POST", body: payload, headers: adminHeaders(token) });
+export const updateTabVisibility = (token, payload) =>
+  request("/api/admin/tabs/visibility", { method: "POST", body: payload, headers: adminHeaders(token) });
 export const createServiceDriveNote = (token, payload) =>
   request("/api/admin/service-drive/notes", { method: "POST", body: payload, headers: adminHeaders(token) });
 export const updateServiceDriveNote = (token, id, payload) =>
