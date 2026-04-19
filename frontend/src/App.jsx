@@ -9,6 +9,7 @@ import {
   createServiceDriveTraffic,
   createSpecial,
   createTrafficPdf,
+  deleteServiceDriveTrafficDay,
   generateServiceDrive,
   getAdminDaysOff,
   getAdminSession,
@@ -421,6 +422,7 @@ export default function App() {
   const [reynoldsImportFileKey, setReynoldsImportFileKey] = useState(0);
   const [reynoldsImportResult, setReynoldsImportResult] = useState(null);
   const [reynoldsUndoResult, setReynoldsUndoResult] = useState(null);
+  const [trafficDayClearResult, setTrafficDayClearResult] = useState(null);
   const [quoteRates, setQuoteRates] = useState([]);
   const [quoteRateDraft, setQuoteRateDraft] = useState({});
   const [marketplaceTemplate, setMarketplaceTemplate] = useState({
@@ -1222,6 +1224,44 @@ export default function App() {
     }
   }
 
+  async function clearTrafficDay(trafficDate = selectedTrafficDate) {
+    const resolvedDate = String(trafficDate || "").trim();
+    if (!resolvedDate) {
+      setError("Pick a traffic date first.");
+      return;
+    }
+    const count = serviceTrafficData.counts_by_date?.[resolvedDate] || 0;
+    if (
+      typeof window !== "undefined" &&
+      !window.confirm(
+        `Clear ${count} traffic row${count === 1 ? "" : "s"} for ${resolvedDate}? This deletes the full day, including uploaded offer screenshots.`
+      )
+    ) {
+      return;
+    }
+
+    const busyKey = `clear-traffic-day-${resolvedDate}`;
+    setBusy(busyKey);
+    setError("");
+    setReynoldsImportResult(null);
+    setReynoldsUndoResult(null);
+    try {
+      const result = await deleteServiceDriveTrafficDay(adminToken, resolvedDate);
+      setTrafficDayClearResult(result);
+      setExpandedTrafficEntryId(null);
+      setSelectedTrafficDate(resolvedDate);
+      setTrafficMonth(resolvedDate.slice(0, 7));
+      await refreshServiceTraffic(resolvedDate.slice(0, 7), resolvedDate);
+      if (!result.deleted) {
+        setError(`No traffic rows were found for ${resolvedDate}.`);
+      }
+    } catch (errorValue) {
+      setError(errText(errorValue));
+    } finally {
+      setBusy("");
+    }
+  }
+
   async function saveTrafficEntry(entry) {
     setBusy(`traffic-admin-${entry.id}`);
     setError("");
@@ -1428,9 +1468,43 @@ export default function App() {
       <main className="app">
         <header className="hero">
           <div className="hero-brand">
-            <img className="hero-logo" src="/logo-head.png" alt="Dale Gas" />
-            <span className="eyebrow">Service drive and BDC</span>
-            <h1>Dealership BDC Tool</h1>
+            <div className="hero-brand__top">
+              <div className="hero-logo-shell">
+                <img className="hero-logo" src="/dbt-hub-icon.png" alt="DBT hub icon" />
+              </div>
+              <div className="hero-copy">
+                <span className="eyebrow hero-eyebrow">BDC Dealership Hub</span>
+                <div className="hero-title-lockup">
+                  <div className="hero-title__acronym" aria-hidden="true">
+                    <span>D</span>
+                    <span>B</span>
+                    <span>T</span>
+                  </div>
+                  <h1 className="hero-title__expanded">
+                    <span>Dealership</span>
+                    <span>BDC</span>
+                    <span>Tool</span>
+                  </h1>
+                </div>
+                <p className="hero-subtitle">
+                  Service-drive traffic, admin controls, lead rotation, and notes all in one command board.
+                </p>
+              </div>
+            </div>
+            <div className="hero-ribbon">
+              <div className="hero-ribbon__item">
+                <span>Traffic this month</span>
+                <strong>{trafficMonthTotal}</strong>
+              </div>
+              <div className="hero-ribbon__item">
+                <span>Assigned slots</span>
+                <strong>{serviceMonth ? `${serviceMonth.assigned_slots}/${serviceMonth.total_slots}` : "0/0"}</strong>
+              </div>
+              <div className="hero-ribbon__item">
+                <span>Active staff</span>
+                <strong>{activeSales.length}</strong>
+              </div>
+            </div>
           </div>
           <div className="hero-card">
             <span>Admin</span>
@@ -1537,15 +1611,27 @@ export default function App() {
 
                       <div className="calendar-day__traffic">
                         <span>{trafficCount} traffic rows</span>
-                        <button
-                          type="button"
-                          className="calendar-day__plus"
-                          aria-label={`Open service-drive traffic for ${day.date}`}
-                          onClick={() => openTrafficDay(day.date)}
-                        >
-                          <b>+</b>
-                          <small>Traffic</small>
-                        </button>
+                        <div className="calendar-day__traffic-actions">
+                          <button
+                            type="button"
+                            className="calendar-day__plus"
+                            aria-label={`Open service-drive traffic for ${day.date}`}
+                            onClick={() => openTrafficDay(day.date)}
+                          >
+                            <b>+</b>
+                            <small>Traffic</small>
+                          </button>
+                          {adminSession && trafficCount ? (
+                            <button
+                              type="button"
+                              className="secondary calendar-day__clear"
+                              onClick={() => clearTrafficDay(day.date)}
+                              disabled={busy === `clear-traffic-day-${day.date}`}
+                            >
+                              {busy === `clear-traffic-day-${day.date}` ? "Clearing..." : "Clear Day"}
+                            </button>
+                          ) : null}
+                        </div>
                       </div>
 
                       <div className="calendar-day__assignments">
@@ -1585,7 +1671,7 @@ export default function App() {
 
             <div className="calendar-print-sheet">
               <div className="calendar-print-sheet__title">
-                <img className="calendar-print-sheet__logo" src="/logo-head.png" alt="Bert Ogden Auto Group" />
+                <img className="calendar-print-sheet__logo" src="/dbt-hub-icon.png" alt="DBT hub icon" />
                 <div className="calendar-print-sheet__title-copy">
                   <span className="eyebrow">Service drive calendar</span>
                   <h2>{monthLabel(month)}</h2>
@@ -3156,12 +3242,41 @@ export default function App() {
 
                       <div className="traffic-sidebar">
                         <div className="panel traffic-summary-panel">
-                          <span className="eyebrow">Selected day</span>
-                          <h3>{longDateLabel(selectedTrafficDate)}</h3>
+                          <div className="row">
+                            <div>
+                              <span className="eyebrow">Selected day</span>
+                              <h3>{longDateLabel(selectedTrafficDate)}</h3>
+                            </div>
+                            <button
+                              type="button"
+                              className="secondary"
+                              onClick={() => clearTrafficDay(selectedTrafficDate)}
+                              disabled={busy === `clear-traffic-day-${selectedTrafficDate}` || !selectedTrafficCount}
+                            >
+                              {busy === `clear-traffic-day-${selectedTrafficDate}` ? "Clearing..." : "Clear Day"}
+                            </button>
+                          </div>
                           <p className="admin-note">
                             Sales staff can only edit the notes field from the public page. Everything else stays admin
                             controlled here.
                           </p>
+                          <div className="traffic-summary-panel__status">
+                            <strong>
+                              {selectedTrafficCount} traffic row{selectedTrafficCount === 1 ? "" : "s"} on this date
+                            </strong>
+                            <small>Clearing the day removes every row and any uploaded offer screenshots for that date.</small>
+                          </div>
+                          {trafficDayClearResult?.traffic_date === selectedTrafficDate && trafficDayClearResult.deleted ? (
+                            <div className="notice success">
+                              Cleared {trafficDayClearResult.deleted} row
+                              {trafficDayClearResult.deleted === 1 ? "" : "s"}
+                              {trafficDayClearResult.deleted_images
+                                ? ` and ${trafficDayClearResult.deleted_images} screenshot${
+                                    trafficDayClearResult.deleted_images === 1 ? "" : "s"
+                                  }.`
+                                : "."}
+                            </div>
+                          ) : null}
                           <div className="traffic-team-grid">
                             <div className="traffic-team-card">
                               <span>Kia</span>

@@ -154,6 +154,11 @@ export const createServiceDriveTraffic = (token, payload) =>
   request("/api/admin/service-drive/traffic", { method: "POST", body: payload, headers: adminHeaders(token) });
 export const updateServiceDriveTraffic = (token, id, payload) =>
   request(`/api/admin/service-drive/traffic/${id}`, { method: "PUT", body: payload, headers: adminHeaders(token) });
+export const deleteServiceDriveTrafficDay = (token, trafficDate) =>
+  request(`/api/admin/service-drive/traffic/day/${encodeURIComponent(trafficDate)}`, {
+    method: "DELETE",
+    headers: adminHeaders(token),
+  });
 export const importReynoldsServiceDriveTraffic = (token, formData) =>
   request("/api/admin/service-drive/traffic/import/reynolds", {
     method: "POST",

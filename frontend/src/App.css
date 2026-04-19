@@ -134,20 +134,56 @@ textarea:focus {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(280px, 340px);
   gap: 16px;
-  padding: 20px 22px;
+  padding: 22px 24px;
   align-items: stretch;
+  position: relative;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at top left, rgba(255, 214, 120, 0.26), transparent 28%),
+    radial-gradient(circle at 72% 24%, rgba(28, 128, 121, 0.12), transparent 28%),
+    linear-gradient(135deg, rgba(255, 252, 247, 0.98), rgba(246, 239, 229, 0.94));
 }
 
 .hero-brand {
   display: grid;
-  gap: 10px;
+  gap: 18px;
   align-content: start;
+  position: relative;
+  z-index: 1;
+}
+
+.hero-brand__top {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 18px;
+  align-items: center;
+}
+
+.hero-logo-shell {
+  width: 116px;
+  height: 116px;
+  padding: 8px;
+  border-radius: 28px;
+  border: 1px solid rgba(31, 37, 43, 0.08);
+  background:
+    linear-gradient(180deg, rgba(17, 26, 37, 0.96), rgba(37, 48, 59, 0.92)),
+    rgba(255, 255, 255, 0.8);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.12),
+    0 18px 34px rgba(37, 48, 59, 0.16);
+}
+
+.hero-copy {
+  display: grid;
+  gap: 10px;
 }
 
 .hero-logo {
-  width: min(100%, 320px);
-  height: auto;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
   display: block;
+  border-radius: 22px;
 }
 
 .hero h1,
@@ -166,10 +202,107 @@ textarea:focus {
 }
 
 .hero h1 {
-  max-width: 14ch;
-  font-size: clamp(2rem, 3.8vw, 3.2rem);
-  line-height: 0.98;
+  max-width: none;
+  font-size: clamp(2rem, 4vw, 3.3rem);
+  line-height: 0.94;
   letter-spacing: -0.05em;
+}
+
+.hero-title-lockup {
+  display: grid;
+  gap: 10px;
+}
+
+.hero-title__acronym,
+.hero-title__expanded {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+}
+
+.hero-title__acronym span {
+  min-width: 2.4ch;
+  padding: 8px 12px;
+  border-radius: 18px;
+  border: 1px solid rgba(37, 48, 59, 0.1);
+  background: rgba(255, 255, 255, 0.74);
+  box-shadow: 0 10px 22px rgba(60, 43, 26, 0.08);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: clamp(0.95rem, 1.7vw, 1.2rem);
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  text-align: center;
+  color: var(--accent-deep);
+  animation: hero-acronym-shuffle 820ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+.hero-title__acronym span:nth-child(2) {
+  animation-delay: 70ms;
+}
+
+.hero-title__acronym span:nth-child(3) {
+  animation-delay: 140ms;
+}
+
+.hero-title__expanded {
+  gap: 10px 14px;
+}
+
+.hero-title__expanded span {
+  display: inline-flex;
+  animation: hero-word-reveal 820ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+
+.hero-title__expanded span:nth-child(1) {
+  animation-delay: 220ms;
+}
+
+.hero-title__expanded span:nth-child(2) {
+  animation-delay: 320ms;
+  color: var(--accent-deep);
+}
+
+.hero-title__expanded span:nth-child(3) {
+  animation-delay: 420ms;
+}
+
+.hero-subtitle {
+  max-width: 58ch;
+  margin: 0;
+  color: var(--muted);
+  font-size: 1rem;
+  line-height: 1.6;
+}
+
+.hero-ribbon {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.hero-ribbon__item {
+  padding: 12px 14px;
+  border-radius: 18px;
+  border: 1px solid rgba(31, 37, 43, 0.08);
+  background: rgba(255, 255, 255, 0.68);
+  box-shadow: 0 10px 22px rgba(60, 43, 26, 0.06);
+  display: grid;
+  gap: 6px;
+}
+
+.hero-ribbon__item span {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.68rem;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.hero-ribbon__item strong {
+  font-size: 1.2rem;
+  line-height: 1;
 }
 
 .eyebrow {
@@ -183,12 +316,18 @@ textarea:focus {
   color: var(--deep);
 }
 
+.hero-eyebrow {
+  margin-bottom: 0;
+}
+
 .hero-card {
   border-radius: 22px;
   padding: 18px 20px;
   display: grid;
   gap: 6px;
   align-content: center;
+  position: relative;
+  z-index: 1;
   color: #f8f1e7;
   background:
     linear-gradient(160deg, rgba(37, 48, 59, 0.98), rgba(50, 65, 79, 0.94)),
@@ -213,6 +352,34 @@ label span,
 .hero-card strong {
   font-size: clamp(1.45rem, 2vw, 2rem);
   line-height: 1.05;
+}
+
+@keyframes hero-acronym-shuffle {
+  0% {
+    opacity: 0;
+    transform: translateY(18px) rotate(8deg) scale(0.84);
+  }
+  60% {
+    opacity: 1;
+    transform: translateY(-2px) rotate(-1deg) scale(1.02);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) rotate(0) scale(1);
+  }
+}
+
+@keyframes hero-word-reveal {
+  0% {
+    opacity: 0;
+    transform: translateX(-18px);
+    filter: blur(7px);
+  }
+  100% {
+    opacity: 1;
+    transform: translateX(0);
+    filter: blur(0);
+  }
 }
 
 .tabs {
@@ -362,8 +529,10 @@ label span,
 }
 
 .calendar-print-sheet__logo {
-  width: 150px;
-  height: auto;
+  width: 92px;
+  height: 92px;
+  object-fit: cover;
+  border-radius: 18px;
   display: block;
 }
 
@@ -616,6 +785,13 @@ label span,
   color: var(--muted);
 }
 
+.calendar-day__traffic-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 .calendar-day__plus {
   min-width: 68px;
   padding: 8px 9px;
@@ -645,6 +821,13 @@ button.calendar-day__plus:hover:not(:disabled) {
   letter-spacing: 0.14em;
   text-transform: uppercase;
   color: rgba(248, 241, 231, 0.74);
+}
+
+.calendar-day__clear {
+  padding: 8px 12px;
+  min-width: 96px;
+  font-size: 0.76rem;
+  box-shadow: 0 10px 22px rgba(37, 48, 59, 0.14);
 }
 
 .calendar-day__assignments {
@@ -2126,7 +2309,8 @@ button.special-card:hover:not(:disabled) {
   }
 
   .calendar-print-sheet__logo {
-    width: 92pt;
+    width: 52pt;
+    height: 52pt;
   }
 
   .calendar-print-sheet__title-copy {
@@ -2495,8 +2679,18 @@ button.special-card:hover:not(:disabled) {
     padding: 20px;
   }
 
+  .hero-brand__top,
+  .hero-ribbon {
+    grid-template-columns: 1fr;
+  }
+
+  .hero-logo-shell {
+    width: min(180px, 100%);
+    height: auto;
+    aspect-ratio: 1;
+  }
+
   .hero h1 {
-    max-width: none;
     font-size: 2.2rem;
   }
 

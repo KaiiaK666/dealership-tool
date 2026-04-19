@@ -395,6 +395,12 @@ class ServiceDriveTrafficImportUndoOut(BaseModel):
     preserved_with_notes: int = 0
 
 
+class ServiceDriveTrafficDayClearOut(BaseModel):
+    traffic_date: str
+    deleted: int
+    deleted_images: int = 0
+
+
 class QuoteRateOut(BaseModel):
     brand: str
     tier: str
@@ -2561,6 +2567,46 @@ def undo_reynolds_service_traffic_import() -> ServiceDriveTrafficImportUndoOut:
     return ServiceDriveTrafficImportUndoOut(deleted=deleted, preserved_with_notes=preserved_with_notes)
 
 
+def clear_service_drive_traffic_day(traffic_date: str) -> ServiceDriveTrafficDayClearOut:
+    resolved_date = parse_iso_date(traffic_date, "traffic_date").isoformat()
+    traffic_rows = db_query_all(
+        """
+        SELECT id
+        FROM service_drive_traffic_entries
+        WHERE traffic_date = ?
+        ORDER BY id ASC
+        """,
+        (resolved_date,),
+    )
+    traffic_ids = [int(row.get("id") or 0) for row in traffic_rows if row.get("id")]
+    if not traffic_ids:
+        return ServiceDriveTrafficDayClearOut(traffic_date=resolved_date, deleted=0, deleted_images=0)
+
+    placeholders = ",".join("?" for _ in traffic_ids)
+    image_rows = db_query_all(
+        f"""
+        SELECT stored_filename
+        FROM service_drive_traffic_images
+        WHERE traffic_entry_id IN ({placeholders})
+        ORDER BY id ASC
+        """,
+        tuple(traffic_ids),
+    )
+    for row in image_rows:
+        remove_uploaded_file(TRAFFIC_OFFER_ROOT, row.get("stored_filename"))
+
+    db_execute(
+        f"DELETE FROM service_drive_traffic_images WHERE traffic_entry_id IN ({placeholders})",
+        tuple(traffic_ids),
+    )
+    db_execute("DELETE FROM service_drive_traffic_entries WHERE traffic_date = ?", (resolved_date,))
+    return ServiceDriveTrafficDayClearOut(
+        traffic_date=resolved_date,
+        deleted=len(traffic_ids),
+        deleted_images=len(image_rows),
+    )
+
+
 def create_service_drive_traffic_entry(payload: ServiceDriveTrafficIn) -> ServiceDriveTrafficOut:
     traffic_date = parse_iso_date(payload.traffic_date, "traffic_date").isoformat()
     brand = normalize_brand(payload.brand)
@@ -2963,6 +3009,15 @@ def put_service_drive_traffic(
 ) -> ServiceDriveTrafficOut:
     require_admin(x_admin_token)
     return update_service_drive_traffic_entry(traffic_id, payload)
+
+
+@app.delete("/api/admin/service-drive/traffic/day/{traffic_date}", response_model=ServiceDriveTrafficDayClearOut)
+def delete_service_drive_traffic_day(
+    traffic_date: str,
+    x_admin_token: Optional[str] = Header(default=None),
+) -> ServiceDriveTrafficDayClearOut:
+    require_admin(x_admin_token)
+    return clear_service_drive_traffic_day(traffic_date)
 
 
 @app.post("/api/admin/service-drive/traffic/import/reynolds", response_model=ServiceDriveTrafficImportOut)
