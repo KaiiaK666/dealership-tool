@@ -423,6 +423,12 @@ export default function App() {
   const [reynoldsImportResult, setReynoldsImportResult] = useState(null);
   const [reynoldsUndoResult, setReynoldsUndoResult] = useState(null);
   const [trafficDayClearResult, setTrafficDayClearResult] = useState(null);
+  const [resourceLoadState, setResourceLoadState] = useState({
+    trafficPdfs: false,
+    specials: false,
+    quoteRates: false,
+    marketplaceTemplate: false,
+  });
   const [quoteRates, setQuoteRates] = useState([]);
   const [quoteRateDraft, setQuoteRateDraft] = useState({});
   const [marketplaceTemplate, setMarketplaceTemplate] = useState({
@@ -633,11 +639,13 @@ export default function App() {
   async function refreshTrafficPdfs() {
     const data = await getTrafficPdfs();
     setTrafficPdfs(data.entries || []);
+    setResourceLoadState((current) => ({ ...current, trafficPdfs: true }));
   }
 
   async function refreshSpecials() {
     const data = await getSpecials();
     setSpecials(data.entries || []);
+    setResourceLoadState((current) => ({ ...current, specials: true }));
   }
 
   async function refreshQuoteRates() {
@@ -656,11 +664,13 @@ export default function App() {
       draft[entry.brand][entry.tier] = String(entry.apr ?? "");
     }
     setQuoteRateDraft(draft);
+    setResourceLoadState((current) => ({ ...current, quoteRates: true }));
   }
 
   async function refreshMarketplaceTemplate() {
     const data = await getMarketplaceTemplate();
     setMarketplaceTemplate(data);
+    setResourceLoadState((current) => ({ ...current, marketplaceTemplate: true }));
   }
 
   function updateQuoteRateDraft(brand, tier, value) {
@@ -733,8 +743,6 @@ export default function App() {
       setError("");
       try {
         await loadAll(month, filters);
-        await refreshQuoteRates();
-        await refreshMarketplaceTemplate();
       } catch (errorValue) {
         if (active) setError(errText(errorValue));
       } finally {
@@ -783,13 +791,28 @@ export default function App() {
   }, [trafficMonth, selectedTrafficDate]);
 
   useEffect(() => {
+    if (resourceLoadState.quoteRates) return;
+    if (!(tab === "quote" || (tab === "admin" && adminSection === "quoteRates"))) return;
     let active = true;
     const run = async () => {
       try {
-        const [pdfData, specialData] = await Promise.all([getTrafficPdfs(), getSpecials()]);
+        const data = await getQuoteRates();
         if (!active) return;
-        setTrafficPdfs(pdfData.entries || []);
-        setSpecials(specialData.entries || []);
+        const entries = data.entries || [];
+        setQuoteRates(entries);
+        const draft = {};
+        for (const brand of QUOTE_BRANDS) {
+          draft[brand] = {};
+          for (const tier of CREDIT_TIERS) {
+            draft[brand][tier.label] = "";
+          }
+        }
+        for (const entry of entries) {
+          if (!draft[entry.brand]) draft[entry.brand] = {};
+          draft[entry.brand][entry.tier] = String(entry.apr ?? "");
+        }
+        setQuoteRateDraft(draft);
+        setResourceLoadState((current) => ({ ...current, quoteRates: true }));
       } catch (errorValue) {
         if (active) setError(errText(errorValue));
       }
@@ -798,7 +821,67 @@ export default function App() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [adminSection, resourceLoadState.quoteRates, tab]);
+
+  useEffect(() => {
+    if (resourceLoadState.marketplaceTemplate) return;
+    if (!(tab === "marketplace" || (tab === "admin" && adminSection === "marketplace"))) return;
+    let active = true;
+    const run = async () => {
+      try {
+        const data = await getMarketplaceTemplate();
+        if (!active) return;
+        setMarketplaceTemplate(data);
+        setResourceLoadState((current) => ({ ...current, marketplaceTemplate: true }));
+      } catch (errorValue) {
+        if (active) setError(errText(errorValue));
+      }
+    };
+    run();
+    return () => {
+      active = false;
+    };
+  }, [adminSection, resourceLoadState.marketplaceTemplate, tab]);
+
+  useEffect(() => {
+    if (resourceLoadState.trafficPdfs) return;
+    if (tab !== "traffic") return;
+    let active = true;
+    const run = async () => {
+      try {
+        const data = await getTrafficPdfs();
+        if (!active) return;
+        setTrafficPdfs(data.entries || []);
+        setResourceLoadState((current) => ({ ...current, trafficPdfs: true }));
+      } catch (errorValue) {
+        if (active) setError(errText(errorValue));
+      }
+    };
+    run();
+    return () => {
+      active = false;
+    };
+  }, [resourceLoadState.trafficPdfs, tab]);
+
+  useEffect(() => {
+    if (resourceLoadState.specials) return;
+    if (!(tab === "specials" || (tab === "admin" && adminSection === "specials"))) return;
+    let active = true;
+    const run = async () => {
+      try {
+        const data = await getSpecials();
+        if (!active) return;
+        setSpecials(data.entries || []);
+        setResourceLoadState((current) => ({ ...current, specials: true }));
+      } catch (errorValue) {
+        if (active) setError(errText(errorValue));
+      }
+    };
+    run();
+    return () => {
+      active = false;
+    };
+  }, [adminSection, resourceLoadState.specials, tab]);
 
   useEffect(() => {
     if (!adminSession && tab !== "admin" && !visibleTabIds.has(tab)) {
