@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from copy import deepcopy
 from datetime import date
 from pathlib import Path
@@ -40,12 +41,33 @@ def iso_today(offset_days: int = 0) -> str:
     return date.fromordinal(date.today().toordinal() + offset_days).isoformat()
 
 
+def slug_username(value: str) -> str:
+    cleaned = re.sub(r"[^a-z0-9]+", "", str(value or "").lower())
+    return cleaned or "user"
+
+
+def unique_username(username: str, existing: list[dict], exclude_user_id: int | None = None) -> str:
+    base = slug_username(username)
+    taken = {
+        str(user.get("username", "")).lower()
+        for user in existing
+        if exclude_user_id is None or int(user.get("id", 0)) != int(exclude_user_id)
+    }
+    if base not in taken:
+        return base
+    suffix = 2
+    while f"{base}{suffix}" in taken:
+        suffix += 1
+    return f"{base}{suffix}"
+
+
 SEED_DATA = {
     "stores": [],
     "users": [
         {
             "id": 1,
             "name": "Admin",
+            "username": "admin",
             "title": "Admin",
             "role": "Admin",
             "department": "Leadership",
@@ -58,6 +80,7 @@ SEED_DATA = {
         {
             "id": 2,
             "name": "Kai Ammons",
+            "username": "kai",
             "title": "BDC Director",
             "role": "Manager",
             "department": "BDC",
@@ -70,6 +93,7 @@ SEED_DATA = {
         {
             "id": 3,
             "name": "Miguel Castillo",
+            "username": "miguel",
             "title": "Boss",
             "role": "Manager",
             "department": "Leadership",
@@ -82,6 +106,7 @@ SEED_DATA = {
         {
             "id": 4,
             "name": "Pearl Medina",
+            "username": "pearl",
             "title": "BDC Director Supervisor",
             "role": "Manager",
             "department": "BDC",
@@ -94,6 +119,7 @@ SEED_DATA = {
         {
             "id": 5,
             "name": "Marcus Ramirez",
+            "username": "marcus",
             "title": "Corporate Trainer",
             "role": "Coordinator",
             "department": "Leadership",
@@ -106,6 +132,7 @@ SEED_DATA = {
         {
             "id": 6,
             "name": "Sales Person",
+            "username": "sales",
             "title": "Sales Person",
             "role": "Staff",
             "department": "Sales",
@@ -353,6 +380,7 @@ def normalize_store(store: dict) -> dict:
         store_row.setdefault("service_target", 0)
 
     for user in normalized["users"]:
+        user["username"] = unique_username(user.get("username") or user.get("name") or f"user{user.get('id', 0)}", normalized["users"], user.get("id"))
         user.setdefault("role", "Staff")
         user.setdefault("department", "General")
         user.setdefault("store_id", None)
@@ -423,7 +451,8 @@ def get_board(store: dict, board_id: int) -> dict:
 
 
 class LoginPayload(BaseModel):
-    user_id: int
+    user_id: int | None = None
+    username: str | None = Field(default=None, min_length=1, max_length=80)
     password: str = Field(min_length=1, max_length=120)
 
 
@@ -451,6 +480,7 @@ class StorePatch(BaseModel):
 
 class UserCreate(BaseModel):
     name: str = Field(min_length=2, max_length=80)
+    username: str | None = Field(default=None, min_length=2, max_length=80)
     title: str = ""
     role: str = "Staff"
     department: str = "General"
@@ -462,6 +492,7 @@ class UserCreate(BaseModel):
 
 class UserPatch(BaseModel):
     name: str | None = Field(default=None, min_length=2, max_length=80)
+    username: str | None = Field(default=None, min_length=2, max_length=80)
     title: str | None = None
     role: str | None = None
     department: str | None = None
@@ -578,7 +609,19 @@ def bootstrap() -> dict:
 @app.post("/api/login")
 def login(payload: LoginPayload) -> dict:
     store = read_store()
-    user = next((entry for entry in store["users"] if int(entry["id"]) == int(payload.user_id) and entry.get("active", True)), None)
+    username = str(payload.username or "").strip().lower()
+    user = next(
+        (
+            entry
+            for entry in store["users"]
+            if entry.get("active", True)
+            and (
+                (payload.user_id is not None and int(entry["id"]) == int(payload.user_id))
+                or (username and str(entry.get("username", "")).lower() == username)
+            )
+        ),
+        None,
+    )
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     if payload.password != user.get("password"):
@@ -613,6 +656,7 @@ def create_user(payload: UserCreate) -> dict:
     store = read_store()
     record = payload.model_dump()
     record["id"] = next_id(store["users"])
+    record["username"] = unique_username(record.get("username") or record["name"], store["users"])
     record["avatar"] = "".join(part[:1] for part in record["name"].split()[:2]).upper()
     store["users"].append(record)
     write_store(store)
@@ -636,6 +680,8 @@ def update_user(user_id: int, payload: UserPatch) -> dict:
         record[key] = value
     if "name" in updates:
         record["avatar"] = "".join(part[:1] for part in record["name"].split()[:2]).upper()
+    if "username" in updates or "name" in updates:
+        record["username"] = unique_username(updates.get("username") or record.get("username") or record["name"], store["users"], user_id)
     write_store(store)
     return {"user": public_user(record)}
 
