@@ -24,126 +24,87 @@ PriorityValue = Literal["Critical", "High", "Medium", "Low"]
 AudienceValue = Literal["All", "Sales", "BDC", "Service", "Leadership"]
 FieldTypeValue = Literal["text", "number", "date", "tag"]
 
+LEGACY_DEMO_USERS = {"Kai Rivers", "Maya Chen", "Jordan Reed", "Ava Martinez", "Luis Gomez"}
+LEGACY_DEMO_BOARDS = {"Showroom Appointments", "Service Lane Follow Up", "Used Car Specials"}
+
 
 def iso_today(offset_days: int = 0) -> str:
     return date.fromordinal(date.today().toordinal() + offset_days).isoformat()
 
 
 SEED_DATA = {
-    "stores": [
-        {
-            "id": 1,
-            "name": "Bert Ogden Kia",
-            "code": "KIA",
-            "city": "Edinburg",
-            "manager": "Kai Rivers",
-            "department_focus": "Sales",
-            "sales_target": 160,
-            "service_target": 1150,
-            "active": True,
-        },
-        {
-            "id": 2,
-            "name": "Bert Ogden Mazda",
-            "code": "MAZ",
-            "city": "Edinburg",
-            "manager": "Maya Chen",
-            "department_focus": "Service",
-            "sales_target": 95,
-            "service_target": 820,
-            "active": True,
-        },
-        {
-            "id": 3,
-            "name": "Bert Ogden Outlet",
-            "code": "OUT",
-            "city": "Mission",
-            "manager": "Jordan Reed",
-            "department_focus": "Used Cars",
-            "sales_target": 120,
-            "service_target": 0,
-            "active": True,
-        },
-    ],
+    "stores": [],
     "users": [
         {
             "id": 1,
-            "name": "Kai Rivers",
-            "title": "General Sales Manager",
+            "name": "Miguel Castillo",
+            "title": "Boss",
             "role": "Admin",
-            "department": "Sales",
-            "store_id": 1,
-            "phone": "(956) 555-0101",
+            "department": "Leadership",
+            "store_id": None,
+            "phone": "",
             "active": True,
-            "avatar": "KR",
+            "avatar": "MC",
             "password": "bertogden",
         },
         {
             "id": 2,
-            "name": "Maya Chen",
-            "title": "Fixed Ops Director",
+            "name": "Kai Ammons",
+            "title": "BDC Director",
             "role": "Manager",
-            "department": "Service",
-            "store_id": 2,
-            "phone": "(956) 555-0102",
+            "department": "BDC",
+            "store_id": None,
+            "phone": "",
             "active": True,
-            "avatar": "MC",
-            "password": "maya2026",
+            "avatar": "KA",
+            "password": "kai2026",
         },
         {
             "id": 3,
-            "name": "Jordan Reed",
-            "title": "BDC Manager",
+            "name": "Pearl Medina",
+            "title": "BDC Director Supervisor",
             "role": "Manager",
             "department": "BDC",
-            "store_id": 1,
-            "phone": "(956) 555-0103",
+            "store_id": None,
+            "phone": "",
             "active": True,
-            "avatar": "JR",
-            "password": "jordan2026",
+            "avatar": "PM",
+            "password": "pearl2026",
         },
         {
             "id": 4,
-            "name": "Ava Martinez",
-            "title": "Marketing Lead",
+            "name": "Marcus Ramirez",
+            "title": "Corporate Trainer",
             "role": "Coordinator",
-            "department": "Marketing",
-            "store_id": 3,
-            "phone": "(956) 555-0104",
+            "department": "Leadership",
+            "store_id": None,
+            "phone": "",
             "active": True,
-            "avatar": "AM",
-            "password": "ava2026",
+            "avatar": "MR",
+            "password": "marcus2026",
         },
         {
             "id": 5,
-            "name": "Luis Gomez",
-            "title": "Service Advisor",
+            "name": "Sales Person",
+            "title": "Sales Person",
             "role": "Staff",
-            "department": "Service",
-            "store_id": 2,
-            "phone": "(956) 555-0105",
+            "department": "Sales",
+            "store_id": None,
+            "phone": "",
             "active": True,
-            "avatar": "LG",
-            "password": "luis2026",
+            "avatar": "SP",
+            "password": "sales2026",
         },
     ],
     "announcements": [
         {
             "id": 1,
-            "title": "Weekend push",
-            "message": "Close out all open priority tasks before the Saturday desk meeting.",
-            "audience": "Sales",
-            "priority": "High",
-            "pinned": True,
-        },
-        {
-            "id": 2,
-            "title": "Mazda service lane",
-            "message": "Loaner inventory is tight. Route approvals through Maya before promising next-day delivery.",
-            "audience": "Service",
+            "title": "Keep projects simple",
+            "message": "Use groups for timing, use priority for urgency, and only add fields when the board truly needs them.",
+            "audience": "All",
             "priority": "Medium",
-            "pinned": False,
-        },
+            "pinned": True,
+        }
     ],
     "settings": {
         "permissions": [
@@ -181,22 +142,22 @@ SEED_DATA = {
             },
         ],
         "pipeline_templates": [
-            {"department": "BDC", "stages": ["Fresh Lead", "Contacted", "Appt Set", "Showed", "Sold"]},
+            {"department": "BDC", "stages": ["Today", "This Week", "Done"]},
+            {"department": "Leadership", "stages": ["Queue", "In Progress", "Done"]},
             {"department": "Sales", "stages": ["Open", "This Week", "Done"]},
-            {"department": "Service", "stages": ["Open", "Waiting", "Done"]},
         ],
     },
     "boards": [
         {
             "id": 1,
-            "name": "Showroom Appointments",
-            "description": "Simple sales task board for appointments, follow-up, and completed deliveries.",
-            "color": "#4f6bed",
-            "department": "Sales",
-            "store_id": 1,
+            "name": "BDC Follow Up",
+            "description": "Quick call tasks, appointment confirmations, and response follow-through.",
+            "color": "#0f766e",
+            "department": "BDC",
+            "store_id": None,
             "fields": [],
             "groups": [
-                {"id": 11, "name": "Open"},
+                {"id": 11, "name": "Today"},
                 {"id": 12, "name": "This Week"},
                 {"id": 13, "name": "Done"},
             ],
@@ -204,105 +165,119 @@ SEED_DATA = {
                 {
                     "id": 101,
                     "group_id": 11,
-                    "name": "Confirm Telluride showroom visit",
+                    "name": "Call missed appointments from yesterday",
                     "status": "Working on it",
                     "priority": "High",
-                    "owner_id": 1,
-                    "store_id": 1,
-                    "department": "Sales",
-                    "category": "Appointment",
-                    "customer_name": "Rosa Salinas",
-                    "vehicle": "2024 Kia Telluride SX",
+                    "owner_id": 2,
+                    "store_id": None,
+                    "department": "BDC",
+                    "category": "Follow Up",
+                    "customer_name": "",
+                    "vehicle": "",
                     "due_date": iso_today(0),
-                    "effort": 1,
-                    "notes": "Call after 5:30 PM.",
+                    "effort": 2,
+                    "notes": "Push reschedules into this week before noon.",
                     "custom_fields": {},
                 },
                 {
                     "id": 102,
                     "group_id": 12,
-                    "name": "Confirm Saturday showroom visit",
-                    "status": "Review",
+                    "name": "Clean up stale CRM tasks",
+                    "status": "Not started",
                     "priority": "Medium",
-                    "owner_id": 1,
-                    "store_id": 1,
-                    "department": "Sales",
-                    "category": "Appointment",
-                    "customer_name": "Hector Garza",
-                    "vehicle": "2022 Silverado LT",
-                    "due_date": iso_today(1),
+                    "owner_id": 3,
+                    "store_id": None,
+                    "department": "BDC",
+                    "category": "Cleanup",
+                    "customer_name": "",
+                    "vehicle": "",
+                    "due_date": iso_today(2),
                     "effort": 1,
-                    "notes": "Needs trade appraisal.",
+                    "notes": "Archive anything older than two weeks with no next step.",
                     "custom_fields": {},
                 },
             ],
         },
         {
             "id": 2,
-            "name": "Service Lane Follow Up",
-            "description": "Track advisor callbacks, approvals, and customer touchpoints.",
-            "color": "#2d9cdb",
-            "department": "Service",
-            "store_id": 2,
+            "name": "Leadership Priorities",
+            "description": "Weekly management items that need ownership and a clear due date.",
+            "color": "#3156f5",
+            "department": "Leadership",
+            "store_id": None,
             "fields": [],
             "groups": [
-                {"id": 21, "name": "Open"},
-                {"id": 22, "name": "Waiting"},
+                {"id": 21, "name": "Queue"},
+                {"id": 22, "name": "In Progress"},
                 {"id": 23, "name": "Done"},
             ],
             "tasks": [
                 {
                     "id": 201,
-                    "group_id": 21,
-                    "name": "Update customer on brake job",
-                    "status": "Working on it",
+                    "group_id": 22,
+                    "name": "Review staffing coverage for next month",
+                    "status": "Review",
                     "priority": "Critical",
-                    "owner_id": 5,
-                    "store_id": 2,
-                    "department": "Service",
-                    "category": "Customer Update",
-                    "customer_name": "Marcos Pena",
-                    "vehicle": "2023 Mazda CX-5",
-                    "due_date": iso_today(0),
-                    "effort": 2,
-                    "notes": "Customer waiting on total after warranty review.",
+                    "owner_id": 1,
+                    "store_id": None,
+                    "department": "Leadership",
+                    "category": "Planning",
+                    "customer_name": "",
+                    "vehicle": "",
+                    "due_date": iso_today(1),
+                    "effort": 3,
+                    "notes": "Need a final decision before payroll lock.",
                     "custom_fields": {},
-                }
+                },
+                {
+                    "id": 202,
+                    "group_id": 21,
+                    "name": "Finalize trainer schedule",
+                    "status": "Not started",
+                    "priority": "Medium",
+                    "owner_id": 4,
+                    "store_id": None,
+                    "department": "Leadership",
+                    "category": "Training",
+                    "customer_name": "",
+                    "vehicle": "",
+                    "due_date": iso_today(3),
+                    "effort": 2,
+                    "notes": "Publish the next two workshop dates once approved.",
+                    "custom_fields": {},
+                },
             ],
         },
         {
             "id": 3,
-            "name": "Used Car Specials",
-            "description": "Creative and pricing tasks for used inventory campaigns.",
-            "color": "#17a36b",
-            "department": "Marketing",
-            "store_id": 3,
-            "fields": [
-                {"id": 1, "name": "Channel", "type": "tag"},
-                {"id": 2, "name": "Publish Date", "type": "date"},
-            ],
+            "name": "Sales Floor Tasks",
+            "description": "Simple daily sales actions that need to stay visible and easy to update.",
+            "color": "#ea580c",
+            "department": "Sales",
+            "store_id": None,
+            "fields": [],
             "groups": [
-                {"id": 31, "name": "Draft"},
-                {"id": 32, "name": "Ready"},
-                {"id": 33, "name": "Live"},
+                {"id": 31, "name": "Open"},
+                {"id": 32, "name": "This Week"},
+                {"id": 33, "name": "Done"},
             ],
             "tasks": [
                 {
                     "id": 301,
                     "group_id": 31,
-                    "name": "Tahoe cash campaign creative",
-                    "status": "Not started",
-                    "priority": "Medium",
-                    "owner_id": 4,
-                    "store_id": 3,
-                    "department": "Marketing",
-                    "category": "Graphic",
+                    "name": "Send quote follow-up to walk-ins",
+                    "status": "Working on it",
+                    "priority": "High",
+                    "owner_id": 5,
+                    "store_id": None,
+                    "department": "Sales",
+                    "category": "Follow Up",
                     "customer_name": "",
-                    "vehicle": "2021 Chevrolet Tahoe",
-                    "due_date": iso_today(1),
+                    "vehicle": "",
+                    "due_date": iso_today(0),
                     "effort": 1,
-                    "notes": "Waiting on final price approval.",
-                    "custom_fields": {"1": "Instagram", "2": iso_today(3)},
+                    "notes": "Keep responses short and close with the next action.",
+                    "custom_fields": {},
                 }
             ],
         },
@@ -325,6 +300,18 @@ def public_user(user: dict) -> dict:
     return {key: value for key, value in user.items() if key != "password"}
 
 
+def apply_demo_migration(store: dict) -> dict:
+    user_names = {user.get("name", "") for user in store.get("users", [])}
+    board_names = {board.get("name", "") for board in store.get("boards", [])}
+    if user_names == LEGACY_DEMO_USERS or board_names == LEGACY_DEMO_BOARDS:
+        store["stores"] = deepcopy(SEED_DATA["stores"])
+        store["users"] = deepcopy(SEED_DATA["users"])
+        store["announcements"] = deepcopy(SEED_DATA["announcements"])
+        store["settings"] = deepcopy(SEED_DATA["settings"])
+        store["boards"] = deepcopy(SEED_DATA["boards"])
+    return store
+
+
 def normalize_store(store: dict) -> dict:
     normalized = deepcopy(store or {})
     normalized.setdefault("stores", deepcopy(SEED_DATA["stores"]))
@@ -336,10 +323,12 @@ def normalize_store(store: dict) -> dict:
     normalized["settings"].setdefault("permissions", deepcopy(SEED_DATA["settings"]["permissions"]))
     normalized["settings"].setdefault("pipeline_templates", deepcopy(SEED_DATA["settings"]["pipeline_templates"]))
 
+    normalized = apply_demo_migration(normalized)
+
     for store_row in normalized["stores"]:
         store_row.setdefault("active", True)
         store_row.setdefault("manager", "")
-        store_row.setdefault("department_focus", "Sales")
+        store_row.setdefault("department_focus", "General")
         store_row.setdefault("sales_target", 0)
         store_row.setdefault("service_target", 0)
 
@@ -350,7 +339,7 @@ def normalize_store(store: dict) -> dict:
         user.setdefault("phone", "")
         user.setdefault("active", True)
         user.setdefault("avatar", "".join(part[:1] for part in user.get("name", "").split()[:2]).upper())
-        user.setdefault("password", f"bertogden-{user.get('id', 0)}")
+        user.setdefault("password", f"orgtool-{user.get('id', 0)}")
 
     for item in normalized["announcements"]:
         item.setdefault("audience", "All")
@@ -359,7 +348,7 @@ def normalize_store(store: dict) -> dict:
 
     for board in normalized["boards"]:
         board.setdefault("description", "")
-        board.setdefault("color", "#4f6bed")
+        board.setdefault("color", "#3156f5")
         board.setdefault("department", "General")
         board.setdefault("store_id", None)
         board.setdefault("groups", [])
@@ -419,7 +408,7 @@ class StoreCreate(BaseModel):
     code: str = Field(min_length=2, max_length=10)
     city: str = ""
     manager: str = ""
-    department_focus: str = "Sales"
+    department_focus: str = "General"
     sales_target: int = Field(default=0, ge=0)
     service_target: int = Field(default=0, ge=0)
     active: bool = True
@@ -485,7 +474,7 @@ class PermissionPatch(BaseModel):
 class BoardCreate(BaseModel):
     name: str = Field(min_length=2, max_length=80)
     description: str = ""
-    color: str = "#4f6bed"
+    color: str = "#3156f5"
     department: str = "General"
     store_id: int | None = None
 
@@ -543,7 +532,7 @@ class TaskPatch(BaseModel):
     custom_fields: dict[str, str | int | float | bool | None] | None = None
 
 
-app = FastAPI(title="OrgTool API")
+app = FastAPI(title="Organization Tool API")
 
 
 @app.get("/health")
@@ -612,6 +601,24 @@ def update_user(user_id: int, payload: UserPatch) -> dict:
         record["avatar"] = "".join(part[:1] for part in record["name"].split()[:2]).upper()
     write_store(store)
     return {"user": public_user(record)}
+
+
+@app.delete("/api/users/{user_id}")
+def delete_user(user_id: int) -> dict:
+    store = read_store()
+    record = next((entry for entry in store["users"] if int(entry["id"]) == int(user_id)), None)
+    if not record:
+        raise HTTPException(status_code=404, detail="User not found")
+    active_admins = [user for user in store["users"] if user.get("role") == "Admin" and user.get("active", True)]
+    if record.get("role") == "Admin" and len(active_admins) <= 1:
+        raise HTTPException(status_code=400, detail="Create another admin before removing the last admin account")
+    store["users"] = [user for user in store["users"] if int(user["id"]) != int(user_id)]
+    for board in store["boards"]:
+        for task in board["tasks"]:
+            if int(task.get("owner_id") or 0) == int(user_id):
+                task["owner_id"] = None
+    write_store(store)
+    return {"deleted": True, "user_id": user_id}
 
 
 @app.post("/api/announcements")
