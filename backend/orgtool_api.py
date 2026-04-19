@@ -74,6 +74,7 @@ SEED_DATA = {
             "store_id": None,
             "phone": "",
             "active": True,
+            "quick_login": True,
             "avatar": "AD",
             "password": "Kai",
         },
@@ -87,6 +88,7 @@ SEED_DATA = {
             "store_id": None,
             "phone": "",
             "active": True,
+            "quick_login": True,
             "avatar": "KA",
             "password": "kai2026",
         },
@@ -100,6 +102,7 @@ SEED_DATA = {
             "store_id": None,
             "phone": "",
             "active": True,
+            "quick_login": True,
             "avatar": "MC",
             "password": "miguel2026",
         },
@@ -113,6 +116,7 @@ SEED_DATA = {
             "store_id": None,
             "phone": "",
             "active": True,
+            "quick_login": True,
             "avatar": "PM",
             "password": "pearl2026",
         },
@@ -126,6 +130,7 @@ SEED_DATA = {
             "store_id": None,
             "phone": "",
             "active": True,
+            "quick_login": True,
             "avatar": "MR",
             "password": "marcus2026",
         },
@@ -139,6 +144,7 @@ SEED_DATA = {
             "store_id": None,
             "phone": "",
             "active": True,
+            "quick_login": True,
             "avatar": "SP",
             "password": "sales2026",
         },
@@ -386,6 +392,7 @@ def normalize_store(store: dict) -> dict:
         user.setdefault("store_id", None)
         user.setdefault("phone", "")
         user.setdefault("active", True)
+        user.setdefault("quick_login", True)
         user.setdefault("avatar", "".join(part[:1] for part in user.get("name", "").split()[:2]).upper())
         user.setdefault("password", f"orgtool-{user.get('id', 0)}")
 
@@ -488,6 +495,7 @@ class UserCreate(BaseModel):
     phone: str = ""
     password: str = Field(min_length=3, max_length=120)
     active: bool = True
+    quick_login: bool = False
 
 
 class UserPatch(BaseModel):
@@ -500,6 +508,7 @@ class UserPatch(BaseModel):
     phone: str | None = None
     password: str | None = Field(default=None, min_length=3, max_length=120)
     active: bool | None = None
+    quick_login: bool | None = None
 
 
 class AnnouncementCreate(BaseModel):
