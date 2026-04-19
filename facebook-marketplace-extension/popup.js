@@ -1,4 +1,5 @@
 const defaultApiBase = "https://api.bertogden123.com";
+const fallbackApiBases = [defaultApiBase, "https://dealership-tool-api.onrender.com"];
 const marketplaceCreateUrl = "https://www.facebook.com/marketplace/create/vehicle";
 
 const els = {
@@ -16,6 +17,10 @@ const els = {
 
 function normalizeApiBase(value) {
   return String(value || defaultApiBase).trim().replace(/\/$/, "") || defaultApiBase;
+}
+
+function uniqueApiBases(values) {
+  return Array.from(new Set(values.map(normalizeApiBase).filter(Boolean)));
 }
 
 function setStatus(text) {
@@ -38,9 +43,19 @@ function fillTemplate(template, data) {
 }
 
 async function fetchTemplate(apiBase) {
-  const response = await fetch(`${normalizeApiBase(apiBase)}/api/marketplace/template`);
-  if (!response.ok) throw new Error("Failed to load marketplace template");
-  return response.json();
+  let lastError = null;
+  for (const base of uniqueApiBases([apiBase, ...fallbackApiBases])) {
+    try {
+      const response = await fetch(`${base}/api/marketplace/template`);
+      if (!response.ok) {
+        throw new Error(`Template request failed at ${base}`);
+      }
+      return response.json();
+    } catch (error) {
+      lastError = error;
+    }
+  }
+  throw lastError || new Error("Failed to load marketplace template");
 }
 
 function buildDraft(vehicle, template) {
