@@ -26,6 +26,7 @@ FieldTypeValue = Literal["text", "number", "date", "tag"]
 
 LEGACY_DEMO_USERS = {"Kai Rivers", "Maya Chen", "Jordan Reed", "Ava Martinez", "Luis Gomez"}
 LEGACY_DEMO_BOARDS = {"Showroom Appointments", "Service Lane Follow Up", "Used Car Specials"}
+PREVIOUS_ORGTOOL_USERS = {"Miguel Castillo", "Kai Ammons", "Pearl Medina", "Marcus Ramirez", "Sales Person"}
 
 
 def iso_today(offset_days: int = 0) -> str:
@@ -37,15 +38,15 @@ SEED_DATA = {
     "users": [
         {
             "id": 1,
-            "name": "Miguel Castillo",
-            "title": "Boss",
+            "name": "Admin",
+            "title": "Admin",
             "role": "Admin",
             "department": "Leadership",
             "store_id": None,
             "phone": "",
             "active": True,
-            "avatar": "MC",
-            "password": "bertogden",
+            "avatar": "AD",
+            "password": "Kai",
         },
         {
             "id": 2,
@@ -61,6 +62,18 @@ SEED_DATA = {
         },
         {
             "id": 3,
+            "name": "Miguel Castillo",
+            "title": "Boss",
+            "role": "Manager",
+            "department": "Leadership",
+            "store_id": None,
+            "phone": "",
+            "active": True,
+            "avatar": "MC",
+            "password": "miguel2026",
+        },
+        {
+            "id": 4,
             "name": "Pearl Medina",
             "title": "BDC Director Supervisor",
             "role": "Manager",
@@ -72,7 +85,7 @@ SEED_DATA = {
             "password": "pearl2026",
         },
         {
-            "id": 4,
+            "id": 5,
             "name": "Marcus Ramirez",
             "title": "Corporate Trainer",
             "role": "Coordinator",
@@ -84,7 +97,7 @@ SEED_DATA = {
             "password": "marcus2026",
         },
         {
-            "id": 5,
+            "id": 6,
             "name": "Sales Person",
             "title": "Sales Person",
             "role": "Staff",
@@ -185,7 +198,7 @@ SEED_DATA = {
                     "name": "Clean up stale CRM tasks",
                     "status": "Not started",
                     "priority": "Medium",
-                    "owner_id": 3,
+                    "owner_id": 4,
                     "store_id": None,
                     "department": "BDC",
                     "category": "Cleanup",
@@ -218,7 +231,7 @@ SEED_DATA = {
                     "name": "Review staffing coverage for next month",
                     "status": "Review",
                     "priority": "Critical",
-                    "owner_id": 1,
+                    "owner_id": 3,
                     "store_id": None,
                     "department": "Leadership",
                     "category": "Planning",
@@ -235,7 +248,7 @@ SEED_DATA = {
                     "name": "Finalize trainer schedule",
                     "status": "Not started",
                     "priority": "Medium",
-                    "owner_id": 4,
+                    "owner_id": 5,
                     "store_id": None,
                     "department": "Leadership",
                     "category": "Training",
@@ -268,7 +281,7 @@ SEED_DATA = {
                     "name": "Send quote follow-up to walk-ins",
                     "status": "Working on it",
                     "priority": "High",
-                    "owner_id": 5,
+                    "owner_id": 6,
                     "store_id": None,
                     "department": "Sales",
                     "category": "Follow Up",
@@ -303,7 +316,7 @@ def public_user(user: dict) -> dict:
 def apply_demo_migration(store: dict) -> dict:
     user_names = {user.get("name", "") for user in store.get("users", [])}
     board_names = {board.get("name", "") for board in store.get("boards", [])}
-    if user_names == LEGACY_DEMO_USERS or board_names == LEGACY_DEMO_BOARDS:
+    if user_names == LEGACY_DEMO_USERS or user_names == PREVIOUS_ORGTOOL_USERS or board_names == LEGACY_DEMO_BOARDS:
         store["stores"] = deepcopy(SEED_DATA["stores"])
         store["users"] = deepcopy(SEED_DATA["users"])
         store["announcements"] = deepcopy(SEED_DATA["announcements"])
