@@ -2565,6 +2565,116 @@ button.special-card:hover:not(:disabled) {
   word-break: break-word;
 }
 
+.marketplace-admin,
+.marketplace-admin__editor,
+.marketplace-admin__preview,
+.marketplace-admin__section,
+.marketplace-preview-card {
+  display: grid;
+  gap: 16px;
+}
+
+.marketplace-admin__header,
+.marketplace-admin__section-head {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.marketplace-admin__section-head small,
+.marketplace-preview-card small {
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.marketplace-admin__layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.08fr) minmax(320px, 0.92fr);
+  gap: 20px;
+}
+
+.marketplace-admin__section {
+  padding: 18px;
+  border-radius: 22px;
+  border: 1px solid rgba(210, 198, 182, 0.72);
+  background: rgba(255, 255, 255, 0.6);
+}
+
+.marketplace-admin__two-up {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.marketplace-admin__description {
+  display: grid;
+  gap: 8px;
+}
+
+.marketplace-placeholder-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.marketplace-placeholder-group .pill {
+  border-radius: 999px;
+  padding: 9px 14px;
+  border: 1px solid rgba(210, 198, 182, 0.8);
+  background: rgba(255, 255, 255, 0.9);
+  color: var(--ink);
+  font-weight: 700;
+  box-shadow: none;
+}
+
+.marketplace-placeholder-group .pill:hover:not(:disabled) {
+  transform: none;
+}
+
+.marketplace-preview-card {
+  padding: 18px;
+  border-radius: 22px;
+  border: 1px solid rgba(210, 198, 182, 0.72);
+  background:
+    radial-gradient(circle at top right, rgba(28, 128, 121, 0.08), transparent 30%),
+    rgba(255, 255, 255, 0.78);
+}
+
+.marketplace-preview-card__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.marketplace-preview-card__meta span,
+.marketplace-token {
+  padding: 7px 10px;
+  border-radius: 999px;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+  background: rgba(196, 102, 52, 0.1);
+  color: var(--accent-deep);
+}
+
+.marketplace-preview-card pre {
+  margin: 0;
+  padding: 16px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.88);
+  border: 1px solid rgba(210, 198, 182, 0.68);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.marketplace-token-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
 .fresh-up-hero,
 .fresh-up-card,
 .fresh-up-playbook {
@@ -2757,6 +2867,8 @@ button.special-card:hover:not(:disabled) {
   .fresh-up-grid,
   .fresh-up-chip-row,
   .fresh-up-playbook,
+  .marketplace-admin__layout,
+  .marketplace-admin__two-up,
   .marketplace-grid,
   .marketplace-template-grid,
   .note-admin-grid,
@@ -2819,6 +2931,8 @@ button.special-card:hover:not(:disabled) {
   .fresh-up-grid,
   .fresh-up-chip-row,
   .fresh-up-playbook,
+  .marketplace-admin__layout,
+  .marketplace-admin__two-up,
   .note-admin-grid,
   .traffic-entry-grid,
   .traffic-toolbar__controls,
@@ -2862,7 +2976,9 @@ button.special-card:hover:not(:disabled) {
   .note-actions,
   .store-column__header,
   .admin-danger-zone,
-  .fresh-up-card__header {
+  .fresh-up-card__header,
+  .marketplace-admin__header,
+  .marketplace-admin__section-head {
     flex-direction: column;
     align-items: flex-start;
   }

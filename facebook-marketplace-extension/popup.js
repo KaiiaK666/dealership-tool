@@ -26,6 +26,13 @@ function isSupportedInventoryUrl(url) {
   return /bertogden/i.test(String(url || ""));
 }
 
+async function ensureInventoryScript(tabId) {
+  await chrome.scripting.executeScript({
+    target: { tabId },
+    files: ["inventory.js"],
+  });
+}
+
 function fillTemplate(template, data) {
   return String(template || "").replace(/\{(\w+)\}/g, (_, key) => data[key] ?? "");
 }
@@ -93,12 +100,22 @@ async function buildDraftForTab(apiBase) {
   if (!isSupportedInventoryUrl(activeTab.url)) {
     throw new Error("Open a Bert Ogden inventory vehicle page first.");
   }
+  try {
+    await ensureInventoryScript(activeTab.id);
+  } catch (error) {
+    throw new Error("Could not prepare the vehicle page. Refresh the tab and try again.");
+  }
   const [template, scrapeResult] = await Promise.all([
     fetchTemplate(apiBase),
-    chrome.tabs.sendMessage(activeTab.id, { type: "SCRAPE_CURRENT_VEHICLE" }),
+    chrome.tabs
+      .sendMessage(activeTab.id, { type: "SCRAPE_CURRENT_VEHICLE" })
+      .catch(() => ({ ok: false, error: "Could not read this page yet. Refresh the vehicle tab and try again." })),
   ]);
   if (!scrapeResult?.ok || !scrapeResult.vehicle) {
     throw new Error(scrapeResult?.error || "Could not read the vehicle page.");
+  }
+  if (!scrapeResult.vehicle.title && !scrapeResult.vehicle.year && !scrapeResult.vehicle.price) {
+    throw new Error("The page opened, but vehicle details were not found. Make sure you are on the actual vehicle details page.");
   }
   return buildDraft(scrapeResult.vehicle, template);
 }

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Dealership Marketplace Helper",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Scrape dealership inventory pages and prepare Facebook Marketplace drafts.",
   "action": {
     "default_popup": "popup.html"
@@ -9,7 +9,8 @@
   "permissions": [
     "storage",
     "activeTab",
-    "tabs"
+    "tabs",
+    "scripting"
   ],
   "host_permissions": [
     "https://www.facebook.com/*",

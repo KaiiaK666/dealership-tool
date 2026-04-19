@@ -73,6 +73,33 @@ const ADMIN_SECTIONS = [
 const DEALERSHIP_ORDER = ["Kia", "Mazda", "Outlet"];
 const TRAFFIC_BRANDS = ["Kia", "Mazda"];
 const QUOTE_BRANDS = ["Kia New", "Mazda New", "Used"];
+const MARKETPLACE_TEMPLATE_DEFAULTS = {
+  title_template: "{year} {make} {model}",
+  description_template:
+    "{year} {make} {model}\n{price_label}: {price}\nMileage: {mileage}\nVIN: {vin}\n{cta_text}\n{url}",
+  price_label: "Bert Ogden Price",
+  cta_text: "Message us for availability and financing options.",
+};
+const MARKETPLACE_PLACEHOLDERS = [
+  "{year}",
+  "{make}",
+  "{model}",
+  "{price}",
+  "{mileage}",
+  "{vin}",
+  "{url}",
+  "{price_label}",
+  "{cta_text}",
+];
+const MARKETPLACE_PREVIEW_SAMPLE = {
+  year: "2024",
+  make: "Kia",
+  model: "Telluride SX",
+  price: "$41,995",
+  mileage: "12,440 mi",
+  vin: "5XYP5DGC8RG123456",
+  url: "https://www.bertogdenexample.com/vehicle/2024-kia-telluride-sx",
+};
 const FRESH_UP_STORAGE_KEY = "dealer_tool_fresh_up_form";
 const FRESH_UP_DEFAULTS = {
   customerName: "",
@@ -254,6 +281,10 @@ function creditTierFromScore(scoreValue) {
 function formatMoney(value) {
   if (!Number.isFinite(value)) return "$0.00";
   return value.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 2 });
+}
+
+function fillMarketplaceTemplate(template, data) {
+  return String(template || "").replace(/\{(\w+)\}/g, (_, key) => data[key] ?? "");
 }
 
 function freshUpTimestampLabel() {
@@ -502,13 +533,7 @@ export default function App() {
   });
   const [quoteRates, setQuoteRates] = useState([]);
   const [quoteRateDraft, setQuoteRateDraft] = useState({});
-  const [marketplaceTemplate, setMarketplaceTemplate] = useState({
-    title_template: "{year} {make} {model}",
-    description_template:
-      "{year} {make} {model}\n{price_label}: {price}\nMileage: {mileage}\nVIN: {vin}\n{cta_text}\n{url}",
-    price_label: "Bert Ogden Price",
-    cta_text: "Message us for availability and financing options.",
-  });
+  const [marketplaceTemplate, setMarketplaceTemplate] = useState(MARKETPLACE_TEMPLATE_DEFAULTS);
   const [quoteForm, setQuoteForm] = useState({
     brand: "Kia New",
     msrp: "",
@@ -636,6 +661,16 @@ export default function App() {
     freshUpForm.salespersonId,
     freshUpForm.notes,
   ].filter((value) => String(value || "").trim()).length;
+  const marketplacePreviewData = {
+    ...MARKETPLACE_PREVIEW_SAMPLE,
+    price_label: marketplaceTemplate.price_label || MARKETPLACE_TEMPLATE_DEFAULTS.price_label,
+    cta_text: marketplaceTemplate.cta_text || MARKETPLACE_TEMPLATE_DEFAULTS.cta_text,
+  };
+  const marketplacePreviewTitle = fillMarketplaceTemplate(marketplaceTemplate.title_template, marketplacePreviewData);
+  const marketplacePreviewDescription = fillMarketplaceTemplate(
+    marketplaceTemplate.description_template,
+    marketplacePreviewData
+  );
   const visibleTabIds = new Set(
     (tabVisibility.entries || []).filter((entry) => entry.visible).map((entry) => entry.tab_id)
   );
@@ -796,6 +831,25 @@ export default function App() {
     } finally {
       setBusy("");
     }
+  }
+
+  function appendMarketplacePlaceholder(field, placeholder) {
+    setMarketplaceTemplate((current) => ({
+      ...current,
+      [field]: (() => {
+        const currentValue = String(current[field] || "");
+        const separator = !currentValue
+          ? ""
+          : field === "description_template"
+            ? currentValue.endsWith("\n") ? "" : "\n"
+            : currentValue.endsWith(" ") ? "" : " ";
+        return `${currentValue}${separator}${placeholder}`;
+      })(),
+    }));
+  }
+
+  function resetMarketplaceTemplateDraft() {
+    setMarketplaceTemplate(MARKETPLACE_TEMPLATE_DEFAULTS);
   }
 
   function setTabVisibilityValue(tabId, visible) {
@@ -3951,51 +4005,140 @@ export default function App() {
                 ) : null}
 
                 {adminSection === "marketplace" ? (
-                  <div className="panel">
-                    <span className="eyebrow">Marketplace template</span>
-                    <h3>Facebook post content</h3>
-                    <p className="admin-note">
-                      The Chrome extension pulls this template and merges it with the scraped vehicle data from the inventory URL.
-                    </p>
-                    <div className="form">
-                      <label>
-                        <span>Title template</span>
-                        <input
-                          value={marketplaceTemplate.title_template}
-                          onChange={(event) =>
-                            setMarketplaceTemplate((current) => ({ ...current, title_template: event.target.value }))
-                          }
-                        />
-                      </label>
-                      <label>
-                        <span>Description template</span>
-                        <textarea
-                          rows={10}
-                          value={marketplaceTemplate.description_template}
-                          onChange={(event) =>
-                            setMarketplaceTemplate((current) => ({ ...current, description_template: event.target.value }))
-                          }
-                        />
-                      </label>
-                      <label>
-                        <span>Price label</span>
-                        <input
-                          value={marketplaceTemplate.price_label}
-                          onChange={(event) =>
-                            setMarketplaceTemplate((current) => ({ ...current, price_label: event.target.value }))
-                          }
-                        />
-                      </label>
-                      <label>
-                        <span>CTA text</span>
-                        <input
-                          value={marketplaceTemplate.cta_text}
-                          onChange={(event) =>
-                            setMarketplaceTemplate((current) => ({ ...current, cta_text: event.target.value }))
-                          }
-                        />
-                      </label>
+                  <div className="panel marketplace-admin">
+                    <div className="marketplace-admin__header">
+                      <div>
+                        <span className="eyebrow">Marketplace template</span>
+                        <h3>Facebook post content</h3>
+                      </div>
+                      <button type="button" className="secondary" onClick={resetMarketplaceTemplateDraft}>
+                        Reset Defaults
+                      </button>
                     </div>
+                    <p className="admin-note">
+                      Build the default Facebook copy here. The extension merges this with year, make, model, price,
+                      mileage, VIN, and the inventory URL from the live vehicle page.
+                    </p>
+
+                    <div className="marketplace-admin__layout">
+                      <div className="marketplace-admin__editor">
+                        <div className="marketplace-admin__section">
+                          <div className="marketplace-admin__section-head">
+                            <div>
+                              <span className="eyebrow">Step 1</span>
+                              <h4>Headline and CTA</h4>
+                            </div>
+                            <small>These usually stay short and clean.</small>
+                          </div>
+                          <div className="form">
+                            <label>
+                              <span>Title template</span>
+                              <input
+                                value={marketplaceTemplate.title_template}
+                                onChange={(event) =>
+                                  setMarketplaceTemplate((current) => ({ ...current, title_template: event.target.value }))
+                                }
+                                placeholder="{year} {make} {model}"
+                              />
+                            </label>
+                            <div className="marketplace-placeholder-group">
+                              {["{year}", "{make}", "{model}", "{price}"].map((placeholder) => (
+                                <button
+                                  key={`title-${placeholder}`}
+                                  type="button"
+                                  className="pill"
+                                  onClick={() => appendMarketplacePlaceholder("title_template", placeholder)}
+                                >
+                                  {placeholder}
+                                </button>
+                              ))}
+                            </div>
+                            <div className="marketplace-admin__two-up">
+                              <label>
+                                <span>Price label</span>
+                                <input
+                                  value={marketplaceTemplate.price_label}
+                                  onChange={(event) =>
+                                    setMarketplaceTemplate((current) => ({ ...current, price_label: event.target.value }))
+                                  }
+                                  placeholder="Bert Ogden Price"
+                                />
+                              </label>
+                              <label>
+                                <span>CTA text</span>
+                                <input
+                                  value={marketplaceTemplate.cta_text}
+                                  onChange={(event) =>
+                                    setMarketplaceTemplate((current) => ({ ...current, cta_text: event.target.value }))
+                                  }
+                                  placeholder="Message us for availability and financing options."
+                                />
+                              </label>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="marketplace-admin__section">
+                          <div className="marketplace-admin__section-head">
+                            <div>
+                              <span className="eyebrow">Step 2</span>
+                              <h4>Description builder</h4>
+                            </div>
+                            <small>Use the chips to drop fields in fast.</small>
+                          </div>
+                          <label className="marketplace-admin__description">
+                            <span>Description template</span>
+                            <textarea
+                              rows={10}
+                              value={marketplaceTemplate.description_template}
+                              onChange={(event) =>
+                                setMarketplaceTemplate((current) => ({ ...current, description_template: event.target.value }))
+                              }
+                            />
+                          </label>
+                          <div className="marketplace-placeholder-group">
+                            {MARKETPLACE_PLACEHOLDERS.map((placeholder) => (
+                              <button
+                                key={`description-${placeholder}`}
+                                type="button"
+                                className="pill"
+                                onClick={() => appendMarketplacePlaceholder("description_template", placeholder)}
+                              >
+                                {placeholder}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="marketplace-admin__preview">
+                        <div className="marketplace-preview-card">
+                          <span className="eyebrow">Live sample output</span>
+                          <h4>{marketplacePreviewTitle}</h4>
+                          <div className="marketplace-preview-card__meta">
+                            <span>{marketplacePreviewData.price_label}: {marketplacePreviewData.price}</span>
+                            <span>{marketplacePreviewData.mileage}</span>
+                            <span>{marketplacePreviewData.vin}</span>
+                          </div>
+                          <pre>{marketplacePreviewDescription}</pre>
+                        </div>
+
+                        <div className="marketplace-preview-card">
+                          <span className="eyebrow">Available placeholders</span>
+                          <div className="marketplace-token-grid">
+                            {MARKETPLACE_PLACEHOLDERS.map((placeholder) => (
+                              <div key={`placeholder-${placeholder}`} className="marketplace-token">
+                                {placeholder}
+                              </div>
+                            ))}
+                          </div>
+                          <small>
+                            The extension pulls these values from the current vehicle page, then fills the template above.
+                          </small>
+                        </div>
+                      </div>
+                    </div>
+
                     <button type="button" onClick={saveMarketplaceTemplate} disabled={busy === "marketplace-template"}>
                       {busy === "marketplace-template" ? "Saving..." : "Save Marketplace Template"}
                     </button>
