@@ -49,6 +49,7 @@ TAB_VISIBILITY_IDS = (
     "bdc",
     "reports",
     "traffic",
+    "freshUp",
     "marketplace",
     "quote",
     "specials",

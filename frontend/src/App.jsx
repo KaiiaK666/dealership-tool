@@ -52,6 +52,7 @@ const TABS = [
   { id: "bdc", label: "BDC Assign" },
   { id: "reports", label: "BDC Reports" },
   { id: "traffic", label: "Service Drive Traffic" },
+  { id: "freshUp", label: "Fresh Up Quick Add" },
   { id: "marketplace", label: "Facebook Marketplace" },
   { id: "quote", label: "Quote Tool" },
   { id: "specials", label: "Specials" },
@@ -72,6 +73,19 @@ const ADMIN_SECTIONS = [
 const DEALERSHIP_ORDER = ["Kia", "Mazda", "Outlet"];
 const TRAFFIC_BRANDS = ["Kia", "Mazda"];
 const QUOTE_BRANDS = ["Kia New", "Mazda New", "Used"];
+const FRESH_UP_STORAGE_KEY = "dealer_tool_fresh_up_form";
+const FRESH_UP_DEFAULTS = {
+  customerName: "",
+  phone: "",
+  email: "",
+  vehicleInterest: "",
+  stockNumber: "",
+  salespersonId: "",
+  source: "Walk-in",
+  tradeIn: "Unknown",
+  nextStep: "Needs TO",
+  notes: "",
+};
 const CREDIT_TIERS = [
   { label: "400s", min: 400, max: 499 },
   { label: "500s", min: 500, max: 599 },
@@ -240,6 +254,63 @@ function creditTierFromScore(scoreValue) {
 function formatMoney(value) {
   if (!Number.isFinite(value)) return "$0.00";
   return value.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 2 });
+}
+
+function freshUpTimestampLabel() {
+  return new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(new Date());
+}
+
+function readFreshUpDraft() {
+  if (typeof window === "undefined") return FRESH_UP_DEFAULTS;
+  try {
+    const raw = window.localStorage.getItem(FRESH_UP_STORAGE_KEY);
+    if (!raw) return FRESH_UP_DEFAULTS;
+    const parsed = JSON.parse(raw);
+    return { ...FRESH_UP_DEFAULTS, ...(parsed || {}) };
+  } catch {
+    return FRESH_UP_DEFAULTS;
+  }
+}
+
+function freshUpSummaryText(form, salespersonName) {
+  return [
+    `Fresh Up - ${freshUpTimestampLabel()}`,
+    `Customer: ${String(form.customerName || "").trim() || "Not added"}`,
+    `Phone: ${String(form.phone || "").trim() || "Not added"}`,
+    `Email: ${String(form.email || "").trim() || "Not added"}`,
+    `Vehicle: ${String(form.vehicleInterest || "").trim() || "Not added"}`,
+    `Stock #: ${String(form.stockNumber || "").trim() || "Not added"}`,
+    `Assigned Salesperson: ${salespersonName || "Not selected"}`,
+    `Lead Source: ${String(form.source || "").trim() || "Not added"}`,
+    `Trade-In: ${String(form.tradeIn || "").trim() || "Unknown"}`,
+    `Next Step: ${String(form.nextStep || "").trim() || "Not added"}`,
+    `Notes: ${String(form.notes || "").trim() || "None"}`,
+  ].join("\n");
+}
+
+async function copyTextValue(value) {
+  if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(value);
+    return;
+  }
+  if (typeof document === "undefined") {
+    throw new Error("Clipboard not available");
+  }
+  const area = document.createElement("textarea");
+  area.value = value;
+  area.setAttribute("readonly", "");
+  area.style.position = "absolute";
+  area.style.left = "-9999px";
+  document.body.appendChild(area);
+  area.select();
+  document.execCommand("copy");
+  document.body.removeChild(area);
 }
 
 function sortTrafficEntries(entries) {
@@ -450,6 +521,8 @@ export default function App() {
     vapAmount: "0",
     months: "72",
   });
+  const [freshUpForm, setFreshUpForm] = useState(() => readFreshUpDraft());
+  const [freshUpCopiedAt, setFreshUpCopiedAt] = useState("");
   const [trafficRowUploadFiles, setTrafficRowUploadFiles] = useState({});
   const [trafficRowUploadKeys, setTrafficRowUploadKeys] = useState({});
   const [trafficPdfForm, setTrafficPdfForm] = useState({ title: "", file: null });
@@ -552,6 +625,17 @@ export default function App() {
       : 0;
   const quoteTotalPaid = quotePayment * quoteMonths;
   const quoteTotalInterest = Math.max(0, quoteTotalPaid - quotePrincipal);
+  const freshUpAssignedSalesperson = salespeople.find((person) => String(person.id) === String(freshUpForm.salespersonId)) || null;
+  const freshUpSummary = freshUpSummaryText(freshUpForm, freshUpAssignedSalesperson?.name || "");
+  const freshUpFilledCount = [
+    freshUpForm.customerName,
+    freshUpForm.phone,
+    freshUpForm.email,
+    freshUpForm.vehicleInterest,
+    freshUpForm.stockNumber,
+    freshUpForm.salespersonId,
+    freshUpForm.notes,
+  ].filter((value) => String(value || "").trim()).length;
   const visibleTabIds = new Set(
     (tabVisibility.entries || []).filter((entry) => entry.visible).map((entry) => entry.tab_id)
   );
@@ -895,6 +979,11 @@ export default function App() {
       setSelectedSpecialId(specials.length ? specials[0].id : null);
     }
   }, [selectedSpecialId, specials]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(FRESH_UP_STORAGE_KEY, JSON.stringify(freshUpForm));
+  }, [freshUpForm]);
 
   useEffect(() => {
     if (!leadForm.bdcAgentId && activeBdc.length) {
@@ -1541,6 +1630,21 @@ export default function App() {
     } finally {
       setBusy("");
     }
+  }
+
+  async function copyFreshUpSummary() {
+    try {
+      setError("");
+      await copyTextValue(freshUpSummary);
+      setFreshUpCopiedAt(new Date().toISOString());
+    } catch (errorValue) {
+      setError(errText(errorValue));
+    }
+  }
+
+  function resetFreshUpForm() {
+    setFreshUpForm(FRESH_UP_DEFAULTS);
+    setFreshUpCopiedAt("");
   }
 
   return (
@@ -2547,6 +2651,194 @@ export default function App() {
                 ) : (
                   <div className="empty">No traffic PDFs uploaded yet.</div>
                 )}
+              </div>
+            </div>
+          </section>
+        ) : null}
+
+        {tab === "freshUp" ? (
+          <section className="stack fresh-up-section">
+            <div className="panel fresh-up-hero">
+              <div>
+                <span className="eyebrow">Fresh Up Quick Add</span>
+                <h2>Capture the walk-in before it slips.</h2>
+                <p>
+                  This is a fast intake board for reps or managers. Add the guest basics, assign the salesperson, then
+                  copy a clean handoff summary for text, CRM notes, or a desk turn.
+                </p>
+              </div>
+              <div className="fresh-up-hero__status">
+                <span>Draft strength</span>
+                <strong>{freshUpFilledCount}/7 key fields</strong>
+                <small>Saved in this browser automatically while you type.</small>
+              </div>
+            </div>
+
+            <div className="fresh-up-grid">
+              <div className="panel fresh-up-card">
+                <div className="fresh-up-card__header">
+                  <div>
+                    <span className="eyebrow">Quick intake</span>
+                    <h3>Guest basics</h3>
+                  </div>
+                  <button type="button" className="secondary" onClick={resetFreshUpForm}>
+                    Start Clean
+                  </button>
+                </div>
+
+                <div className="fresh-up-form-grid">
+                  <label>
+                    Customer Name
+                    <input
+                      value={freshUpForm.customerName}
+                      onChange={(event) => setFreshUpForm((current) => ({ ...current, customerName: event.target.value }))}
+                      placeholder="Customer full name"
+                    />
+                  </label>
+                  <label>
+                    Phone
+                    <input
+                      value={freshUpForm.phone}
+                      onChange={(event) => setFreshUpForm((current) => ({ ...current, phone: event.target.value }))}
+                      placeholder="Best callback number"
+                    />
+                  </label>
+                  <label>
+                    Email
+                    <input
+                      value={freshUpForm.email}
+                      onChange={(event) => setFreshUpForm((current) => ({ ...current, email: event.target.value }))}
+                      placeholder="Email address"
+                    />
+                  </label>
+                  <label>
+                    Salesperson
+                    <select
+                      value={freshUpForm.salespersonId}
+                      onChange={(event) => setFreshUpForm((current) => ({ ...current, salespersonId: event.target.value }))}
+                    >
+                      <option value="">Select salesperson</option>
+                      {activeSales.map((person) => (
+                        <option key={`fresh-up-sales-${person.id}`} value={person.id}>
+                          {person.name} · {person.dealership}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label>
+                    Vehicle Interest
+                    <input
+                      value={freshUpForm.vehicleInterest}
+                      onChange={(event) => setFreshUpForm((current) => ({ ...current, vehicleInterest: event.target.value }))}
+                      placeholder="2024 Kia Telluride EX"
+                    />
+                  </label>
+                  <label>
+                    Stock Number
+                    <input
+                      value={freshUpForm.stockNumber}
+                      onChange={(event) => setFreshUpForm((current) => ({ ...current, stockNumber: event.target.value }))}
+                      placeholder="Stock or VIN shortcut"
+                    />
+                  </label>
+                  <label>
+                    Lead Source
+                    <select
+                      value={freshUpForm.source}
+                      onChange={(event) => setFreshUpForm((current) => ({ ...current, source: event.target.value }))}
+                    >
+                      <option value="Walk-in">Walk-in</option>
+                      <option value="Phone Up">Phone Up</option>
+                      <option value="Be Back">Be Back</option>
+                      <option value="Internet">Internet</option>
+                      <option value="Referral">Referral</option>
+                    </select>
+                  </label>
+                  <label>
+                    Trade-In
+                    <select
+                      value={freshUpForm.tradeIn}
+                      onChange={(event) => setFreshUpForm((current) => ({ ...current, tradeIn: event.target.value }))}
+                    >
+                      <option value="Unknown">Unknown</option>
+                      <option value="Yes">Yes</option>
+                      <option value="No">No</option>
+                    </select>
+                  </label>
+                  <label>
+                    Next Step
+                    <select
+                      value={freshUpForm.nextStep}
+                      onChange={(event) => setFreshUpForm((current) => ({ ...current, nextStep: event.target.value }))}
+                    >
+                      <option value="Needs TO">Needs TO</option>
+                      <option value="Needs Appraisal">Needs Appraisal</option>
+                      <option value="Needs Numbers">Needs Numbers</option>
+                      <option value="Appointment Set">Appointment Set</option>
+                      <option value="Follow Up">Follow Up</option>
+                    </select>
+                  </label>
+                  <label className="fresh-up-form-grid__wide">
+                    Notes
+                    <textarea
+                      value={freshUpForm.notes}
+                      onChange={(event) => setFreshUpForm((current) => ({ ...current, notes: event.target.value }))}
+                      placeholder="Trade details, objections, payment target, desk notes, or what happened on the lot."
+                    />
+                  </label>
+                </div>
+              </div>
+
+              <div className="panel fresh-up-card fresh-up-card--preview">
+                <div className="fresh-up-card__header">
+                  <div>
+                    <span className="eyebrow">Clipboard output</span>
+                    <h3>Ready-to-paste handoff</h3>
+                  </div>
+                  <button type="button" onClick={copyFreshUpSummary}>
+                    Copy Summary
+                  </button>
+                </div>
+
+                <div className="fresh-up-chip-row">
+                  <div className="fresh-up-chip">
+                    <span>Assigned</span>
+                    <strong>{freshUpAssignedSalesperson?.name || "Open"}</strong>
+                  </div>
+                  <div className="fresh-up-chip">
+                    <span>Lead Source</span>
+                    <strong>{freshUpForm.source}</strong>
+                  </div>
+                  <div className="fresh-up-chip">
+                    <span>Next Step</span>
+                    <strong>{freshUpForm.nextStep}</strong>
+                  </div>
+                </div>
+
+                <pre className="fresh-up-summary">{freshUpSummary}</pre>
+
+                <div className="fresh-up-callout">
+                  <strong>{freshUpCopiedAt ? `Copied ${dateTimeLabel(freshUpCopiedAt)}` : "One-click copy"}</strong>
+                  <span>Use the summary for CRM notes, a manager handoff, text follow-up, or a fast desk recap.</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="panel fresh-up-playbook">
+              <div className="fresh-up-playbook__item">
+                <span className="eyebrow">Best use</span>
+                <h3>Lot traffic and handoffs</h3>
+                <p>Keep this open on a desktop or iPad and fill it in while the guest is still in front of you.</p>
+              </div>
+              <div className="fresh-up-playbook__item">
+                <span className="eyebrow">What it solves</span>
+                <h3>No more scratch-paper loss</h3>
+                <p>The draft stays in the browser until you clear it, so quick ups do not disappear between turns.</p>
+              </div>
+              <div className="fresh-up-playbook__item">
+                <span className="eyebrow">Next build</span>
+                <h3>Easy to wire deeper</h3>
+                <p>This can later post into a CRM, BDC log, or Marketplace flow once you decide the destination.</p>
               </div>
             </div>
           </section>
