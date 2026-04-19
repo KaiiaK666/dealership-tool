@@ -12,6 +12,12 @@ body {
   gap: 12px;
 }
 
+.lead {
+  font-size: 13px;
+  line-height: 1.5;
+  color: #5a6773;
+}
+
 .steps {
   display: grid;
   gap: 8px;
@@ -85,6 +91,24 @@ button.wide {
   gap: 8px;
 }
 
+.actions--stack {
+  grid-template-columns: 1fr;
+}
+
+.advanced {
+  border: 1px solid #decfbc;
+  border-radius: 16px;
+  padding: 12px;
+  background: rgba(255, 255, 255, 0.72);
+  display: grid;
+  gap: 10px;
+}
+
+.advanced summary {
+  cursor: pointer;
+  font-weight: 700;
+}
+
 .preview {
   border: 1px solid #decfbc;
   border-radius: 16px;
@@ -108,7 +132,8 @@ pre {
 }
 
 .status {
-  min-height: 18px;
+  min-height: 32px;
   font-size: 12px;
   color: #5a6773;
+  line-height: 1.4;
 }

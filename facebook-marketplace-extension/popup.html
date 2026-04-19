@@ -9,34 +9,44 @@
   <body>
     <main class="app">
       <span class="eyebrow">Marketplace Helper</span>
-      <h1>Post Vehicle</h1>
+      <h1>Quick post vehicle</h1>
+
+      <p class="lead">
+        While you're on a Bert Ogden vehicle page, click once. The helper builds the draft, opens Facebook Marketplace,
+        and tries to fill the form automatically.
+      </p>
 
       <section class="steps">
         <div class="step">
-          <strong>1. Open a vehicle page</strong>
-          <span>Go to the Bert Ogden inventory page for the vehicle you want to post.</span>
+          <strong>1. Open the vehicle tab</strong>
+          <span>Stay on the Bert Ogden inventory page for the car you want to post.</span>
         </div>
         <div class="step">
-          <strong>2. Capture this page</strong>
-          <span>Click the button below while that vehicle tab is open.</span>
+          <strong>2. Click Quick Post</strong>
+          <span>The helper saves the draft and opens Facebook Marketplace for you.</span>
         </div>
         <div class="step">
-          <strong>3. Open Facebook Marketplace</strong>
-          <span>Then use `Apply Draft` on the Marketplace page.</span>
+          <strong>3. Review and publish</strong>
+          <span>Double-check Facebook's form, add images if needed, and finish the post.</span>
         </div>
       </section>
 
-      <label>
-        <span>API base</span>
-        <input id="apiBase" type="text" placeholder="https://api.bertogden123.com" />
-      </label>
-
-      <div class="actions">
-        <button id="saveSettings" type="button" class="secondary">Save Settings</button>
-        <button id="captureCurrentTab" type="button">Capture This Page</button>
+      <div class="actions actions--stack">
+        <button id="quickPost" type="button" class="wide">Quick Post Current Vehicle</button>
+        <div class="actions">
+          <button id="captureCurrentTab" type="button" class="secondary">Capture Only</button>
+          <button id="openMarketplace" type="button" class="secondary">Open Marketplace</button>
+        </div>
       </div>
 
-      <button id="openMarketplace" type="button" class="wide">Open Facebook Marketplace</button>
+      <details class="advanced">
+        <summary>Advanced settings</summary>
+        <label>
+          <span>API base</span>
+          <input id="apiBase" type="text" placeholder="https://api.bertogden123.com" />
+        </label>
+        <button id="saveSettings" type="button" class="secondary wide">Save Settings</button>
+      </details>
 
       <section class="preview">
         <span class="eyebrow">Draft Preview</span>

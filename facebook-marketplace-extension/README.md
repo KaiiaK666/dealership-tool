@@ -8,9 +8,9 @@ Flow:
 3. Click `Load unpacked`
 4. Select this `facebook-marketplace-extension` folder
 5. Open a Bert Ogden vehicle page in Chrome
-6. Open the extension popup and click `Capture This Page`
-7. Click `Open Facebook Marketplace`
-8. On the Facebook vehicle listing page, click `Apply Draft`
+6. Open the extension popup and click `Quick Post Current Vehicle`
+7. The helper opens Facebook Marketplace and tries to fill the draft automatically
+8. Review the listing, upload photos if needed, and finish the post
 
 Current fill coverage:
 - title
@@ -22,6 +22,6 @@ Current fill coverage:
 - mileage
 - condition
 
-The helper shows a status panel on Facebook so the rep can see which fields were filled and which still need manual entry.
+The helper shows a status panel on Facebook so the rep can see which fields were filled and retry if Facebook changes its form.
 
 It does not auto-submit the listing, and image upload still needs to be done manually in Facebook.

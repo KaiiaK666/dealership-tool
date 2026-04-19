@@ -438,9 +438,6 @@ export default function App() {
     price_label: "Bert Ogden Price",
     cta_text: "Message us for availability and financing options.",
   });
-  const [marketplaceForm, setMarketplaceForm] = useState({
-    extensionApiBase: "https://api.bertogden123.com",
-  });
   const [quoteForm, setQuoteForm] = useState({
     brand: "Kia New",
     msrp: "",
@@ -2559,10 +2556,11 @@ export default function App() {
           <section className="stack marketplace-section">
             <div className="panel marketplace-hero">
               <span className="eyebrow">Facebook Marketplace</span>
-              <h2>Simple posting flow for reps</h2>
+              <h2>One-click posting flow for reps</h2>
               <p>
-                Facebook cannot be embedded in this app. The reliable workflow is: open the vehicle page, capture it with
-                the Chrome extension, then open Facebook Marketplace and let the extension apply the draft.
+                Facebook still has to be finished inside Facebook, but reps should only need one main action now:
+                open the vehicle page, click `Quick Post Current Vehicle`, and let the helper open Marketplace and
+                try to fill the form automatically.
               </p>
             </div>
 
@@ -2581,37 +2579,31 @@ export default function App() {
                   <li>Click `Load unpacked`</li>
                   <li>Select the unzipped `facebook-marketplace-extension` folder</li>
                 </ol>
-                <label>
-                  <span>API base for the extension</span>
-                  <input
-                    value={marketplaceForm.extensionApiBase}
-                    onChange={(event) =>
-                      setMarketplaceForm((current) => ({ ...current, extensionApiBase: event.target.value }))
-                    }
-                  />
-                </label>
-                <small>Most reps should leave this as `https://api.bertogden123.com`.</small>
+                <div className="marketplace-callout">
+                  <strong>No rep setup</strong>
+                  <span>The helper already defaults to `https://api.bertogden123.com`. Reps should not need to change settings.</span>
+                </div>
               </div>
 
               <div className="panel marketplace-card">
                 <span className="eyebrow">Step 2</span>
-                <h3>How reps use it</h3>
+                <h3>Daily rep workflow</h3>
                 <ol className="numbered-list">
                   <li>Open the Bert Ogden vehicle page in Chrome</li>
-                  <li>Click the extension and press `Capture This Page`</li>
-                  <li>Click `Open Facebook Marketplace` in the extension</li>
-                  <li>On the Facebook vehicle listing page, click `Apply Draft`</li>
+                  <li>Click the extension and press `Quick Post Current Vehicle`</li>
+                  <li>The helper builds the draft and opens Facebook Marketplace automatically</li>
+                  <li>Let the helper try to fill the Facebook form for you</li>
                   <li>Review the listing and finish the post manually</li>
                 </ol>
                 <div className="marketplace-callout">
-                  <strong>Important</strong>
-                  <span>The extension now reads the vehicle page directly. Reps do not need to paste the inventory URL anymore.</span>
+                  <strong>Main improvement</strong>
+                  <span>Reps no longer need to capture first, then open Marketplace, then click Apply Draft as separate steps.</span>
                 </div>
               </div>
 
               <div className="panel marketplace-card">
                 <span className="eyebrow">Step 3</span>
-                <h3>What the extension pulls in</h3>
+                <h3>What still needs attention</h3>
                 <ul className="feature-list">
                   <li>Year, make, and model</li>
                   <li>Bert Ogden price when available</li>
@@ -2622,8 +2614,8 @@ export default function App() {
                   <li>Available gallery images from the vehicle page</li>
                 </ul>
                 <div className="marketplace-callout">
-                  <strong>Fallback</strong>
-                  <span>If Facebook changes its form layout, the rep should still review every field before posting.</span>
+                  <strong>Manual step that remains</strong>
+                  <span>Facebook image upload can still require rep review. If Facebook changes a field, the helper panel on the page can retry the draft fill.</span>
                 </div>
               </div>
             </div>

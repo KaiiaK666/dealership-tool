@@ -1,8 +1,10 @@
 const defaultApiBase = "https://api.bertogden123.com";
+const marketplaceCreateUrl = "https://www.facebook.com/marketplace/create/vehicle";
 
 const els = {
   apiBase: document.getElementById("apiBase"),
   saveSettings: document.getElementById("saveSettings"),
+  quickPost: document.getElementById("quickPost"),
   captureCurrentTab: document.getElementById("captureCurrentTab"),
   openMarketplace: document.getElementById("openMarketplace"),
   draftTitle: document.getElementById("draftTitle"),
@@ -12,8 +14,16 @@ const els = {
   status: document.getElementById("status"),
 };
 
+function normalizeApiBase(value) {
+  return String(value || defaultApiBase).trim().replace(/\/$/, "") || defaultApiBase;
+}
+
 function setStatus(text) {
   els.status.textContent = text || "";
+}
+
+function isSupportedInventoryUrl(url) {
+  return /bertogden/i.test(String(url || ""));
 }
 
 function fillTemplate(template, data) {
@@ -21,7 +31,7 @@ function fillTemplate(template, data) {
 }
 
 async function fetchTemplate(apiBase) {
-  const response = await fetch(`${apiBase.replace(/\/$/, "")}/api/marketplace/template`);
+  const response = await fetch(`${normalizeApiBase(apiBase)}/api/marketplace/template`);
   if (!response.ok) throw new Error("Failed to load marketplace template");
   return response.json();
 }
@@ -48,14 +58,6 @@ function buildDraft(vehicle, template) {
   };
 }
 
-async function loadSettings() {
-  const saved = await chrome.storage.local.get(["dealerApiBase", "dealerDraft"]);
-  els.apiBase.value = saved.dealerApiBase || defaultApiBase;
-  if (saved.dealerDraft) {
-    renderDraft(saved.dealerDraft);
-  }
-}
-
 function renderDraft(draft) {
   els.draftTitle.textContent = draft.title || "No draft yet";
   els.draftPrice.textContent = draft.price ? `Price: $${draft.price}` : "";
@@ -65,54 +67,106 @@ function renderDraft(draft) {
   if (draft.vehicle?.vin) meta.push(`VIN ${draft.vehicle.vin}`);
   if (draft.vehicle?.condition) meta.push(draft.vehicle.condition);
   if (draft.images?.length) meta.push(`${draft.images.length} image${draft.images.length === 1 ? "" : "s"}`);
-  els.draftMeta.textContent = meta.join(" • ");
+  els.draftMeta.textContent = meta.join(" | ");
   els.draftDescription.textContent = draft.description || "";
 }
 
-els.saveSettings.addEventListener("click", async () => {
-  await chrome.storage.local.set({
-    dealerApiBase: els.apiBase.value.trim() || defaultApiBase,
-  });
-  setStatus("Settings saved.");
-});
+async function loadSettings() {
+  const saved = await chrome.storage.local.get(["dealerApiBase", "dealerDraft"]);
+  els.apiBase.value = saved.dealerApiBase || defaultApiBase;
+  if (saved.dealerDraft) {
+    renderDraft(saved.dealerDraft);
+    setStatus("Saved draft ready. Quick Post will open Facebook and try to fill the form automatically.");
+  }
+}
 
 async function getActiveTab() {
   const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
   return tabs[0];
 }
 
+async function buildDraftForTab(apiBase) {
+  const activeTab = await getActiveTab();
+  if (!activeTab?.id || !activeTab.url) {
+    throw new Error("Open a vehicle page in Chrome first.");
+  }
+  if (!isSupportedInventoryUrl(activeTab.url)) {
+    throw new Error("Open a Bert Ogden inventory vehicle page first.");
+  }
+  const [template, scrapeResult] = await Promise.all([
+    fetchTemplate(apiBase),
+    chrome.tabs.sendMessage(activeTab.id, { type: "SCRAPE_CURRENT_VEHICLE" }),
+  ]);
+  if (!scrapeResult?.ok || !scrapeResult.vehicle) {
+    throw new Error(scrapeResult?.error || "Could not read the vehicle page.");
+  }
+  return buildDraft(scrapeResult.vehicle, template);
+}
+
+async function saveDraftState(apiBase, draft, autoApply) {
+  await chrome.storage.local.set({
+    dealerApiBase: normalizeApiBase(apiBase),
+    dealerDraft: draft,
+    dealerAutoApply: {
+      pending: Boolean(autoApply),
+      updatedAt: Date.now(),
+    },
+  });
+}
+
+async function openMarketplace(autoApply = true) {
+  const saved = await chrome.storage.local.get(["dealerDraft"]);
+  await chrome.storage.local.set({
+    dealerAutoApply: {
+      pending: Boolean(autoApply && saved.dealerDraft),
+      updatedAt: Date.now(),
+    },
+  });
+  await chrome.tabs.create({ url: marketplaceCreateUrl });
+}
+
+els.saveSettings.addEventListener("click", async () => {
+  await chrome.storage.local.set({
+    dealerApiBase: normalizeApiBase(els.apiBase.value),
+  });
+  setStatus("Settings saved.");
+});
+
 els.captureCurrentTab.addEventListener("click", async () => {
-  const apiBase = els.apiBase.value.trim() || defaultApiBase;
+  const apiBase = normalizeApiBase(els.apiBase.value);
   setStatus("Reading vehicle page...");
   try {
-    const activeTab = await getActiveTab();
-    if (!activeTab?.id || !activeTab.url) {
-      throw new Error("Open a vehicle page in Chrome first.");
-    }
-    if (!/bertogden/i.test(activeTab.url)) {
-      throw new Error("Open a Bert Ogden inventory vehicle page first.");
-    }
-    const [template, scrapeResult] = await Promise.all([
-      fetchTemplate(apiBase),
-      chrome.tabs.sendMessage(activeTab.id, { type: "SCRAPE_CURRENT_VEHICLE" }),
-    ]);
-    if (!scrapeResult?.ok || !scrapeResult.vehicle) {
-      throw new Error(scrapeResult?.error || "Could not read the vehicle page.");
-    }
-    const draft = buildDraft(scrapeResult.vehicle, template);
-    await chrome.storage.local.set({
-      dealerApiBase: apiBase,
-      dealerDraft: draft,
-    });
+    const draft = await buildDraftForTab(apiBase);
+    await saveDraftState(apiBase, draft, false);
     renderDraft(draft);
-    setStatus("Draft ready. Open Facebook Marketplace and click Apply Draft.");
+    setStatus("Draft saved. You can open Marketplace any time and the helper can fill the form.");
   } catch (error) {
     setStatus(error.message || "Draft build failed.");
   }
 });
 
+els.quickPost.addEventListener("click", async () => {
+  const apiBase = normalizeApiBase(els.apiBase.value);
+  setStatus("Building draft and opening Marketplace...");
+  try {
+    const draft = await buildDraftForTab(apiBase);
+    await saveDraftState(apiBase, draft, true);
+    renderDraft(draft);
+    await openMarketplace(true);
+    setStatus("Marketplace opened. The helper will try to fill the Facebook form automatically.");
+  } catch (error) {
+    setStatus(error.message || "Quick Post failed.");
+  }
+});
+
 els.openMarketplace.addEventListener("click", async () => {
-  await chrome.tabs.create({ url: "https://www.facebook.com/marketplace/create/vehicle" });
+  const saved = await chrome.storage.local.get(["dealerDraft"]);
+  await openMarketplace(Boolean(saved.dealerDraft));
+  setStatus(
+    saved.dealerDraft
+      ? "Marketplace opened. The helper will try to apply your saved draft automatically."
+      : "Marketplace opened. Capture a vehicle first if you want fields filled automatically."
+  );
 });
 
 loadSettings();
