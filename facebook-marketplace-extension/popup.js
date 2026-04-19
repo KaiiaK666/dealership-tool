@@ -60,15 +60,18 @@ function looksUsableCaption(value) {
 function buildSmartCaption(vehicle, template, draftData) {
   const nameLine = [vehicle.year, vehicle.make, vehicle.model].filter(Boolean).join(" ");
   const lines = [];
-  if (nameLine) lines.push(nameLine);
+  if (nameLine) lines.push(`${nameLine} available now at Bert Ogden.`);
   if (draftData.price) {
     lines.push(`${template.price_label || "Price"}: ${draftData.price}`);
   }
   if (vehicle.mileage) {
     lines.push(`Mileage: ${formatNumber(vehicle.mileage)} mi`);
   }
-  if (vehicle.vin) {
-    lines.push(`VIN: ${vehicle.vin}`);
+  if (vehicle.body_style) {
+    lines.push(`Body style: ${normalizeSentence(vehicle.body_style)}`);
+  }
+  if (vehicle.condition) {
+    lines.push(`Condition: ${normalizeSentence(vehicle.condition)}`);
   }
   const bodyStyle = normalizeSentence(vehicle.body_style || "Sedan").toLowerCase();
   const conditionLine =
@@ -79,8 +82,11 @@ function buildSmartCaption(vehicle, template, draftData) {
   if (template.cta_text) {
     lines.push(normalizeSentence(template.cta_text));
   }
+  if (vehicle.vin) {
+    lines.push(`VIN: ${vehicle.vin}`);
+  }
   if (vehicle.url) {
-    lines.push(vehicle.url);
+    lines.push(`View full details: ${vehicle.url}`);
   }
   return lines.filter(Boolean).join("\n");
 }

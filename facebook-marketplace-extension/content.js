@@ -8,9 +8,57 @@
     return String(text || "").replace(/\s+/g, " ").trim();
   }
 
+  function isVisible(node) {
+    if (!node || !node.isConnected) return false;
+    const style = window.getComputedStyle(node);
+    if (style.display === "none" || style.visibility === "hidden") return false;
+    return node.getClientRects().length > 0;
+  }
+
+  function dispatchMouseSequence(node) {
+    if (!node) return false;
+    const events = ["pointerdown", "mousedown", "mouseup", "click"];
+    node.focus?.();
+    for (const type of events) {
+      node.dispatchEvent(
+        new MouseEvent(type, {
+          bubbles: true,
+          cancelable: true,
+          view: window,
+        })
+      );
+    }
+    node.click?.();
+    return true;
+  }
+
+  function getAriaLabelText(node) {
+    const ids = String(node?.getAttribute("aria-labelledby") || "")
+      .split(/\s+/)
+      .filter(Boolean);
+    return normalizeText(
+      ids
+        .map((id) => document.getElementById(id)?.textContent || "")
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase()
+    );
+  }
+
+  function getComboboxValue(node) {
+    if (!node) return "";
+    const candidates = Array.from(
+      node.querySelectorAll('[tabindex="-1"] span, [tabindex="-1"] div, input, textarea, [role="textbox"]')
+    )
+      .map((candidate) => normalizeText(candidate.textContent || candidate.value || ""))
+      .filter(Boolean);
+    return candidates[0] || "";
+  }
+
   function collectFieldText(node) {
     return normalizeText(
       [
+        getAriaLabelText(node),
         node.getAttribute("aria-label"),
         node.getAttribute("placeholder"),
         node.getAttribute("name"),
@@ -32,18 +80,46 @@
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
+  function matchesHint(text, hints, exact = false) {
+    const source = normalizeText(text).toLowerCase();
+    if (!source) return false;
+    return hints.some((hint) => {
+      const normalizedHint = normalizeText(hint).toLowerCase();
+      return exact ? source === normalizedHint || source.startsWith(`${normalizedHint} `) : source.includes(normalizedHint);
+    });
+  }
+
+  function findLabeledInput(hints, { tagName = "", exact = false } = {}) {
+    const labels = Array.from(document.querySelectorAll("label")).filter(isVisible);
+    for (const label of labels) {
+      const labelText = normalizeText(
+        [
+          getAriaLabelText(label),
+          ...Array.from(label.querySelectorAll("span[id]")).map((node) => node.textContent || ""),
+        ].join(" ")
+      ).toLowerCase();
+      if (!matchesHint(labelText, hints, exact)) continue;
+      const target = label.querySelector(tagName ? tagName.toLowerCase() : 'input, textarea, [contenteditable="true"], [role="textbox"]');
+      if (target) return target;
+    }
+    return null;
+  }
+
   function findEditable(hints, { tagName = "", exact = false } = {}) {
+    const labeled = findLabeledInput(hints, { tagName, exact });
+    if (labeled) return labeled;
     const candidates = Array.from(
       document.querySelectorAll('input, textarea, [contenteditable="true"], [role="textbox"]')
     ).filter((node) => {
       const type = (node.getAttribute("type") || "").toLowerCase();
       if (["hidden", "file", "checkbox", "radio"].includes(type)) return false;
       if (tagName && node.tagName !== tagName.toUpperCase()) return false;
+      if (!isVisible(node)) return false;
       return true;
     });
     return candidates.find((node) => {
       const text = collectFieldText(node);
-      return hints.some((hint) => (exact ? text === hint || text.startsWith(`${hint} `) : text.includes(hint)));
+      return matchesHint(text, hints, exact);
     });
   }
 
@@ -58,6 +134,12 @@
 
   function findTextField(hints) {
     return findEditable(hints, { exact: true }) || findEditable(hints);
+  }
+
+  function findFieldGroupTitle(title) {
+    return Array.from(document.querySelectorAll("span, div, h1, h2, h3")).find((node) =>
+      isVisible(node) && normalizeText(node.textContent).toLowerCase() === normalizeText(title).toLowerCase()
+    );
   }
 
   function setNativeInputValue(node, value) {
@@ -88,43 +170,87 @@
   }
 
   function findSelectTrigger(hints) {
-    const candidates = Array.from(
-      document.querySelectorAll('[role="combobox"], [aria-haspopup="listbox"], [role="button"], button')
-    );
-    return candidates.find((node) => {
-      const text = collectFieldText(node);
-      return text && hints.some((hint) => text === hint || text.startsWith(`${hint} `) || text.includes(` ${hint} `));
-    });
+    const exactCandidates = Array.from(
+      document.querySelectorAll('label[role="combobox"], [role="combobox"], [aria-haspopup="listbox"]')
+    ).filter(isVisible);
+    const exactMatch = exactCandidates.find((node) => matchesHint(getAriaLabelText(node), hints, true));
+    if (exactMatch) return exactMatch;
+    return exactCandidates.find((node) => matchesHint(collectFieldText(node), hints, false));
   }
 
-  function findOptionByText(value) {
-    const target = normalizeText(value).toLowerCase();
-    const candidates = Array.from(document.querySelectorAll('[role="option"], [role="menuitem"], li, span, div'));
-    return candidates.find((node) => {
-      const text = normalizeText(node.textContent).toLowerCase();
-      return text === target || text.includes(target);
-    });
+  function findOptionByText(values) {
+    const targets = (Array.isArray(values) ? values : [values])
+      .map((value) => normalizeText(value).toLowerCase())
+      .filter(Boolean);
+    if (!targets.length) return null;
+
+    const exactCandidates = Array.from(
+      document.querySelectorAll('[role="option"], [role="menuitemradio"], [role="menuitem"], [aria-selected="true"], [aria-selected="false"]')
+    ).filter(isVisible);
+    const broadCandidates = Array.from(document.querySelectorAll("li, span, div"))
+      .filter((node) => isVisible(node) && !node.querySelector("input, textarea") && normalizeText(node.textContent).length <= 64);
+    const candidates = [...exactCandidates, ...broadCandidates];
+
+    const scored = candidates
+      .map((node) => {
+        const text = normalizeText(node.textContent).toLowerCase();
+        if (!text) return null;
+        const score = targets.reduce((best, target) => {
+          if (text === target) return Math.max(best, 100);
+          if (text.startsWith(target)) return Math.max(best, 80);
+          if (text.includes(target)) return Math.max(best, 60);
+          return best;
+        }, 0);
+        return score ? { node, score, textLength: text.length } : null;
+      })
+      .filter(Boolean)
+      .sort((left, right) => right.score - left.score || left.textLength - right.textLength);
+
+    return scored[0]?.node || null;
   }
 
-  async function selectOption(hints, value) {
-    if (!value) return false;
+  function bodyStyleCandidates(value) {
+    const source = normalizeText(value || "Sedan").toLowerCase();
+    if (source.includes("suv")) return ["SUV", "Sedan"];
+    if (source.includes("truck")) return ["Truck", "Pickup Truck", "Sedan"];
+    if (source.includes("hatch")) return ["Hatchback", "Sedan"];
+    if (source.includes("coupe")) return ["Coupe", "Sedan"];
+    if (source.includes("wagon")) return ["Wagon", "Sedan"];
+    if (source.includes("convert")) return ["Convertible", "Sedan"];
+    if (source.includes("van")) return ["Van", "Minivan", "Sedan"];
+    return [normalizeText(value || "Sedan"), "Sedan"];
+  }
+
+  async function selectOption(hints, value, fallbacks = []) {
+    const candidateValues = [value, ...fallbacks].map((item) => normalizeText(item)).filter(Boolean);
+    if (!candidateValues.length) return false;
     const trigger = findSelectTrigger(hints);
     if (!trigger) return false;
-    trigger.click();
-    await wait(350);
-    const option = findOptionByText(value);
-    if (!option) return false;
-    option.click();
-    await wait(250);
-    return true;
+
+    const currentValue = normalizeText(getComboboxValue(trigger)).toLowerCase();
+    if (candidateValues.some((candidate) => currentValue === candidate.toLowerCase())) {
+      return true;
+    }
+
+    for (const candidate of candidateValues) {
+      dispatchMouseSequence(trigger);
+      await wait(450);
+      const option = findOptionByText(candidate);
+      if (!option) continue;
+      dispatchMouseSequence(option);
+      await wait(350);
+      const nextValue = normalizeText(getComboboxValue(trigger)).toLowerCase();
+      if (!nextValue || nextValue.includes(candidate.toLowerCase()) || candidate.toLowerCase().includes(nextValue)) {
+        return true;
+      }
+    }
+
+    return false;
   }
 
   async function pickVehicleType(value) {
-    const resolved = normalizeText(value || "Sedan");
-    return (
-      (await selectOption(["vehicle type", "body style", "type"], resolved)) ||
-      (await selectOption(["vehicle type", "body style", "type"], "Sedan"))
-    );
+    const candidates = bodyStyleCandidates(value);
+    return await selectOption(["vehicle type"], candidates[0], candidates.slice(1));
   }
 
   function findAddPhotosButton() {
@@ -134,9 +260,10 @@
   }
 
   function findImageInput() {
-    return Array.from(document.querySelectorAll('input[type="file"]')).find((node) => {
+    return Array.from(document.querySelectorAll('input[type="file"][multiple], input[type="file"]')).find((node) => {
+      if (!isVisible(node) && node.closest("label") && !isVisible(node.closest("label"))) return false;
       const accept = String(node.getAttribute("accept") || "").toLowerCase();
-      return !accept || accept.includes("image");
+      return (!accept || accept.includes("image")) && node.hasAttribute("multiple");
     });
   }
 
@@ -166,8 +293,15 @@
     }
     if (!uploaded) return { ok: false, uploaded: 0 };
     input.files = dataTransfer.files;
+    input.dispatchEvent(new Event("click", { bubbles: true }));
     input.dispatchEvent(new Event("change", { bubbles: true }));
     input.dispatchEvent(new Event("input", { bubbles: true }));
+    try {
+      input.dispatchEvent(new DragEvent("drop", { bubbles: true, dataTransfer }));
+    } catch {
+      // DragEvent is not always constructible in Chrome extension contexts.
+    }
+    await wait(800);
     return { ok: true, uploaded };
   }
 
@@ -217,18 +351,14 @@
 
     const results = [];
     const vehicle = dealerDraft.vehicle || {};
+    const modelValue = normalizeText(vehicle.model || dealerDraft.raw?.model || "");
+    const mileageValue = String(vehicle.mileage || "").replace(/[^0-9]/g, "");
 
     const vehicleTypeOk = await pickVehicleType(vehicle.body_style || "Sedan");
     results.push(vehicleTypeOk ? "Filled vehicle type" : "Could not find vehicle type field");
 
-    const titleOk = setNodeValue(findTextField(["title", "listing title", "vehicle title"]), dealerDraft.title || "");
-    results.push(titleOk ? "Filled title" : "Could not find title field");
-
     const priceOk = setNodeValue(findTextField(["price", "asking price"]), dealerDraft.price || "");
     results.push(priceOk ? "Filled price" : "Could not find price field");
-
-    const descOk = setNodeValue(findDescriptionField(), dealerDraft.description || "");
-    results.push(descOk ? "Filled description" : "Could not find description field");
 
     const yearOk =
       (await selectOption(["year"], vehicle.year || "")) ||
@@ -241,15 +371,17 @@
     results.push(makeOk ? "Filled make" : "Could not find make field");
 
     const modelOk =
-      (await selectOption(["model"], vehicle.model || "")) ||
-      setNodeValue(findTextField(["model"]), vehicle.model || "");
+      (await selectOption(["model"], modelValue)) ||
+      setNodeValue(findTextField(["model"]), modelValue);
     results.push(modelOk ? "Filled model" : "Could not find model field");
 
-    const mileageValue = String(vehicle.mileage || "").replace(/[^0-9]/g, "");
     const mileageOk =
       (await selectOption(["mileage", "odometer"], mileageValue)) ||
       setNodeValue(findTextField(["mileage", "odometer"]), mileageValue);
     results.push(mileageOk ? "Filled mileage" : "Could not find mileage field");
+
+    const descOk = setNodeValue(findDescriptionField(), dealerDraft.description || "");
+    results.push(descOk ? "Filled description" : "Could not find description field");
 
     const conditionOk =
       (await selectOption(["condition"], vehicle.condition || "")) ||
@@ -288,7 +420,9 @@
     try {
       for (let attempt = 0; attempt < 15; attempt += 1) {
         const formReady = Boolean(
-          findTextField(["title", "price"]) || findDescriptionField() || findSelectTrigger(["year", "make", "model", "condition"])
+          findTextField(["price", "model", "mileage"]) ||
+            findDescriptionField() ||
+            findSelectTrigger(["vehicle type", "year", "make", "condition"])
         );
         if (formReady) {
           await applyDraft({ auto: true });
