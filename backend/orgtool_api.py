@@ -19,10 +19,17 @@ DEFAULT_DATA_ROOT = Path(
 ).expanduser().resolve().parent
 DATA_FILE = Path(os.getenv("ORGTOOL_DATA_FILE", str(DEFAULT_DATA_ROOT / "orgtool-store.json"))).expanduser()
 
-StatusValue = Literal["Not started", "Working on it", "Review", "Stuck", "Done"]
+StatusValue = Literal["Overdue", "Pending", "Done"]
 PriorityValue = Literal["Critical", "High", "Medium", "Low"]
 AudienceValue = Literal["All", "Sales", "BDC", "Service", "Leadership"]
 FieldTypeValue = Literal["text", "number", "date", "tag"]
+LEGACY_STATUS_MAP = {
+    "Not started": "Pending",
+    "Working on it": "Pending",
+    "Review": "Pending",
+    "Stuck": "Overdue",
+    "Done": "Done",
+}
 
 LEGACY_DEMO_USERS = {"Kai Rivers", "Maya Chen", "Jordan Reed", "Ava Martinez", "Luis Gomez"}
 LEGACY_DEMO_BOARDS = {"Showroom Appointments", "Service Lane Follow Up", "Used Car Specials"}
@@ -113,7 +120,7 @@ SEED_DATA = {
         {
             "id": 1,
             "title": "Keep projects simple",
-            "message": "Use groups for timing, use priority for urgency, and only add fields when the board truly needs them.",
+            "message": "Use task groups for timing, use priority for urgency, and only add extra columns when the board truly needs them.",
             "audience": "All",
             "priority": "Medium",
             "pinned": True,
@@ -170,16 +177,16 @@ SEED_DATA = {
             "store_id": None,
             "fields": [],
             "groups": [
-                {"id": 11, "name": "Today"},
-                {"id": 12, "name": "This Week"},
-                {"id": 13, "name": "Done"},
+                {"id": 11, "name": "Today", "color": "#0f766e"},
+                {"id": 12, "name": "This Week", "color": "#3156f5"},
+                {"id": 13, "name": "Done", "color": "#1f8a4c"},
             ],
             "tasks": [
                 {
                     "id": 101,
                     "group_id": 11,
                     "name": "Call missed appointments from yesterday",
-                    "status": "Working on it",
+                    "status": "Pending",
                     "priority": "High",
                     "owner_id": 2,
                     "store_id": None,
@@ -196,7 +203,7 @@ SEED_DATA = {
                     "id": 102,
                     "group_id": 12,
                     "name": "Clean up stale CRM tasks",
-                    "status": "Not started",
+                    "status": "Pending",
                     "priority": "Medium",
                     "owner_id": 4,
                     "store_id": None,
@@ -220,16 +227,16 @@ SEED_DATA = {
             "store_id": None,
             "fields": [],
             "groups": [
-                {"id": 21, "name": "Queue"},
-                {"id": 22, "name": "In Progress"},
-                {"id": 23, "name": "Done"},
+                {"id": 21, "name": "Queue", "color": "#3156f5"},
+                {"id": 22, "name": "In Progress", "color": "#0f766e"},
+                {"id": 23, "name": "Done", "color": "#1f8a4c"},
             ],
             "tasks": [
                 {
                     "id": 201,
                     "group_id": 22,
                     "name": "Review staffing coverage for next month",
-                    "status": "Review",
+                    "status": "Pending",
                     "priority": "Critical",
                     "owner_id": 3,
                     "store_id": None,
@@ -246,7 +253,7 @@ SEED_DATA = {
                     "id": 202,
                     "group_id": 21,
                     "name": "Finalize trainer schedule",
-                    "status": "Not started",
+                    "status": "Pending",
                     "priority": "Medium",
                     "owner_id": 5,
                     "store_id": None,
@@ -270,16 +277,16 @@ SEED_DATA = {
             "store_id": None,
             "fields": [],
             "groups": [
-                {"id": 31, "name": "Open"},
-                {"id": 32, "name": "This Week"},
-                {"id": 33, "name": "Done"},
+                {"id": 31, "name": "Open", "color": "#ea580c"},
+                {"id": 32, "name": "This Week", "color": "#3156f5"},
+                {"id": 33, "name": "Done", "color": "#1f8a4c"},
             ],
             "tasks": [
                 {
                     "id": 301,
                     "group_id": 31,
                     "name": "Send quote follow-up to walk-ins",
-                    "status": "Working on it",
+                    "status": "Pending",
                     "priority": "High",
                     "owner_id": 6,
                     "store_id": None,
@@ -367,10 +374,14 @@ def normalize_store(store: dict) -> dict:
         board.setdefault("groups", [])
         board.setdefault("fields", [])
         board.setdefault("tasks", [])
+        for index, group in enumerate(board["groups"]):
+            group.setdefault("color", board.get("color") or ["#3156f5", "#0f766e", "#ea580c", "#7c3aed"][index % 4])
         for field in board["fields"]:
             field.setdefault("type", "text")
         for task in board["tasks"]:
-            task.setdefault("status", "Not started")
+            task["status"] = LEGACY_STATUS_MAP.get(task.get("status"), task.get("status") or "Pending")
+            if task["status"] not in {"Overdue", "Pending", "Done"}:
+                task["status"] = "Pending"
             task.setdefault("priority", "Medium")
             task.setdefault("owner_id", None)
             task.setdefault("store_id", board.get("store_id"))
@@ -445,7 +456,7 @@ class UserCreate(BaseModel):
     department: str = "General"
     store_id: int | None = None
     phone: str = ""
-    password: str = Field(min_length=4, max_length=120)
+    password: str = Field(min_length=3, max_length=120)
     active: bool = True
 
 
@@ -456,7 +467,7 @@ class UserPatch(BaseModel):
     department: str | None = None
     store_id: int | None = None
     phone: str | None = None
-    password: str | None = Field(default=None, min_length=4, max_length=120)
+    password: str | None = Field(default=None, min_length=3, max_length=120)
     active: bool | None = None
 
 
@@ -503,6 +514,12 @@ class BoardPatch(BaseModel):
 class GroupCreate(BaseModel):
     board_id: int
     name: str = Field(min_length=1, max_length=60)
+    color: str | None = "#3156f5"
+
+
+class GroupPatch(BaseModel):
+    name: str | None = Field(default=None, min_length=1, max_length=60)
+    color: str | None = None
 
 
 class BoardFieldCreate(BaseModel):
@@ -514,7 +531,7 @@ class TaskCreate(BaseModel):
     board_id: int
     group_id: int
     name: str = Field(min_length=2, max_length=120)
-    status: StatusValue = "Not started"
+    status: StatusValue = "Pending"
     priority: PriorityValue = "Medium"
     owner_id: int | None = None
     store_id: int | None = None
@@ -608,9 +625,16 @@ def update_user(user_id: int, payload: UserPatch) -> dict:
     record = next((entry for entry in store["users"] if int(entry["id"]) == int(user_id)), None)
     if not record:
         raise HTTPException(status_code=404, detail="User not found")
-    for key, value in payload.model_dump(exclude_unset=True).items():
+    updates = payload.model_dump(exclude_unset=True)
+    active_admins = [user for user in store["users"] if user.get("role") == "Admin" and user.get("active", True)]
+    if record.get("role") == "Admin":
+        next_role = updates.get("role", record.get("role"))
+        next_active = updates.get("active", record.get("active", True))
+        if (next_role != "Admin" or next_active is False) and len(active_admins) <= 1:
+            raise HTTPException(status_code=400, detail="Create another active admin before changing the last admin account")
+    for key, value in updates.items():
         record[key] = value
-    if "name" in payload.model_dump(exclude_unset=True):
+    if "name" in updates:
         record["avatar"] = "".join(part[:1] for part in record["name"].split()[:2]).upper()
     write_store(store)
     return {"user": public_user(record)}
@@ -706,8 +730,21 @@ def create_board_field(board_id: int, payload: BoardFieldCreate) -> dict:
 def create_group(payload: GroupCreate) -> dict:
     store = read_store()
     board = get_board(store, payload.board_id)
-    group = {"id": next_id(board["groups"]), "name": payload.name}
+    group = {"id": next_id(board["groups"]), "name": payload.name, "color": payload.color or board.get("color", "#3156f5")}
     board["groups"].append(group)
+    write_store(store)
+    return {"group": group}
+
+
+@app.patch("/api/boards/{board_id}/groups/{group_id}")
+def update_group(board_id: int, group_id: int, payload: GroupPatch) -> dict:
+    store = read_store()
+    board = get_board(store, board_id)
+    group = next((entry for entry in board["groups"] if int(entry["id"]) == int(group_id)), None)
+    if not group:
+        raise HTTPException(status_code=404, detail="Group not found")
+    for key, value in payload.model_dump(exclude_unset=True).items():
+        group[key] = value
     write_store(store)
     return {"group": group}
 
