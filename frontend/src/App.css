@@ -2535,6 +2535,12 @@ button.special-card:hover:not(:disabled) {
   color: var(--muted);
 }
 
+.marketplace-helper-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
 .feature-list {
   margin: 0;
   padding-left: 20px;
@@ -2882,6 +2888,7 @@ button.special-card:hover:not(:disabled) {
   .fresh-up-playbook,
   .marketplace-admin__layout,
   .marketplace-admin__two-up,
+  .marketplace-helper-actions,
   .marketplace-grid,
   .marketplace-template-grid,
   .note-admin-grid,
@@ -2946,6 +2953,7 @@ button.special-card:hover:not(:disabled) {
   .fresh-up-playbook,
   .marketplace-admin__layout,
   .marketplace-admin__two-up,
+  .marketplace-helper-actions,
   .note-admin-grid,
   .traffic-entry-grid,
   .traffic-toolbar__controls,

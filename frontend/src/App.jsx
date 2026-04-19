@@ -84,8 +84,8 @@ const MARKETPLACE_TITLE_TOKEN = "{year} {make} {model}";
 const MARKETPLACE_BUILDER_DEFAULTS = {
   titlePrefix: "",
   titleSuffix: "",
-  priceLabel: "Bert Ogden Price",
-  ctaText: "Message us for availability and financing options.",
+  priceLabel: "Price",
+  ctaText: "Message us today for availability, trade value, and financing options.",
   contactLine: "",
   extraNotes: "",
   includeVehicleLine: true,
@@ -623,6 +623,7 @@ export default function App() {
   });
   const [freshUpForm, setFreshUpForm] = useState(() => readFreshUpDraft());
   const [freshUpCopiedAt, setFreshUpCopiedAt] = useState("");
+  const [marketplaceGuideStatus, setMarketplaceGuideStatus] = useState("");
   const [trafficRowUploadFiles, setTrafficRowUploadFiles] = useState({});
   const [trafficRowUploadKeys, setTrafficRowUploadKeys] = useState({});
   const [trafficPdfForm, setTrafficPdfForm] = useState({ title: "", file: null });
@@ -1794,6 +1795,27 @@ export default function App() {
   function resetFreshUpForm() {
     setFreshUpForm(FRESH_UP_DEFAULTS);
     setFreshUpCopiedAt("");
+  }
+
+  function openChromeExtensionsPage() {
+    setMarketplaceGuideStatus("Trying to open Chrome Extensions...");
+    try {
+      const opened = window.open("chrome://extensions/", "_blank", "noopener,noreferrer");
+      if (!opened) {
+        window.location.href = "chrome://extensions/";
+      }
+    } catch {
+      setMarketplaceGuideStatus("Chrome may block direct opening from the website. Copy the link below and paste it into the address bar.");
+    }
+  }
+
+  async function copyChromeExtensionsLink() {
+    try {
+      await copyTextValue("chrome://extensions/");
+      setMarketplaceGuideStatus("Copied chrome://extensions/ to the clipboard.");
+    } catch (errorValue) {
+      setError(errText(errorValue));
+    }
   }
 
   return (
@@ -3009,9 +3031,17 @@ export default function App() {
               <div className="panel marketplace-card">
                 <span className="eyebrow">Step 1</span>
                 <h3>Install the Chrome extension once</h3>
-                <a className="asset-link" href="/facebook-marketplace-extension.zip?v=0.3.3" download>
+                <a className="asset-link" href="/facebook-marketplace-extension.zip?v=0.3.4" download>
                   Download Extension Zip
                 </a>
+                <div className="marketplace-helper-actions">
+                  <button type="button" className="secondary" onClick={openChromeExtensionsPage}>
+                    Open Chrome Extensions
+                  </button>
+                  <button type="button" className="secondary" onClick={copyChromeExtensionsLink}>
+                    Copy `chrome://extensions/`
+                  </button>
+                </div>
                 <ol className="numbered-list">
                   <li>Download the zip above</li>
                   <li>Unzip it anywhere on your computer</li>
@@ -3024,6 +3054,7 @@ export default function App() {
                   <strong>No rep setup</strong>
                   <span>The helper already defaults to the right API. If it was loaded unpacked before, just click Reload in `chrome://extensions` instead of deleting it.</span>
                 </div>
+                {marketplaceGuideStatus ? <div className="notice">{marketplaceGuideStatus}</div> : null}
               </div>
 
               <div className="panel marketplace-card">
@@ -3032,13 +3063,13 @@ export default function App() {
                 <ol className="numbered-list">
                   <li>Open the Bert Ogden vehicle page in Chrome</li>
                   <li>Click the extension and press `Quick Post Current Vehicle`</li>
-                  <li>The helper builds the draft and opens Facebook Marketplace automatically</li>
-                  <li>Let the helper try to fill the Facebook form for you</li>
+                  <li>The helper downloads the vehicle photos and opens Facebook Marketplace automatically</li>
+                  <li>Let the helper try to fill the Facebook form and queue the photo upload for you</li>
                   <li>Review the listing and finish the post manually</li>
                 </ol>
                 <div className="marketplace-callout">
                   <strong>Main improvement</strong>
-                  <span>Reps no longer need to capture first, then open Marketplace, then click Apply Draft as separate steps.</span>
+                  <span>Reps should not need to write a caption by hand or save photos one by one before posting.</span>
                 </div>
               </div>
 
@@ -3055,8 +3086,8 @@ export default function App() {
                   <li>Available gallery images from the vehicle page</li>
                 </ul>
                 <div className="marketplace-callout">
-                  <strong>Manual step that remains</strong>
-                  <span>Facebook image upload can still require rep review. If Facebook changes a field, the helper panel on the page can retry the draft fill.</span>
+                  <strong>Still needs review</strong>
+                  <span>Facebook can still change its form. If something misses, the helper panel on the page can retry the draft fill and show what was or was not applied.</span>
                 </div>
               </div>
             </div>

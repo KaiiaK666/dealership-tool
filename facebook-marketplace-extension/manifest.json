@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Dealership Marketplace Helper",
-  "version": "0.3.3",
+  "version": "0.3.4",
   "description": "Scrape dealership inventory pages and prepare Facebook Marketplace drafts.",
   "icons": {
     "16": "icons/icon16.png",
@@ -21,13 +21,15 @@
     "storage",
     "activeTab",
     "tabs",
-    "scripting"
+    "scripting",
+    "downloads"
   ],
   "host_permissions": [
     "https://www.facebook.com/*",
     "https://facebook.com/*",
     "https://api.bertogden123.com/*",
     "https://dealership-tool-api.onrender.com/*",
+    "https://*.carscommerce.inc/*",
     "https://www.bertogdenmissionkia.com/*",
     "https://www.bertogdenmissionmazda.com/*",
     "https://www.bertogdenmission.com/*",

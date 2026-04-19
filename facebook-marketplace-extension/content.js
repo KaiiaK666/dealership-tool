@@ -16,7 +16,10 @@
         node.getAttribute("name"),
         node.id,
         node.closest("label")?.textContent,
+        node.closest('[aria-label]')?.getAttribute("aria-label"),
         node.closest('[role="group"]')?.textContent,
+        node.previousElementSibling?.textContent,
+        node.parentElement?.previousElementSibling?.textContent,
         node.parentElement?.textContent,
       ]
         .filter(Boolean)
@@ -29,17 +32,32 @@
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
-  function findEditable(hints) {
+  function findEditable(hints, { tagName = "", exact = false } = {}) {
     const candidates = Array.from(
       document.querySelectorAll('input, textarea, [contenteditable="true"], [role="textbox"]')
     ).filter((node) => {
       const type = (node.getAttribute("type") || "").toLowerCase();
-      return !["hidden", "file", "checkbox", "radio"].includes(type);
+      if (["hidden", "file", "checkbox", "radio"].includes(type)) return false;
+      if (tagName && node.tagName !== tagName.toUpperCase()) return false;
+      return true;
     });
     return candidates.find((node) => {
       const text = collectFieldText(node);
-      return hints.some((hint) => text.includes(hint));
+      return hints.some((hint) => (exact ? text === hint || text.startsWith(`${hint} `) : text.includes(hint)));
     });
+  }
+
+  function findDescriptionField() {
+    return (
+      findEditable(["description"], { tagName: "TEXTAREA", exact: true }) ||
+      findEditable(["description"], { tagName: "TEXTAREA" }) ||
+      findEditable(["description"], { exact: true }) ||
+      findEditable(["description"])
+    );
+  }
+
+  function findTextField(hints) {
+    return findEditable(hints, { exact: true }) || findEditable(hints);
   }
 
   function setNativeInputValue(node, value) {
@@ -70,10 +88,12 @@
   }
 
   function findSelectTrigger(hints) {
-    const candidates = Array.from(document.querySelectorAll('[role="button"], [role="combobox"], button, div'));
+    const candidates = Array.from(
+      document.querySelectorAll('[role="combobox"], [aria-haspopup="listbox"], [role="button"], button')
+    );
     return candidates.find((node) => {
       const text = collectFieldText(node);
-      return text && hints.some((hint) => text.includes(hint));
+      return text && hints.some((hint) => text === hint || text.startsWith(`${hint} `) || text.includes(` ${hint} `));
     });
   }
 
@@ -97,6 +117,39 @@
     option.click();
     await wait(250);
     return true;
+  }
+
+  function findImageInput() {
+    return Array.from(document.querySelectorAll('input[type="file"]')).find((node) => {
+      const accept = String(node.getAttribute("accept") || "").toLowerCase();
+      return !accept || accept.includes("image");
+    });
+  }
+
+  async function uploadImages(imageUrls) {
+    const input = findImageInput();
+    if (!input || !Array.isArray(imageUrls) || !imageUrls.length) return { ok: false, uploaded: 0 };
+    const dataTransfer = new DataTransfer();
+    let uploaded = 0;
+    for (let index = 0; index < Math.min(imageUrls.length, 10); index += 1) {
+      const url = imageUrls[index];
+      try {
+        const response = await fetch(url);
+        if (!response.ok) continue;
+        const blob = await response.blob();
+        const extensionMatch = String(url).match(/\.([a-zA-Z0-9]{3,4})(?:[?#]|$)/);
+        const extension = extensionMatch?.[1] || "jpg";
+        dataTransfer.items.add(new File([blob], `vehicle-${index + 1}.${extension}`, { type: blob.type || `image/${extension}` }));
+        uploaded += 1;
+      } catch {
+        // Ignore individual image failures.
+      }
+    }
+    if (!uploaded) return { ok: false, uploaded: 0 };
+    input.files = dataTransfer.files;
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    return { ok: true, uploaded };
   }
 
   function getStatusNode() {
@@ -146,45 +199,50 @@
     const results = [];
     const vehicle = dealerDraft.vehicle || {};
 
-    const titleOk = setNodeValue(findEditable(["title", "listing title", "vehicle title"]), dealerDraft.title || "");
+    const titleOk = setNodeValue(findTextField(["title", "listing title", "vehicle title"]), dealerDraft.title || "");
     results.push(titleOk ? "Filled title" : "Could not find title field");
 
-    const priceOk = setNodeValue(findEditable(["price", "asking price"]), dealerDraft.price || "");
+    const priceOk = setNodeValue(findTextField(["price", "asking price"]), dealerDraft.price || "");
     results.push(priceOk ? "Filled price" : "Could not find price field");
 
-    const descOk = setNodeValue(findEditable(["description"]), dealerDraft.description || "");
+    const descOk = setNodeValue(findDescriptionField(), dealerDraft.description || "");
     results.push(descOk ? "Filled description" : "Could not find description field");
 
     const yearOk =
       (await selectOption(["year"], vehicle.year || "")) ||
-      setNodeValue(findEditable(["year"]), vehicle.year || "");
+      setNodeValue(findTextField(["year"]), vehicle.year || "");
     results.push(yearOk ? "Filled year" : "Could not find year field");
 
     const makeOk =
       (await selectOption(["make"], vehicle.make || "")) ||
-      setNodeValue(findEditable(["make"]), vehicle.make || "");
+      setNodeValue(findTextField(["make"]), vehicle.make || "");
     results.push(makeOk ? "Filled make" : "Could not find make field");
 
     const modelOk =
       (await selectOption(["model"], vehicle.model || "")) ||
-      setNodeValue(findEditable(["model"]), vehicle.model || "");
+      setNodeValue(findTextField(["model"]), vehicle.model || "");
     results.push(modelOk ? "Filled model" : "Could not find model field");
 
     const mileageValue = String(vehicle.mileage || "").replace(/[^0-9]/g, "");
     const mileageOk =
       (await selectOption(["mileage", "odometer"], mileageValue)) ||
-      setNodeValue(findEditable(["mileage", "odometer"]), mileageValue);
+      setNodeValue(findTextField(["mileage", "odometer"]), mileageValue);
     results.push(mileageOk ? "Filled mileage" : "Could not find mileage field");
 
     const conditionOk =
       (await selectOption(["condition"], vehicle.condition || "")) ||
-      setNodeValue(findEditable(["condition"]), vehicle.condition || "");
+      setNodeValue(findTextField(["condition"]), vehicle.condition || "");
     results.push(conditionOk ? "Filled condition" : "Could not find condition field");
 
     const warningLines = [];
     if (Array.isArray(dealerDraft.images) && dealerDraft.images.length) {
-      warningLines.push(`Images found on vehicle page: ${dealerDraft.images.length}`);
-      warningLines.push("Facebook image upload still needs to be done manually.");
+      const uploadResult = await uploadImages(dealerDraft.images);
+      if (uploadResult.ok) {
+        results.push(`Queued ${uploadResult.uploaded} photo${uploadResult.uploaded === 1 ? "" : "s"}`);
+      } else {
+        warningLines.push(`Images found on vehicle page: ${dealerDraft.images.length}`);
+        warningLines.push("Photo upload could not be automated on this Facebook layout.");
+      }
     }
 
     const failedCount = results.filter((line) => line.startsWith("Could not")).length;
@@ -208,7 +266,7 @@
     try {
       for (let attempt = 0; attempt < 15; attempt += 1) {
         const formReady = Boolean(
-          findEditable(["title", "price", "description"]) || findSelectTrigger(["year", "make", "model", "condition"])
+          findTextField(["title", "price"]) || findDescriptionField() || findSelectTrigger(["year", "make", "model", "condition"])
         );
         if (formReady) {
           await applyDraft({ auto: true });
