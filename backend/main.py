@@ -61,6 +61,7 @@ DEFAULT_CORS_ORIGINS = [
     "http://localhost:5173",
     "http://127.0.0.1:5173",
     "https://dealership-tool-web.onrender.com",
+    "https://orgtool-web.onrender.com",
     "https://organize.bertogden123.com",
     "https://app.bertogden123.com",
     "https://bertogden123.com",
