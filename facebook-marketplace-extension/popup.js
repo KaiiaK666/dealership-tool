@@ -42,6 +42,49 @@ function fillTemplate(template, data) {
   return String(template || "").replace(/\{(\w+)\}/g, (_, key) => data[key] ?? "");
 }
 
+function formatNumber(value) {
+  const numeric = String(value || "").replace(/[^0-9]/g, "");
+  if (!numeric) return "";
+  return Number(numeric).toLocaleString("en-US");
+}
+
+function normalizeSentence(value) {
+  return String(value || "").trim().replace(/\s+/g, " ");
+}
+
+function looksUsableCaption(value) {
+  const text = normalizeSentence(value);
+  return /[a-z]/i.test(text) && text.length >= 40;
+}
+
+function buildSmartCaption(vehicle, template, draftData) {
+  const nameLine = [vehicle.year, vehicle.make, vehicle.model].filter(Boolean).join(" ");
+  const lines = [];
+  if (nameLine) lines.push(nameLine);
+  if (draftData.price) {
+    lines.push(`${template.price_label || "Price"}: ${draftData.price}`);
+  }
+  if (vehicle.mileage) {
+    lines.push(`Mileage: ${formatNumber(vehicle.mileage)} mi`);
+  }
+  if (vehicle.vin) {
+    lines.push(`VIN: ${vehicle.vin}`);
+  }
+  const bodyStyle = normalizeSentence(vehicle.body_style || "Sedan").toLowerCase();
+  const conditionLine =
+    vehicle.condition === "New"
+      ? `New ${bodyStyle} ready for a test drive.`
+      : `Clean ${bodyStyle} ready for its next owner.`;
+  lines.push(conditionLine);
+  if (template.cta_text) {
+    lines.push(normalizeSentence(template.cta_text));
+  }
+  if (vehicle.url) {
+    lines.push(vehicle.url);
+  }
+  return lines.filter(Boolean).join("\n");
+}
+
 async function fetchTemplate(apiBase) {
   let lastError = null;
   for (const base of uniqueApiBases([apiBase, ...fallbackApiBases])) {
@@ -67,15 +110,19 @@ function buildDraft(vehicle, template) {
     mileage: vehicle.mileage ? `${vehicle.mileage} mi` : "",
     vin: vehicle.vin || "",
     condition: vehicle.condition || "",
+    body_style: vehicle.body_style || "Sedan",
     stock: vehicle.stock || "",
     url: vehicle.url || "",
     price_label: template.price_label || "Bert Ogden Price",
     cta_text: template.cta_text || "",
   };
+  const templatedDescription = fillTemplate(template.description_template, draftData);
   return {
     title: fillTemplate(template.title_template, draftData),
     price: String(vehicle.price || "").replace(/[^0-9]/g, ""),
-    description: fillTemplate(template.description_template, draftData),
+    description: looksUsableCaption(templatedDescription)
+      ? templatedDescription
+      : buildSmartCaption(vehicle, template, draftData),
     images: Array.isArray(vehicle.images) ? vehicle.images : [],
     raw: draftData,
     vehicle,

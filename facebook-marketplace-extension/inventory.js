@@ -37,6 +37,19 @@
       .join(" ");
   }
 
+  function inferBodyStyle(text) {
+    const source = normalizeText(text).toLowerCase();
+    if (!source) return "Sedan";
+    if (/(suv|sport utility|crossover)/i.test(source)) return "SUV";
+    if (/(truck|pickup)/i.test(source)) return "Truck";
+    if (/(hatchback)/i.test(source)) return "Hatchback";
+    if (/(coupe)/i.test(source)) return "Coupe";
+    if (/(van|minivan)/i.test(source)) return "Van";
+    if (/(wagon)/i.test(source)) return "Wagon";
+    if (/(convertible|cabriolet)/i.test(source)) return "Convertible";
+    return "Sedan";
+  }
+
   function parseTitleParts(title) {
     const clean = normalizeText(title).replace(/\s+[|-].*$/, "");
     const match = clean.match(/(20\d{2})\s+([A-Za-z]+)\s+(.+)/);
@@ -186,6 +199,7 @@
       vin: normalizeText(vin),
       stock: normalizeText(stock),
       condition,
+      body_style: inferBodyStyle(`${rawTitle} ${parts.model}`),
       url: location.href,
       images: collectImages(),
     };

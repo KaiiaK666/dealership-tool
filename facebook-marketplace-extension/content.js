@@ -119,6 +119,20 @@
     return true;
   }
 
+  async function pickVehicleType(value) {
+    const resolved = normalizeText(value || "Sedan");
+    return (
+      (await selectOption(["vehicle type", "body style", "type"], resolved)) ||
+      (await selectOption(["vehicle type", "body style", "type"], "Sedan"))
+    );
+  }
+
+  function findAddPhotosButton() {
+    return Array.from(document.querySelectorAll('button, [role="button"]')).find((node) =>
+      /add photos/i.test(normalizeText(node.textContent || node.getAttribute("aria-label") || ""))
+    );
+  }
+
   function findImageInput() {
     return Array.from(document.querySelectorAll('input[type="file"]')).find((node) => {
       const accept = String(node.getAttribute("accept") || "").toLowerCase();
@@ -127,7 +141,12 @@
   }
 
   async function uploadImages(imageUrls) {
-    const input = findImageInput();
+    let input = findImageInput();
+    if (!input) {
+      findAddPhotosButton()?.click();
+      await wait(500);
+      input = findImageInput();
+    }
     if (!input || !Array.isArray(imageUrls) || !imageUrls.length) return { ok: false, uploaded: 0 };
     const dataTransfer = new DataTransfer();
     let uploaded = 0;
@@ -198,6 +217,9 @@
 
     const results = [];
     const vehicle = dealerDraft.vehicle || {};
+
+    const vehicleTypeOk = await pickVehicleType(vehicle.body_style || "Sedan");
+    results.push(vehicleTypeOk ? "Filled vehicle type" : "Could not find vehicle type field");
 
     const titleOk = setNodeValue(findTextField(["title", "listing title", "vehicle title"]), dealerDraft.title || "");
     results.push(titleOk ? "Filled title" : "Could not find title field");

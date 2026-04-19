@@ -2535,6 +2535,36 @@ button.special-card:hover:not(:disabled) {
   color: var(--muted);
 }
 
+.marketplace-helper-strip {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border-radius: 14px;
+  border: 1px solid rgba(210, 198, 182, 0.68);
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.marketplace-helper-strip span {
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.marketplace-helper-strip button {
+  white-space: nowrap;
+  padding: 10px 14px;
+  box-shadow: none;
+}
+
+.marketplace-helper-strip button.secondary {
+  background: rgba(37, 48, 59, 0.94);
+}
+
+.marketplace-helper-strip button.secondary:hover:not(:disabled) {
+  transform: none;
+}
+
 .marketplace-helper-actions {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

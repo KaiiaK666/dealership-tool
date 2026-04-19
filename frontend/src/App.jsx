@@ -1797,18 +1797,6 @@ export default function App() {
     setFreshUpCopiedAt("");
   }
 
-  function openChromeExtensionsPage() {
-    setMarketplaceGuideStatus("Trying to open Chrome Extensions...");
-    try {
-      const opened = window.open("chrome://extensions/", "_blank", "noopener,noreferrer");
-      if (!opened) {
-        window.location.href = "chrome://extensions/";
-      }
-    } catch {
-      setMarketplaceGuideStatus("Chrome may block direct opening from the website. Copy the link below and paste it into the address bar.");
-    }
-  }
-
   async function copyChromeExtensionsLink() {
     try {
       await copyTextValue("chrome://extensions/");
@@ -3031,15 +3019,13 @@ export default function App() {
               <div className="panel marketplace-card">
                 <span className="eyebrow">Step 1</span>
                 <h3>Install the Chrome extension once</h3>
-                <a className="asset-link" href="/facebook-marketplace-extension.zip?v=0.3.4" download>
+                <a className="asset-link" href="/facebook-marketplace-extension.zip?v=0.3.5" download>
                   Download Extension Zip
                 </a>
-                <div className="marketplace-helper-actions">
-                  <button type="button" className="secondary" onClick={openChromeExtensionsPage}>
-                    Open Chrome Extensions
-                  </button>
+                <div className="marketplace-helper-strip">
+                  <span>Then open `chrome://extensions/` in Chrome.</span>
                   <button type="button" className="secondary" onClick={copyChromeExtensionsLink}>
-                    Copy `chrome://extensions/`
+                    Copy link
                   </button>
                 </div>
                 <ol className="numbered-list">
@@ -3054,6 +3040,7 @@ export default function App() {
                   <strong>No rep setup</strong>
                   <span>The helper already defaults to the right API. If it was loaded unpacked before, just click Reload in `chrome://extensions` instead of deleting it.</span>
                 </div>
+                <p className="admin-note">Chrome does not let the website turn on Developer Mode for the user. That part still has to be clicked manually once.</p>
                 {marketplaceGuideStatus ? <div className="notice">{marketplaceGuideStatus}</div> : null}
               </div>
 
