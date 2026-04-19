@@ -16,6 +16,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
+from orgtool_api import app as orgtool_app
+
 
 DB_PATH = os.getenv(
     "DEALER_DB_PATH",
@@ -52,11 +54,14 @@ TAB_VISIBILITY_IDS = (
     "specials",
 )
 DEFAULT_CORS_ORIGINS = [
+    "http://localhost:4174",
+    "http://127.0.0.1:4174",
     "http://localhost:4183",
     "http://127.0.0.1:4183",
     "http://localhost:5173",
     "http://127.0.0.1:5173",
     "https://dealership-tool-web.onrender.com",
+    "https://organize.bertogden123.com",
     "https://app.bertogden123.com",
     "https://bertogden123.com",
     "https://www.bertogden123.com",
@@ -77,6 +82,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.mount("/uploads", StaticFiles(directory=UPLOADS_ROOT), name="uploads")
+app.mount("/orgtool", orgtool_app)
 
 db_lock = threading.Lock()
 db_conn: Optional[sqlite3.Connection] = None

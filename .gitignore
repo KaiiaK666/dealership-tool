@@ -19,6 +19,7 @@ frontend/.env.production
 data/*.db
 data/*.db-shm
 data/*.db-wal
+data/orgtool-store.json
 
 .DS_Store
 Thumbs.db
