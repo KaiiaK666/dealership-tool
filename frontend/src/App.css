@@ -2569,7 +2569,8 @@ button.special-card:hover:not(:disabled) {
 .marketplace-admin__editor,
 .marketplace-admin__preview,
 .marketplace-admin__section,
-.marketplace-preview-card {
+.marketplace-preview-card,
+.marketplace-advanced {
   display: grid;
   gap: 16px;
 }
@@ -2673,6 +2674,18 @@ button.special-card:hover:not(:disabled) {
   display: flex;
   flex-wrap: wrap;
   gap: 10px;
+}
+
+.marketplace-advanced {
+  padding: 18px;
+  border-radius: 22px;
+  border: 1px solid rgba(210, 198, 182, 0.72);
+  background: rgba(255, 255, 255, 0.6);
+}
+
+.marketplace-advanced summary {
+  cursor: pointer;
+  font-weight: 700;
 }
 
 .fresh-up-hero,

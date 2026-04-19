@@ -55,7 +55,7 @@ async function fetchTemplate(apiBase) {
       lastError = error;
     }
   }
-  throw lastError || new Error("Failed to load marketplace template");
+  throw new Error("Could not reach the Marketplace template service. Reload the extension and try again.");
 }
 
 function buildDraft(vehicle, template) {

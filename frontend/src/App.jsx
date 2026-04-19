@@ -80,6 +80,19 @@ const MARKETPLACE_TEMPLATE_DEFAULTS = {
   price_label: "Bert Ogden Price",
   cta_text: "Message us for availability and financing options.",
 };
+const MARKETPLACE_TITLE_TOKEN = "{year} {make} {model}";
+const MARKETPLACE_BUILDER_DEFAULTS = {
+  titlePrefix: "",
+  titleSuffix: "",
+  priceLabel: "Bert Ogden Price",
+  ctaText: "Message us for availability and financing options.",
+  contactLine: "",
+  extraNotes: "",
+  includeVehicleLine: true,
+  includeMileage: true,
+  includeVin: true,
+  includeUrl: true,
+};
 const MARKETPLACE_PLACEHOLDERS = [
   "{year}",
   "{make}",
@@ -285,6 +298,67 @@ function formatMoney(value) {
 
 function fillMarketplaceTemplate(template, data) {
   return String(template || "").replace(/\{(\w+)\}/g, (_, key) => data[key] ?? "");
+}
+
+function buildMarketplaceTemplateFromBuilder(builder) {
+  const prefix = String(builder.titlePrefix || "").trim();
+  const suffix = String(builder.titleSuffix || "").trim();
+  const title_template = [prefix, MARKETPLACE_TITLE_TOKEN, suffix].filter(Boolean).join(" ").trim();
+  const descriptionLines = [];
+  if (builder.includeVehicleLine) descriptionLines.push(MARKETPLACE_TITLE_TOKEN);
+  descriptionLines.push("{price_label}: {price}");
+  if (builder.includeMileage) descriptionLines.push("Mileage: {mileage}");
+  if (builder.includeVin) descriptionLines.push("VIN: {vin}");
+  if (String(builder.contactLine || "").trim()) descriptionLines.push(String(builder.contactLine || "").trim());
+  if (String(builder.extraNotes || "").trim()) descriptionLines.push(String(builder.extraNotes || "").trim());
+  if (String(builder.ctaText || "").trim()) descriptionLines.push("{cta_text}");
+  if (builder.includeUrl) descriptionLines.push("{url}");
+  return {
+    title_template: title_template || MARKETPLACE_TITLE_TOKEN,
+    description_template: descriptionLines.join("\n"),
+    price_label: String(builder.priceLabel || MARKETPLACE_TEMPLATE_DEFAULTS.price_label).trim() || MARKETPLACE_TEMPLATE_DEFAULTS.price_label,
+    cta_text: String(builder.ctaText || "").trim(),
+  };
+}
+
+function marketplaceBuilderFromTemplate(template) {
+  const source = {
+    ...MARKETPLACE_TEMPLATE_DEFAULTS,
+    ...(template || {}),
+  };
+  const title = String(source.title_template || MARKETPLACE_TITLE_TOKEN);
+  const tokenIndex = title.indexOf(MARKETPLACE_TITLE_TOKEN);
+  const titlePrefix = tokenIndex >= 0 ? title.slice(0, tokenIndex).trim() : "";
+  const titleSuffix = tokenIndex >= 0 ? title.slice(tokenIndex + MARKETPLACE_TITLE_TOKEN.length).trim() : "";
+  const lines = String(source.description_template || "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean);
+  const contactLine = lines.find((line) => !line.includes("{") && /\d/.test(line)) || "";
+  const extraNotes = lines
+    .filter(
+      (line) =>
+        line !== MARKETPLACE_TITLE_TOKEN &&
+        !line.includes("{price}") &&
+        !line.includes("{mileage}") &&
+        !line.includes("{vin}") &&
+        !line.includes("{url}") &&
+        line !== "{cta_text}" &&
+        line !== contactLine
+    )
+    .join("\n");
+  return {
+    titlePrefix,
+    titleSuffix,
+    priceLabel: String(source.price_label || MARKETPLACE_TEMPLATE_DEFAULTS.price_label),
+    ctaText: String(source.cta_text || MARKETPLACE_TEMPLATE_DEFAULTS.cta_text),
+    contactLine,
+    extraNotes,
+    includeVehicleLine: lines.includes(MARKETPLACE_TITLE_TOKEN),
+    includeMileage: lines.some((line) => line.includes("{mileage}")),
+    includeVin: lines.some((line) => line.includes("{vin}")),
+    includeUrl: lines.some((line) => line.includes("{url}")),
+  };
 }
 
 function freshUpTimestampLabel() {
@@ -534,6 +608,7 @@ export default function App() {
   const [quoteRates, setQuoteRates] = useState([]);
   const [quoteRateDraft, setQuoteRateDraft] = useState({});
   const [marketplaceTemplate, setMarketplaceTemplate] = useState(MARKETPLACE_TEMPLATE_DEFAULTS);
+  const [marketplaceBuilder, setMarketplaceBuilder] = useState(MARKETPLACE_BUILDER_DEFAULTS);
   const [quoteForm, setQuoteForm] = useState({
     brand: "Kia New",
     msrp: "",
@@ -661,14 +736,15 @@ export default function App() {
     freshUpForm.salespersonId,
     freshUpForm.notes,
   ].filter((value) => String(value || "").trim()).length;
+  const marketplaceBuilderTemplate = buildMarketplaceTemplateFromBuilder(marketplaceBuilder);
   const marketplacePreviewData = {
     ...MARKETPLACE_PREVIEW_SAMPLE,
-    price_label: marketplaceTemplate.price_label || MARKETPLACE_TEMPLATE_DEFAULTS.price_label,
-    cta_text: marketplaceTemplate.cta_text || MARKETPLACE_TEMPLATE_DEFAULTS.cta_text,
+    price_label: marketplaceBuilderTemplate.price_label || MARKETPLACE_TEMPLATE_DEFAULTS.price_label,
+    cta_text: marketplaceBuilderTemplate.cta_text || MARKETPLACE_TEMPLATE_DEFAULTS.cta_text,
   };
-  const marketplacePreviewTitle = fillMarketplaceTemplate(marketplaceTemplate.title_template, marketplacePreviewData);
+  const marketplacePreviewTitle = fillMarketplaceTemplate(marketplaceBuilderTemplate.title_template, marketplacePreviewData);
   const marketplacePreviewDescription = fillMarketplaceTemplate(
-    marketplaceTemplate.description_template,
+    marketplaceBuilderTemplate.description_template,
     marketplacePreviewData
   );
   const visibleTabIds = new Set(
@@ -786,6 +862,7 @@ export default function App() {
   async function refreshMarketplaceTemplate() {
     const data = await getMarketplaceTemplate();
     setMarketplaceTemplate(data);
+    setMarketplaceBuilder(marketplaceBuilderFromTemplate(data));
     setResourceLoadState((current) => ({ ...current, marketplaceTemplate: true }));
   }
 
@@ -824,8 +901,24 @@ export default function App() {
     setBusy("marketplace-template");
     setError("");
     try {
+      const payload = buildMarketplaceTemplateFromBuilder(marketplaceBuilder);
+      const updated = await updateMarketplaceTemplate(adminToken, payload);
+      setMarketplaceTemplate(updated);
+      setMarketplaceBuilder(marketplaceBuilderFromTemplate(updated));
+    } catch (errorValue) {
+      setError(errText(errorValue));
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function saveMarketplaceTemplateAdvanced() {
+    setBusy("marketplace-template-advanced");
+    setError("");
+    try {
       const updated = await updateMarketplaceTemplate(adminToken, marketplaceTemplate);
       setMarketplaceTemplate(updated);
+      setMarketplaceBuilder(marketplaceBuilderFromTemplate(updated));
     } catch (errorValue) {
       setError(errText(errorValue));
     } finally {
@@ -850,6 +943,7 @@ export default function App() {
 
   function resetMarketplaceTemplateDraft() {
     setMarketplaceTemplate(MARKETPLACE_TEMPLATE_DEFAULTS);
+    setMarketplaceBuilder(MARKETPLACE_BUILDER_DEFAULTS);
   }
 
   function setTabVisibilityValue(tabId, visible) {
@@ -967,6 +1061,7 @@ export default function App() {
         const data = await getMarketplaceTemplate();
         if (!active) return;
         setMarketplaceTemplate(data);
+        setMarketplaceBuilder(marketplaceBuilderFromTemplate(data));
         setResourceLoadState((current) => ({ ...current, marketplaceTemplate: true }));
       } catch (errorValue) {
         if (active) setError(errText(errorValue));
@@ -2914,7 +3009,7 @@ export default function App() {
               <div className="panel marketplace-card">
                 <span className="eyebrow">Step 1</span>
                 <h3>Install the Chrome extension once</h3>
-                <a className="asset-link" href="/facebook-marketplace-extension.zip?v=0.3.2" download>
+                <a className="asset-link" href="/facebook-marketplace-extension.zip?v=0.3.3" download>
                   Download Extension Zip
                 </a>
                 <ol className="numbered-list">
@@ -2927,7 +3022,7 @@ export default function App() {
                 </ol>
                 <div className="marketplace-callout">
                   <strong>No rep setup</strong>
-                  <span>The helper already defaults to `https://api.bertogden123.com`. Reps should not need to change settings.</span>
+                  <span>The helper already defaults to the right API. If it was loaded unpacked before, just click Reload in `chrome://extensions` instead of deleting it.</span>
                 </div>
               </div>
 
@@ -4012,12 +4107,12 @@ export default function App() {
                         <h3>Facebook post content</h3>
                       </div>
                       <button type="button" className="secondary" onClick={resetMarketplaceTemplateDraft}>
-                        Reset Defaults
+                        Reset Builder
                       </button>
                     </div>
                     <p className="admin-note">
-                      Build the default Facebook copy here. The extension merges this with year, make, model, price,
-                      mileage, VIN, and the inventory URL from the live vehicle page.
+                      Use the simple builder below. No bracket syntax is required. The extension inserts year, make,
+                      model, price, mileage, VIN, and the vehicle URL automatically.
                     </p>
 
                     <div className="marketplace-admin__layout">
@@ -4026,11 +4121,130 @@ export default function App() {
                           <div className="marketplace-admin__section-head">
                             <div>
                               <span className="eyebrow">Step 1</span>
-                              <h4>Headline and CTA</h4>
+                              <h4>Simple builder</h4>
                             </div>
-                            <small>These usually stay short and clean.</small>
+                            <small>Type plain words only. The vehicle details are inserted for you.</small>
                           </div>
                           <div className="form">
+                            <div className="marketplace-admin__two-up">
+                              <label>
+                                <span>Headline prefix</span>
+                                <input
+                                  value={marketplaceBuilder.titlePrefix}
+                                  onChange={(event) =>
+                                    setMarketplaceBuilder((current) => ({ ...current, titlePrefix: event.target.value }))
+                                  }
+                                  placeholder="Optional, like Clean trade-in"
+                                />
+                              </label>
+                              <label>
+                                <span>Headline suffix</span>
+                                <input
+                                  value={marketplaceBuilder.titleSuffix}
+                                  onChange={(event) =>
+                                    setMarketplaceBuilder((current) => ({ ...current, titleSuffix: event.target.value }))
+                                  }
+                                  placeholder="Optional, like Financing available"
+                                />
+                              </label>
+                            </div>
+                            <div className="notice">
+                              Vehicle headline will always include the vehicle name automatically.
+                            </div>
+                            <div className="marketplace-admin__two-up">
+                              <label>
+                                <span>Price label</span>
+                                <input
+                                  value={marketplaceBuilder.priceLabel}
+                                  onChange={(event) =>
+                                    setMarketplaceBuilder((current) => ({ ...current, priceLabel: event.target.value }))
+                                  }
+                                  placeholder="Bert Ogden Price"
+                                />
+                              </label>
+                              <label>
+                                <span>CTA text</span>
+                                <input
+                                  value={marketplaceBuilder.ctaText}
+                                  onChange={(event) =>
+                                    setMarketplaceBuilder((current) => ({ ...current, ctaText: event.target.value }))
+                                  }
+                                  placeholder="Message us for availability and financing options."
+                                />
+                              </label>
+                            </div>
+                            <label>
+                              <span>Contact line</span>
+                              <input
+                                value={marketplaceBuilder.contactLine}
+                                onChange={(event) =>
+                                  setMarketplaceBuilder((current) => ({ ...current, contactLine: event.target.value }))
+                                }
+                                placeholder="Example: Call us at 956-429-8898"
+                              />
+                            </label>
+                            <label className="marketplace-admin__description">
+                              <span>Extra notes</span>
+                              <textarea
+                                rows={5}
+                                value={marketplaceBuilder.extraNotes}
+                                onChange={(event) =>
+                                  setMarketplaceBuilder((current) => ({ ...current, extraNotes: event.target.value }))
+                                }
+                                placeholder="Optional plain-English notes to add under the vehicle details."
+                              />
+                            </label>
+                            <div className="editor-list editor-list--two-up">
+                              <label className="checkbox panel inset-panel">
+                                <input
+                                  type="checkbox"
+                                  checked={marketplaceBuilder.includeVehicleLine}
+                                  onChange={(event) =>
+                                    setMarketplaceBuilder((current) => ({ ...current, includeVehicleLine: event.target.checked }))
+                                  }
+                                />
+                                <span>Repeat vehicle name in description</span>
+                              </label>
+                              <label className="checkbox panel inset-panel">
+                                <input
+                                  type="checkbox"
+                                  checked={marketplaceBuilder.includeMileage}
+                                  onChange={(event) =>
+                                    setMarketplaceBuilder((current) => ({ ...current, includeMileage: event.target.checked }))
+                                  }
+                                />
+                                <span>Include mileage line</span>
+                              </label>
+                              <label className="checkbox panel inset-panel">
+                                <input
+                                  type="checkbox"
+                                  checked={marketplaceBuilder.includeVin}
+                                  onChange={(event) =>
+                                    setMarketplaceBuilder((current) => ({ ...current, includeVin: event.target.checked }))
+                                  }
+                                />
+                                <span>Include VIN line</span>
+                              </label>
+                              <label className="checkbox panel inset-panel">
+                                <input
+                                  type="checkbox"
+                                  checked={marketplaceBuilder.includeUrl}
+                                  onChange={(event) =>
+                                    setMarketplaceBuilder((current) => ({ ...current, includeUrl: event.target.checked }))
+                                  }
+                                />
+                                <span>Include vehicle link</span>
+                              </label>
+                            </div>
+                          </div>
+                        </div>
+
+                        <details className="marketplace-advanced">
+                          <summary>Advanced raw template editor</summary>
+                          <p className="admin-note">
+                            Only use this if you want full control. The bracket tokens must stay exactly as shown.
+                          </p>
+                          <div className="marketplace-admin__section">
                             <label>
                               <span>Title template</span>
                               <input
@@ -4061,7 +4275,6 @@ export default function App() {
                                   onChange={(event) =>
                                     setMarketplaceTemplate((current) => ({ ...current, price_label: event.target.value }))
                                   }
-                                  placeholder="Bert Ogden Price"
                                 />
                               </label>
                               <label>
@@ -4071,44 +4284,41 @@ export default function App() {
                                   onChange={(event) =>
                                     setMarketplaceTemplate((current) => ({ ...current, cta_text: event.target.value }))
                                   }
-                                  placeholder="Message us for availability and financing options."
                                 />
                               </label>
                             </div>
-                          </div>
-                        </div>
-
-                        <div className="marketplace-admin__section">
-                          <div className="marketplace-admin__section-head">
-                            <div>
-                              <span className="eyebrow">Step 2</span>
-                              <h4>Description builder</h4>
+                            <label className="marketplace-admin__description">
+                              <span>Description template</span>
+                              <textarea
+                                rows={10}
+                                value={marketplaceTemplate.description_template}
+                                onChange={(event) =>
+                                  setMarketplaceTemplate((current) => ({ ...current, description_template: event.target.value }))
+                                }
+                              />
+                            </label>
+                            <div className="marketplace-placeholder-group">
+                              {MARKETPLACE_PLACEHOLDERS.map((placeholder) => (
+                                <button
+                                  key={`description-${placeholder}`}
+                                  type="button"
+                                  className="pill"
+                                  onClick={() => appendMarketplacePlaceholder("description_template", placeholder)}
+                                >
+                                  {placeholder}
+                                </button>
+                              ))}
                             </div>
-                            <small>Use the chips to drop fields in fast.</small>
+                            <button
+                              type="button"
+                              className="secondary"
+                              onClick={saveMarketplaceTemplateAdvanced}
+                              disabled={busy === "marketplace-template-advanced"}
+                            >
+                              {busy === "marketplace-template-advanced" ? "Saving..." : "Save Advanced Template"}
+                            </button>
                           </div>
-                          <label className="marketplace-admin__description">
-                            <span>Description template</span>
-                            <textarea
-                              rows={10}
-                              value={marketplaceTemplate.description_template}
-                              onChange={(event) =>
-                                setMarketplaceTemplate((current) => ({ ...current, description_template: event.target.value }))
-                              }
-                            />
-                          </label>
-                          <div className="marketplace-placeholder-group">
-                            {MARKETPLACE_PLACEHOLDERS.map((placeholder) => (
-                              <button
-                                key={`description-${placeholder}`}
-                                type="button"
-                                className="pill"
-                                onClick={() => appendMarketplacePlaceholder("description_template", placeholder)}
-                              >
-                                {placeholder}
-                              </button>
-                            ))}
-                          </div>
-                        </div>
+                        </details>
                       </div>
 
                       <div className="marketplace-admin__preview">
@@ -4124,23 +4334,24 @@ export default function App() {
                         </div>
 
                         <div className="marketplace-preview-card">
-                          <span className="eyebrow">Available placeholders</span>
+                          <span className="eyebrow">What gets inserted automatically</span>
                           <div className="marketplace-token-grid">
-                            {MARKETPLACE_PLACEHOLDERS.map((placeholder) => (
-                              <div key={`placeholder-${placeholder}`} className="marketplace-token">
-                                {placeholder}
+                            {["Vehicle name", "Price", "Mileage", "VIN", "Vehicle link"].map((label) => (
+                              <div key={`placeholder-${label}`} className="marketplace-token">
+                                {label}
                               </div>
                             ))}
                           </div>
                           <small>
-                            The extension pulls these values from the current vehicle page, then fills the template above.
+                            Sales managers should only type reusable wording here. Do not type one specific unit’s year,
+                            price, or VIN into the builder.
                           </small>
                         </div>
                       </div>
                     </div>
 
                     <button type="button" onClick={saveMarketplaceTemplate} disabled={busy === "marketplace-template"}>
-                      {busy === "marketplace-template" ? "Saving..." : "Save Marketplace Template"}
+                      {busy === "marketplace-template" ? "Saving..." : "Save Simple Layout"}
                     </button>
                   </div>
                 ) : null}
