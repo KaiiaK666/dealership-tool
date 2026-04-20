@@ -61,6 +61,20 @@
     return "Very Good";
   }
 
+  function inferFuelType(pageText, explicitFuelType) {
+    const direct = normalizeText(explicitFuelType);
+    if (direct) return direct;
+    const source = normalizeText(pageText).toLowerCase();
+    if (!source) return "";
+    if (/(plug[-\s]?in hybrid)/i.test(source)) return "Plug-in Hybrid";
+    if (/(gas\/electric hybrid|hybrid electric motor|telluride hybrid|\bhybrid\b)/i.test(source)) return "Hybrid";
+    if (/\belectric\b|\bev\b/i.test(source)) return "Electric";
+    if (/\bdiesel\b/i.test(source)) return "Diesel";
+    if (/\bflex fuel\b/i.test(source)) return "Flex Fuel";
+    if (/\b(engine:\s*)?(2\.\d+l|3\.\d+l|4 cylinder|i4|v6|turbo|fuel tank)\b/i.test(source)) return "Gasoline";
+    return "";
+  }
+
   function parseTitleParts(title) {
     const clean = normalizeText(title).replace(/\s+[|-].*$/, "");
     const match = clean.match(/(20\d{2})\s+([A-Za-z]+)\s+(.+)/);
@@ -191,7 +205,10 @@
       queryMeta(['meta[itemprop="vehicleIdentificationNumber"]']);
     const stock = firstMatch(pageText, [/Stock[^A-Z0-9-]*([A-Z0-9-]+)/i]);
     const transmission = firstMatch(pageText, [/Transmission[^A-Za-z0-9]*([A-Za-z0-9 /-]+)/i]);
-    const fuelType = firstMatch(pageText, [/Fuel(?: Type)?[^A-Za-z0-9]*([A-Za-z0-9 /-]+)/i]);
+    const fuelType = inferFuelType(
+      pageText,
+      firstMatch(pageText, [/Fuel(?: Type)?[^A-Za-z0-9]*([A-Za-z0-9 /-]+)/i])
+    );
     const exteriorColor = firstMatch(pageText, [/Exterior(?: Color)?[^A-Za-z0-9]*([A-Za-z0-9 /-]+)/i]);
     const interiorColor = firstMatch(pageText, [/Interior(?: Color)?[^A-Za-z0-9]*([A-Za-z0-9 /-]+)/i]);
     const parts = {

@@ -19,6 +19,15 @@
     return current === target || current.includes(target) || target.includes(current);
   }
 
+  function clampMarketplaceMileage(value) {
+    const digits = String(value || "").replace(/[^0-9]/g, "");
+    if (!digits) return "";
+    const numeric = Number(digits);
+    if (!Number.isFinite(numeric) || numeric <= 0) return "";
+    if (numeric < 300) return "300";
+    return String(Math.min(numeric, 1000000));
+  }
+
   function isVisible(node) {
     if (!node || !node.isConnected) return false;
     const style = window.getComputedStyle(node);
@@ -151,11 +160,19 @@
     const markers = Array.from(document.querySelectorAll("div, span, p, label"))
       .filter((node) => isVisible(node) && /clean title/i.test(normalizeText(node.textContent || "")));
     for (const marker of markers) {
-      let current = marker;
-      for (let depth = 0; current && depth < 5; depth += 1) {
-        const checkbox = current.querySelector?.('input[type="checkbox"]');
-        if (checkbox) return checkbox;
-        current = current.parentElement;
+      const markerBox = marker.getBoundingClientRect();
+      const candidates = Array.from(document.querySelectorAll('input[type="checkbox"], [role="checkbox"], [aria-checked]'))
+        .filter(isVisible)
+        .map((node) => {
+          const box = node.getBoundingClientRect();
+          const distance =
+            Math.abs(box.left - markerBox.right) +
+            Math.abs(box.top - markerBox.top);
+          return { node, distance };
+        })
+        .sort((left, right) => left.distance - right.distance);
+      if (candidates[0]?.node) {
+        return candidates[0].node;
       }
     }
     return null;
@@ -191,6 +208,10 @@
 
   function setNativeChecked(node, checked) {
     if (!node) return false;
+    if (node.getAttribute("role") === "checkbox" || node.hasAttribute("aria-checked")) {
+      dispatchMouseSequence(node);
+      return String(node.getAttribute("aria-checked")) === String(checked);
+    }
     const descriptor = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "checked");
     if (!descriptor?.set) return false;
     descriptor.set.call(node, checked);
@@ -288,12 +309,23 @@
     const source = normalizeText(value).toLowerCase();
     if (!source) return [];
     if (source.includes("plug") && source.includes("hybrid")) return ["Plug-in Hybrid", "Hybrid"];
-    if (source.includes("hybrid")) return ["Hybrid", "Plug-in Hybrid"];
+    if (source.includes("hybrid")) return ["Other", "Plug-in hybrid", "Petrol"];
     if (source.includes("electric") || source === "ev") return ["Electric"];
     if (source.includes("diesel")) return ["Diesel"];
     if (source.includes("flex")) return ["Flex Fuel", "Gasoline"];
     if (/(gas|gasoline|unleaded|petrol)/i.test(source)) return ["Petrol", "Gasoline", "Gas", "Other"];
     return [normalizeText(value)];
+  }
+
+  function scrollFieldIntoView(hints) {
+    const node =
+      findSelectTrigger(hints) ||
+      findTextField(hints) ||
+      findCheckboxByHints(hints);
+    if (node) {
+      node.scrollIntoView({ block: "center", inline: "nearest", behavior: "instant" });
+    }
+    return node;
   }
 
   function vehicleTypeCandidates() {
@@ -548,6 +580,55 @@
     return findPhotoUploadLabel() || input?.closest("label") || input?.parentElement || findAddPhotosButton() || null;
   }
 
+  async function assignFilesInPageContext(input, files) {
+    if (!input || !files.length) return false;
+    const targetId = `dealer-upload-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    input.setAttribute("data-dealer-upload-target", targetId);
+    const payload = await Promise.all(
+      files.map(async (file) => ({
+        name: file.name,
+        type: file.type,
+        dataUrl: await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result);
+          reader.onerror = reject;
+          reader.readAsDataURL(file);
+        }),
+      }))
+    );
+    await new Promise((resolve) => {
+      const script = document.createElement("script");
+      script.textContent = `
+        (async () => {
+          const input = document.querySelector('[data-dealer-upload-target="${targetId}"]');
+          if (!input) return;
+          const files = [];
+          for (const item of ${JSON.stringify(payload)}) {
+            const response = await fetch(item.dataUrl);
+            const blob = await response.blob();
+            files.push(new File([blob], item.name, { type: item.type || blob.type || "image/jpeg" }));
+          }
+          const dataTransfer = new DataTransfer();
+          for (const file of files) dataTransfer.items.add(file);
+          const descriptor = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "files");
+          if (descriptor && descriptor.set) {
+            descriptor.set.call(input, dataTransfer.files);
+          } else {
+            input.files = dataTransfer.files;
+          }
+          input.dispatchEvent(new Event("input", { bubbles: true }));
+          input.dispatchEvent(new Event("change", { bubbles: true }));
+        })().finally(() => {
+          document.currentScript?.remove();
+        });
+      `;
+      document.documentElement.appendChild(script);
+      setTimeout(resolve, 700);
+    });
+    input.removeAttribute("data-dealer-upload-target");
+    return Number(input.files?.length || 0) > 0;
+  }
+
   function getPhotoCount() {
     const texts = Array.from(document.querySelectorAll("span, div"))
       .filter(isVisible)
@@ -604,6 +685,7 @@
     let assignedCount = 0;
     for (let attempt = 0; attempt < 2; attempt += 1) {
       input = findImageInput() || input;
+      scrollFieldIntoView(["add photos"]);
       const dropTarget = findPhotoDropTarget(input);
       const filesDescriptor = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "files");
       if (filesDescriptor?.set) {
@@ -632,6 +714,15 @@
       dispatchMouseSequence(dropTarget || input);
       await wait(450);
     }
+    const pageWorldAssigned = await assignFilesInPageContext(
+      input,
+      Array.from(dataTransfer.files)
+    );
+    assignedCount = Math.max(assignedCount, Number(input.files?.length || 0));
+    endingCount = await waitForPhotoUpload(startingCount, Math.min(uploaded, 1));
+    if (pageWorldAssigned && endingCount > startingCount) {
+      return { ok: true, uploaded, photoCount: endingCount, assignedCount };
+    }
     return { ok: false, uploaded, photoCount: endingCount, assignedCount };
   }
 
@@ -643,7 +734,7 @@
   function getFormSnapshot() {
     const cleanTitleCheckbox = findCheckboxByHints(["clean title"]);
     return {
-      cleanTitle: Boolean(cleanTitleCheckbox?.checked),
+      cleanTitle: Boolean(cleanTitleCheckbox?.checked || cleanTitleCheckbox?.getAttribute?.("aria-checked") === "true"),
       condition: getSelectValue(["condition"]),
       fuelType: getSelectValue(["fuel type"]),
       transmission: getSelectValue(["transmission"]),
@@ -708,7 +799,7 @@
     const results = [];
     const vehicle = dealerDraft.vehicle || {};
     const modelValue = normalizeText(vehicle.model || dealerDraft.raw?.model || "");
-    const mileageValue = String(vehicle.mileage || "").replace(/[^0-9]/g, "");
+    const mileageValue = clampMarketplaceMileage(vehicle.mileage);
 
     const vehicleTypeOk = await pickVehicleType(vehicle.body_style || "Sedan");
     results.push(vehicleTypeOk ? "Filled vehicle type" : "Could not find vehicle type field");
@@ -739,6 +830,9 @@
 
     await fillSelectOrTextField(["model"], modelValue, results, "Filled model", "Could not find model field");
 
+    if (mileageValue && mileageValue !== String(vehicle.mileage || "").replace(/[^0-9]/g, "")) {
+      results.push(`Adjusted mileage to ${mileageValue} for Facebook minimums`);
+    }
     await fillSelectOrTextField(
       ["mileage", "odometer"],
       mileageValue,
@@ -749,6 +843,7 @@
 
     await fillTextField(["description"], dealerDraft.description || "", results, "Filled description", "Could not find description field");
 
+    scrollFieldIntoView(["clean title"]);
     await ensureCheckboxChecked(
       ["clean title"],
       vehicle.clean_title !== false,
@@ -759,6 +854,7 @@
 
     const conditionOptions = conditionCandidates(vehicle.marketplace_condition || vehicle.condition || "Very Good");
 
+    scrollFieldIntoView(["condition"]);
     await fillSelectOrTextField(
       ["condition"],
       conditionOptions[0] || "Very Good",
@@ -768,6 +864,7 @@
       conditionOptions.slice(1)
     );
 
+    scrollFieldIntoView(["fuel type"]);
     await fillAdditionalVehicleDetails(vehicle, results);
 
     const warningLines = [];
