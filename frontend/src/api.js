@@ -110,6 +110,8 @@ export const getAdminSalespeople = (token, params = {}) =>
   request(`/api/admin/salespeople${qs({ include_inactive: params.includeInactive })}`, { headers: adminHeaders(token) });
 export const getNotificationConfig = (token) =>
   request("/api/admin/notifications/config", { headers: adminHeaders(token) });
+export const sendNotificationTestSms = (token, payload) =>
+  request("/api/admin/notifications/test-sms", { method: "POST", body: payload, headers: adminHeaders(token) });
 export const getFreshUpLog = (params = {}) =>
   request(`/api/freshup/log${qs({ salesperson_id: params.salespersonId, limit: params.limit })}`);
 export const getFreshUpLinks = () => request("/api/freshup/links");

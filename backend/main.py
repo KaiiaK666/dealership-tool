@@ -247,6 +247,15 @@ class NotificationConfigOut(BaseModel):
     email_configured: bool = False
 
 
+class NotificationTestSmsIn(BaseModel):
+    phone_number: str
+
+
+class NotificationTestSmsOut(BaseModel):
+    phone_number: str
+    status: str
+
+
 class BdcStateOut(BaseModel):
     dealership: Optional[str] = None
     next_index: int
@@ -694,6 +703,34 @@ def get_notification_config() -> NotificationConfigOut:
     return NotificationConfigOut(
         sms_configured=sms_notifications_configured(),
         email_configured=email_notifications_configured(),
+    )
+
+
+def build_test_notification_body() -> str:
+    lines = [
+        "Dealership Tool SMS test.",
+        "If you received this message, Twilio is configured correctly.",
+        f"Sent at: {now_iso()}",
+        f"From: {TWILIO_FROM_NUMBER or 'Twilio sender'}",
+    ]
+    if APP_BASE_URL:
+        lines.extend(["", f"Open the app: {APP_BASE_URL}"])
+    return "\n".join(lines)
+
+
+def send_notification_test_sms(raw_phone_number: str) -> NotificationTestSmsOut:
+    if not sms_notifications_configured():
+        raise HTTPException(status_code=400, detail="Twilio is not configured")
+    sms_target = normalize_sms_phone(raw_phone_number)
+    if not sms_target:
+        raise HTTPException(status_code=400, detail="phone number must be a valid US or E.164 number")
+    try:
+        send_twilio_sms(sms_target, build_test_notification_body())
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=compact_error_text(exc)) from exc
+    return NotificationTestSmsOut(
+        phone_number=sms_target,
+        status=f"Test text sent to {sms_target}",
     )
 
 
@@ -3944,6 +3981,15 @@ def get_admin_salespeople(
 def get_admin_notification_config(x_admin_token: Optional[str] = Header(default=None)) -> NotificationConfigOut:
     require_admin(x_admin_token)
     return get_notification_config()
+
+
+@app.post("/api/admin/notifications/test-sms", response_model=NotificationTestSmsOut)
+def post_admin_notification_test_sms(
+    payload: NotificationTestSmsIn,
+    x_admin_token: Optional[str] = Header(default=None),
+) -> NotificationTestSmsOut:
+    require_admin(x_admin_token)
+    return send_notification_test_sms(payload.phone_number)
 
 
 @app.post("/api/admin/salespeople", response_model=SalespersonAdminOut)

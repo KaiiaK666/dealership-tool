@@ -1571,6 +1571,42 @@ th {
   word-break: break-word;
 }
 
+.notification-test-form {
+  display: grid;
+  gap: 12px;
+  padding: 16px 18px;
+  border-radius: 20px;
+  border: 1px solid rgba(31, 37, 43, 0.08);
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.notification-test-actions {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.notification-test-actions small {
+  color: var(--muted);
+}
+
+.notification-test-feedback {
+  padding: 11px 13px;
+  border-radius: 14px;
+  font-size: 0.95rem;
+  line-height: 1.4;
+  border: 1px solid rgba(32, 151, 116, 0.16);
+  background: rgba(32, 151, 116, 0.1);
+  color: #16664d;
+}
+
+.notification-test-feedback.is-error {
+  border-color: rgba(196, 102, 52, 0.18);
+  background: rgba(196, 102, 52, 0.1);
+  color: #92431c;
+}
+
 .editor-list {
   align-content: start;
   align-self: start;
@@ -4361,5 +4397,10 @@ button.special-card:hover:not(:disabled) {
   .notification-toggle-grid,
   .notification-status-grid {
     grid-template-columns: 1fr;
+  }
+
+  .notification-test-actions {
+    flex-direction: column;
+    align-items: stretch;
   }
 }

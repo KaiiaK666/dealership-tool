@@ -18,6 +18,7 @@ import {
   getAdminSession,
   getBdcAgents,
   getNotificationConfig,
+  sendNotificationTestSms,
   getBdcLog,
   getBdcReport,
   getBdcState,
@@ -309,8 +310,21 @@ function longDateLabel(value) {
 
 function errText(error) {
   if (!error) return "Request failed";
-  if (typeof error === "string") return error;
-  if (error.message) return error.message;
+  const text = typeof error === "string" ? error : error.message || "Request failed";
+  const separator = " - ";
+  const separatorIndex = text.indexOf(separator);
+  if (separatorIndex >= 0) {
+    const detail = text.slice(separatorIndex + separator.length).trim();
+    try {
+      const payload = JSON.parse(detail);
+      if (payload && typeof payload.detail === "string" && payload.detail.trim()) {
+        return payload.detail.trim();
+      }
+    } catch {
+      // Leave non-JSON payloads untouched.
+    }
+  }
+  if (text) return text;
   return "Request failed";
 }
 
@@ -1079,6 +1093,8 @@ export default function App() {
     email_provider: "Resend",
     email_configured: false,
   });
+  const [smsTestPhone, setSmsTestPhone] = useState("");
+  const [smsTestFeedback, setSmsTestFeedback] = useState(null);
   const [leadForm, setLeadForm] = useState({ bdcAgentId: "", leadStore: "Kia", customerName: "", customerPhone: "" });
   const [trafficEntryForm, setTrafficEntryForm] = useState({
     brand: "Kia",
@@ -1442,6 +1458,21 @@ export default function App() {
     }
     const data = await getNotificationConfig(adminToken);
     setNotificationConfig(data);
+  }
+
+  async function submitSmsTest(event) {
+    event.preventDefault();
+    setBusy("notification-sms-test");
+    setSmsTestFeedback(null);
+    try {
+      const result = await sendNotificationTestSms(adminToken, { phone_number: smsTestPhone });
+      setSmsTestPhone(result.phone_number);
+      setSmsTestFeedback({ kind: "success", message: result.status });
+    } catch (errorValue) {
+      setSmsTestFeedback({ kind: "error", message: errText(errorValue) });
+    } finally {
+      setBusy("");
+    }
   }
 
   function trackFreshUpEvent({ eventType, linkType = "", targetUrl = "", storeDealership = "" }) {
@@ -5050,6 +5081,42 @@ export default function App() {
                           <small>`RESEND_API_KEY`, `BDC_NOTIFY_EMAIL_FROM`</small>
                         </div>
                       </div>
+                      <form className="notification-test-form" onSubmit={submitSmsTest}>
+                        <label>
+                          <span>Send a test text</span>
+                          <input
+                            type="tel"
+                            value={smsTestPhone}
+                            onChange={(event) => {
+                              setSmsTestPhone(event.target.value);
+                              setSmsTestFeedback(null);
+                            }}
+                            placeholder="(956) 555-1234 or +19565551234"
+                          />
+                        </label>
+                        <div className="notification-test-actions">
+                          <button
+                            type="submit"
+                            disabled={
+                              busy === "notification-sms-test" ||
+                              !notificationConfig.sms_configured ||
+                              !smsTestPhone.trim()
+                            }
+                          >
+                            {busy === "notification-sms-test" ? "Sending..." : "Send test text"}
+                          </button>
+                          <small>Uses the current Twilio sender number from Render.</small>
+                        </div>
+                        {smsTestFeedback ? (
+                          <div
+                            className={`notification-test-feedback ${
+                              smsTestFeedback.kind === "error" ? "is-error" : "is-success"
+                            }`}
+                          >
+                            {smsTestFeedback.message}
+                          </div>
+                        ) : null}
+                      </form>
                     </div>
 
                     <div className="panel">
