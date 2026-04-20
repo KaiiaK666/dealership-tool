@@ -290,6 +290,44 @@ class FreshUpLinksConfigIn(FreshUpLinksConfigOut):
     pass
 
 
+class FreshUpAnalyticsEventIn(BaseModel):
+    salesperson_id: Optional[int] = None
+    store_dealership: str = ""
+    event_type: str
+    link_type: str = ""
+    target_url: str = ""
+
+
+class FreshUpAnalyticsEventOut(BaseModel):
+    id: int
+    event_at: str
+    event_type: str
+    link_type: str = ""
+    salesperson_name: str = ""
+    salesperson_dealership: str = ""
+    store_dealership: str = ""
+    target_url: str = ""
+
+
+class FreshUpAnalyticsCountOut(BaseModel):
+    label: str
+    count: int
+
+
+class FreshUpAnalyticsSummaryOut(BaseModel):
+    total_events: int
+    page_views: int
+    submissions: int
+    link_clicks: int
+    clicks_by_link_type: List[FreshUpAnalyticsCountOut]
+    clicks_by_store: List[FreshUpAnalyticsCountOut]
+    recent: List[FreshUpAnalyticsEventOut]
+
+
+class FreshUpAnalyticsAck(BaseModel):
+    ok: bool = True
+
+
 class BdcReportRowOut(BaseModel):
     salesperson_id: Optional[int] = None
     salesperson_name: str
@@ -562,6 +600,13 @@ def normalize_optional_dealership(value: Optional[str]) -> Optional[str]:
     if not text:
         return None
     return normalize_dealership(text)
+
+
+def normalize_freshup_event_type(value: str) -> str:
+    text = normalize_short_text(value, "event_type", max_len=40).lower()
+    if text not in ("page_view", "submit", "link_click"):
+        raise HTTPException(status_code=400, detail="event_type must be page_view, submit, or link_click")
+    return text
 
 
 def normalize_brand(value: str) -> str:
@@ -1113,6 +1158,22 @@ def init_db() -> None:
     )
     db_execute(
         """
+        CREATE TABLE IF NOT EXISTS freshup_analytics_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            event_ts REAL NOT NULL,
+            event_at TEXT NOT NULL,
+            salesperson_id INTEGER,
+            salesperson_name TEXT NOT NULL DEFAULT '',
+            salesperson_dealership TEXT NOT NULL DEFAULT '',
+            store_dealership TEXT NOT NULL DEFAULT '',
+            event_type TEXT NOT NULL,
+            link_type TEXT NOT NULL DEFAULT '',
+            target_url TEXT NOT NULL DEFAULT ''
+        )
+        """
+    )
+    db_execute(
+        """
         CREATE TABLE IF NOT EXISTS service_drive_notes (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             appointment_at TEXT NOT NULL,
@@ -1291,6 +1352,19 @@ def freshup_log_out(row: Dict[str, Any]) -> FreshUpLogOut:
         salesperson_name=str(row.get("salesperson_name") or ""),
         salesperson_dealership=str(row.get("salesperson_dealership") or ""),
         source=str(row.get("source") or "Desk"),
+    )
+
+
+def freshup_analytics_event_out(row: Dict[str, Any]) -> FreshUpAnalyticsEventOut:
+    return FreshUpAnalyticsEventOut(
+        id=int(row.get("id") or 0),
+        event_at=str(row.get("event_at") or ""),
+        event_type=str(row.get("event_type") or ""),
+        link_type=str(row.get("link_type") or ""),
+        salesperson_name=str(row.get("salesperson_name") or ""),
+        salesperson_dealership=str(row.get("salesperson_dealership") or ""),
+        store_dealership=str(row.get("store_dealership") or ""),
+        target_url=str(row.get("target_url") or ""),
     )
 
 
@@ -2128,6 +2202,15 @@ def create_freshup_log(payload: FreshUpLogCreateIn) -> FreshUpLogOut:
     row = db_query_one("SELECT * FROM freshup_log WHERE id = ?", (created_id,))
     if not row:
         raise HTTPException(status_code=500, detail="failed to create freshup log")
+    if source.lower() == "nfc card":
+        create_freshup_analytics_event(
+            FreshUpAnalyticsEventIn(
+                salesperson_id=salesperson_id,
+                store_dealership=salesperson_dealership,
+                event_type="submit",
+                link_type="contact_form",
+            )
+        )
     return freshup_log_out(row)
 
 
@@ -2145,6 +2228,117 @@ def fetch_freshup_log(salesperson_id: Optional[int] = None, limit: int = 100) ->
         tuple(params + [safe_limit]),
     )
     return FreshUpLogListOut(total=int(count_row.get("count") or 0), entries=[freshup_log_out(row) for row in rows])
+
+
+def create_freshup_analytics_event(payload: FreshUpAnalyticsEventIn) -> FreshUpAnalyticsEventOut:
+    event_type = normalize_freshup_event_type(payload.event_type)
+    link_type = normalize_short_text(payload.link_type, "link_type", max_len=80)
+    target_url = normalize_short_text(payload.target_url, "target_url", max_len=500)
+
+    salesperson_id: Optional[int] = None
+    salesperson_name = ""
+    salesperson_dealership = ""
+    if payload.salesperson_id is not None:
+        row = get_salesperson_row(int(payload.salesperson_id))
+        if row:
+            salesperson_id = int(row.get("id") or 0)
+            salesperson_name = str(row.get("name") or "")
+            salesperson_dealership = str(row.get("dealership") or "")
+
+    store_dealership = normalize_optional_dealership(payload.store_dealership) or salesperson_dealership or ""
+    created_id = db_insert(
+        """
+        INSERT INTO freshup_analytics_events (
+            event_ts, event_at, salesperson_id, salesperson_name, salesperson_dealership,
+            store_dealership, event_type, link_type, target_url
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            time.time(),
+            now_iso(),
+            salesperson_id,
+            salesperson_name,
+            salesperson_dealership,
+            store_dealership,
+            event_type,
+            link_type,
+            target_url,
+        ),
+    )
+    row = db_query_one("SELECT * FROM freshup_analytics_events WHERE id = ?", (created_id,))
+    if not row:
+        raise HTTPException(status_code=500, detail="failed to create analytics event")
+    return freshup_analytics_event_out(row)
+
+
+def fetch_freshup_analytics(days: int = 30, salesperson_id: Optional[int] = None) -> FreshUpAnalyticsSummaryOut:
+    safe_days = max(1, min(int(days or 30), 365))
+    cutoff_ts = time.time() - (safe_days * 86400)
+    clauses = ["event_ts >= ?"]
+    params: List[Any] = [cutoff_ts]
+    if salesperson_id is not None:
+        clauses.append("salesperson_id = ?")
+        params.append(int(salesperson_id))
+    where_sql = f" WHERE {' AND '.join(clauses)}"
+
+    total_row = db_query_one(
+        f"""
+        SELECT
+            COUNT(*) AS total_events,
+            SUM(CASE WHEN event_type = 'page_view' THEN 1 ELSE 0 END) AS page_views,
+            SUM(CASE WHEN event_type = 'submit' THEN 1 ELSE 0 END) AS submissions,
+            SUM(CASE WHEN event_type = 'link_click' THEN 1 ELSE 0 END) AS link_clicks
+        FROM freshup_analytics_events
+        {where_sql}
+        """,
+        tuple(params),
+    ) or {}
+
+    link_rows = db_query_all(
+        f"""
+        SELECT COALESCE(NULLIF(link_type, ''), 'other') AS label, COUNT(*) AS count
+        FROM freshup_analytics_events
+        {where_sql} AND event_type = 'link_click'
+        GROUP BY COALESCE(NULLIF(link_type, ''), 'other')
+        ORDER BY count DESC, label ASC
+        """,
+        tuple(params),
+    )
+    store_rows = db_query_all(
+        f"""
+        SELECT COALESCE(NULLIF(store_dealership, ''), 'Unknown') AS label, COUNT(*) AS count
+        FROM freshup_analytics_events
+        {where_sql} AND event_type = 'link_click'
+        GROUP BY COALESCE(NULLIF(store_dealership, ''), 'Unknown')
+        ORDER BY count DESC, label ASC
+        """,
+        tuple(params),
+    )
+    recent_rows = db_query_all(
+        f"""
+        SELECT *
+        FROM freshup_analytics_events
+        {where_sql}
+        ORDER BY event_ts DESC, id DESC
+        LIMIT 20
+        """,
+        tuple(params),
+    )
+    return FreshUpAnalyticsSummaryOut(
+        total_events=int(total_row.get("total_events") or 0),
+        page_views=int(total_row.get("page_views") or 0),
+        submissions=int(total_row.get("submissions") or 0),
+        link_clicks=int(total_row.get("link_clicks") or 0),
+        clicks_by_link_type=[
+            FreshUpAnalyticsCountOut(label=str(row.get("label") or "other"), count=int(row.get("count") or 0))
+            for row in link_rows
+        ],
+        clicks_by_store=[
+            FreshUpAnalyticsCountOut(label=str(row.get("label") or "Unknown"), count=int(row.get("count") or 0))
+            for row in store_rows
+        ],
+        recent=[freshup_analytics_event_out(row) for row in recent_rows],
+    )
 
 
 def fetch_bdc_report(
@@ -3427,6 +3621,22 @@ def get_freshup_log(salesperson_id: Optional[int] = None, limit: int = 100) -> F
 @app.get("/api/freshup/links", response_model=FreshUpLinksConfigOut)
 def get_freshup_links() -> FreshUpLinksConfigOut:
     return fetch_freshup_links_config()
+
+
+@app.get("/api/admin/freshup/analytics", response_model=FreshUpAnalyticsSummaryOut)
+def get_admin_freshup_analytics(
+    days: int = 30,
+    salesperson_id: Optional[int] = None,
+    x_admin_token: Optional[str] = Header(default=None),
+) -> FreshUpAnalyticsSummaryOut:
+    require_admin(x_admin_token)
+    return fetch_freshup_analytics(days=days, salesperson_id=salesperson_id)
+
+
+@app.post("/api/freshup/analytics", response_model=FreshUpAnalyticsAck)
+def post_freshup_analytics(payload: FreshUpAnalyticsEventIn) -> FreshUpAnalyticsAck:
+    create_freshup_analytics_event(payload)
+    return FreshUpAnalyticsAck(ok=True)
 
 
 @app.post("/api/freshup/log", response_model=FreshUpLogOut)

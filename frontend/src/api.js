@@ -109,6 +109,11 @@ export const getSalespeople = (params = {}) => request(`/api/salespeople${qs({ i
 export const getFreshUpLog = (params = {}) =>
   request(`/api/freshup/log${qs({ salesperson_id: params.salespersonId, limit: params.limit })}`);
 export const getFreshUpLinks = () => request("/api/freshup/links");
+export const getFreshUpAnalytics = (token, params = {}) =>
+  request(`/api/admin/freshup/analytics${qs({ days: params.days, salesperson_id: params.salespersonId })}`, {
+    headers: adminHeaders(token),
+  });
+export const createFreshUpAnalytics = (payload) => request("/api/freshup/analytics", { method: "POST", body: payload });
 export const createFreshUpLog = (payload) => request("/api/freshup/log", { method: "POST", body: payload });
 export const updateFreshUpLinks = (token, payload) =>
   request("/api/admin/freshup/links", { method: "POST", body: payload, headers: adminHeaders(token) });

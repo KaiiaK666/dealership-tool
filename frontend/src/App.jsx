@@ -1,9 +1,10 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import {
   apiBase,
   adminLogin,
   assignBdcLead,
   clearBdcHistory,
+  createFreshUpAnalytics,
   createFreshUpLog,
   createBdcAgent,
   createSalesperson,
@@ -20,6 +21,7 @@ import {
   getBdcState,
   getFreshUpLog,
   getFreshUpLinks,
+  getFreshUpAnalytics,
   getBdcDistribution,
   getBdcUndoSettings,
   getMarketplaceTemplate,
@@ -212,6 +214,15 @@ const FRESHUP_SOCIAL_LINKS = [
   { key: "facebook_url", label: "Facebook", icon: "f" },
   { key: "youtube_url", label: "YouTube", icon: "▶" },
 ];
+const FRESHUP_ANALYTICS_DEFAULTS = {
+  total_events: 0,
+  page_views: 0,
+  submissions: 0,
+  link_clicks: 0,
+  clicks_by_link_type: [],
+  clicks_by_store: [],
+  recent: [],
+};
 const CREDIT_TIERS = [
   { label: "400s", min: 400, max: 499 },
   { label: "500s", min: 500, max: 599 },
@@ -531,6 +542,23 @@ function freshUpStoreBrandMeta(dealership) {
   return STORE_BRAND_META[dealership] || STORE_BRAND_META.Outlet;
 }
 
+function freshUpAnalyticsLabel(value) {
+  const mapping = {
+    page_view: "Page View",
+    submit: "Submit",
+    link_click: "Link Click",
+    soft_pull: "Quick Qualify",
+    hard_pull: "Quick Application",
+    inventory: "Inventory",
+    maps: "Maps",
+    call: "Call",
+    instagram: "Instagram",
+    facebook: "Facebook",
+    youtube: "YouTube",
+  };
+  return mapping[value] || String(value || "Other").replace(/_/g, " ");
+}
+
 async function copyTextValue(value) {
   if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
     await navigator.clipboard.writeText(value);
@@ -762,6 +790,7 @@ export default function App() {
     quoteRates: false,
     marketplaceTemplate: false,
     freshUpLinks: false,
+    freshUpAnalytics: false,
   });
   const [quoteRates, setQuoteRates] = useState([]);
   const [quoteRateDraft, setQuoteRateDraft] = useState({});
@@ -791,6 +820,8 @@ export default function App() {
   const [freshUpStatus, setFreshUpStatus] = useState("");
   const freshUpCopiedAt = "";
   const [freshUpLinksConfig, setFreshUpLinksConfig] = useState(FRESHUP_LINKS_DEFAULTS);
+  const [freshUpAnalytics, setFreshUpAnalytics] = useState(FRESHUP_ANALYTICS_DEFAULTS);
+  const freshUpPageViewRef = useRef("");
   const [marketplaceGuideStatus, setMarketplaceGuideStatus] = useState("");
   const [trafficRowUploadFiles, setTrafficRowUploadFiles] = useState({});
   const [trafficRowUploadKeys, setTrafficRowUploadKeys] = useState({});
@@ -913,6 +944,9 @@ export default function App() {
   });
   const freshUpPrimaryStore = freshUpStoreCards[0] || null;
   const freshUpPrimaryBrand = freshUpStoreBrandMeta(freshUpPrimaryStore?.dealership);
+  const freshUpConversionRate = freshUpAnalytics.page_views
+    ? Math.round((freshUpAnalytics.submissions / freshUpAnalytics.page_views) * 100)
+    : 0;
   const marketplaceBuilderTemplate = buildMarketplaceTemplateFromBuilder(marketplaceBuilder);
   const marketplacePreviewData = {
     ...MARKETPLACE_PREVIEW_SAMPLE,
@@ -928,6 +962,7 @@ export default function App() {
     (tabVisibility.entries || []).filter((entry) => entry.visible).map((entry) => entry.tab_id)
   );
   const tabsToShow = TABS.filter((item) => item.id === "admin" || adminSession || visibleTabIds.has(item.id));
+  const latestBdcAssignment = lastAssignment || bdcLog.entries?.[0] || null;
 
   async function loadAll(nextMonth = month, nextFilters = filters) {
     const [sales, bdc, service, log, report, distribution, undoSettings, tabs] = await Promise.all([
@@ -1055,6 +1090,25 @@ export default function App() {
     const data = await getFreshUpLinks();
     setFreshUpLinksConfig(data);
     setResourceLoadState((current) => ({ ...current, freshUpLinks: true }));
+  }
+
+  async function refreshFreshUpAnalytics() {
+    const data = await getFreshUpAnalytics(adminToken, { days: 30 });
+    setFreshUpAnalytics(data);
+    setResourceLoadState((current) => ({ ...current, freshUpAnalytics: true }));
+  }
+
+  function trackFreshUpEvent({ eventType, linkType = "", targetUrl = "", storeDealership = "" }) {
+    if (!freshUpCardMode) return;
+    const salespersonId =
+      freshUpAssignedSalesperson?.id || (freshUpLaunchContext.salespersonId ? Number(freshUpLaunchContext.salespersonId) : undefined);
+    createFreshUpAnalytics({
+      salesperson_id: salespersonId,
+      store_dealership: storeDealership,
+      event_type: eventType,
+      link_type: linkType,
+      target_url: targetUrl,
+    }).catch(() => {});
   }
 
   function updateQuoteRateDraft(brand, tier, value) {
@@ -1283,6 +1337,45 @@ export default function App() {
       active = false;
     };
   }, [adminSection, freshUpCardMode, resourceLoadState.freshUpLinks, tab]);
+
+  useEffect(() => {
+    if (resourceLoadState.freshUpAnalytics) return;
+    if (!(tab === "admin" && adminSection === "freshupLinks" && adminSession)) return;
+    let active = true;
+    const run = async () => {
+      try {
+        const data = await getFreshUpAnalytics(adminToken, { days: 30 });
+        if (!active) return;
+        setFreshUpAnalytics(data);
+        setResourceLoadState((current) => ({ ...current, freshUpAnalytics: true }));
+      } catch (errorValue) {
+        if (active) setError(errText(errorValue));
+      }
+    };
+    run();
+    return () => {
+      active = false;
+    };
+  }, [adminSection, adminSession, adminToken, resourceLoadState.freshUpAnalytics, tab]);
+
+  useEffect(() => {
+    if (!freshUpCardMode) return;
+    const salespersonId = freshUpAssignedSalesperson?.id || freshUpLaunchContext.salespersonId || "";
+    const storeKey = freshUpPrimaryStore?.dealership || "";
+    if (!salespersonId || !storeKey) return;
+    const key = `${salespersonId}:${storeKey}`;
+    if (freshUpPageViewRef.current === key) return;
+    freshUpPageViewRef.current = key;
+    trackFreshUpEvent({
+      eventType: "page_view",
+      storeDealership: storeKey,
+    });
+  }, [
+    freshUpAssignedSalesperson?.id,
+    freshUpCardMode,
+    freshUpLaunchContext.salespersonId,
+    freshUpPrimaryStore?.dealership,
+  ]);
 
   useEffect(() => {
     if (resourceLoadState.trafficPdfs) return;
@@ -2926,11 +3019,20 @@ export default function App() {
               </div>
             </div>
 
-            {lastAssignment ? (
-              <div className="notice success">
-                {lastAssignment.bdc_agent_name} assigned {lastAssignment.customer_name || "a customer"} to{" "}
-                {lastAssignment.salesperson_name} for {lastAssignment.lead_store || lastAssignment.salesperson_dealership} at{" "}
-                {dateTimeLabel(lastAssignment.assigned_at)}
+            {latestBdcAssignment ? (
+              <div className="bdc-last-assigned">
+                <span className="eyebrow">Last assigned</span>
+                <div className="bdc-last-assigned__headline">
+                  <strong>{latestBdcAssignment.salesperson_name}</strong>
+                  <span>{latestBdcAssignment.lead_store || latestBdcAssignment.salesperson_dealership}</span>
+                </div>
+                <p>
+                  {latestBdcAssignment.bdc_agent_name} sent {latestBdcAssignment.customer_name || "a customer"} to{" "}
+                  {latestBdcAssignment.salesperson_name}.
+                </p>
+                <small>
+                  {latestBdcAssignment.customer_phone || "No phone added"} · {dateTimeLabel(latestBdcAssignment.assigned_at)}
+                </small>
               </div>
             ) : null}
 
@@ -3378,6 +3480,14 @@ export default function App() {
                                 target="_blank"
                                 rel="noreferrer"
                                 aria-label={`${store.display_name} ${item.label}`}
+                                onClick={() =>
+                                  trackFreshUpEvent({
+                                    eventType: "link_click",
+                                    linkType: item.key.replace("_url", ""),
+                                    targetUrl: store[item.key],
+                                    storeDealership: store.dealership,
+                                  })
+                                }
                               >
                                 <span>{item.icon}</span>
                               </a>
@@ -3386,22 +3496,85 @@ export default function App() {
                         ) : null}
                         <div className="freshup-store-card__actions">
                           {store.maps_url ? (
-                            <a className="freshup-link-btn freshup-link-btn--dark" href={store.maps_url} target="_blank" rel="noreferrer">
+                            <a
+                              className="freshup-link-btn freshup-link-btn--dark"
+                              href={store.maps_url}
+                              target="_blank"
+                              rel="noreferrer"
+                              onClick={() =>
+                                trackFreshUpEvent({
+                                  eventType: "link_click",
+                                  linkType: "maps",
+                                  targetUrl: store.maps_url,
+                                  storeDealership: store.dealership,
+                                })
+                              }
+                            >
                               {store.maps_label || "Google Maps"}
                             </a>
                           ) : null}
                           {store.call_url ? (
-                            <a className="freshup-link-btn freshup-link-btn--blue" href={store.call_url}>
+                            <a
+                              className="freshup-link-btn freshup-link-btn--blue"
+                              href={store.call_url}
+                              onClick={() =>
+                                trackFreshUpEvent({
+                                  eventType: "link_click",
+                                  linkType: "call",
+                                  targetUrl: store.call_url,
+                                  storeDealership: store.dealership,
+                                })
+                              }
+                            >
                               {store.call_label || "Call Now"}
                             </a>
                           ) : null}
-                          <a className="freshup-link-btn" href={store.soft_pull_url} target="_blank" rel="noreferrer">
+                          <a
+                            className="freshup-link-btn"
+                            href={store.soft_pull_url}
+                            target="_blank"
+                            rel="noreferrer"
+                            onClick={() =>
+                              trackFreshUpEvent({
+                                eventType: "link_click",
+                                linkType: "soft_pull",
+                                targetUrl: store.soft_pull_url,
+                                storeDealership: store.dealership,
+                              })
+                            }
+                          >
                             {store.soft_pull_label}
                           </a>
-                          <a className="freshup-link-btn" href={store.hard_pull_url} target="_blank" rel="noreferrer">
+                          <a
+                            className="freshup-link-btn"
+                            href={store.hard_pull_url}
+                            target="_blank"
+                            rel="noreferrer"
+                            onClick={() =>
+                              trackFreshUpEvent({
+                                eventType: "link_click",
+                                linkType: "hard_pull",
+                                targetUrl: store.hard_pull_url,
+                                storeDealership: store.dealership,
+                              })
+                            }
+                          >
                             {store.hard_pull_label}
                           </a>
-                          <a className="freshup-link-btn freshup-link-btn--soft" href={store.inventory_url} target="_blank" rel="noreferrer">
+                          <a
+                            className="freshup-link-btn freshup-link-btn--soft"
+                            href={store.inventory_url}
+                            target="_blank"
+                            rel="noreferrer"
+                            onClick={() =>
+                              trackFreshUpEvent({
+                                eventType: "link_click",
+                                linkType: "inventory",
+                                targetUrl: store.inventory_url,
+                                storeDealership: store.dealership,
+                              })
+                            }
+                          >
                             {store.inventory_label}
                           </a>
                         </div>
@@ -5182,6 +5355,97 @@ export default function App() {
                           </label>
                         </div>
                       </details>
+                    </div>
+
+                    <div className="panel">
+                      <div className="row">
+                        <div>
+                          <span className="eyebrow">Freshup analytics</span>
+                          <h3>Customer page activity</h3>
+                          <p className="admin-note">Last 30 days of visits, submissions, and link clicks from NFC customer pages.</p>
+                        </div>
+                        <button type="button" className="secondary" onClick={refreshFreshUpAnalytics} disabled={busy === "freshup-links"}>
+                          Refresh Analytics
+                        </button>
+                      </div>
+
+                      <div className="analytics-grid">
+                        <div className="analytics-card">
+                          <span className="eyebrow">Page views</span>
+                          <strong>{freshUpAnalytics.page_views}</strong>
+                          <small>Customer opens from NFC or direct links.</small>
+                        </div>
+                        <div className="analytics-card">
+                          <span className="eyebrow">Submissions</span>
+                          <strong>{freshUpAnalytics.submissions}</strong>
+                          <small>Contact forms completed on the customer page.</small>
+                        </div>
+                        <div className="analytics-card">
+                          <span className="eyebrow">Link clicks</span>
+                          <strong>{freshUpAnalytics.link_clicks}</strong>
+                          <small>Outbound taps into maps, finance, inventory, or social.</small>
+                        </div>
+                        <div className="analytics-card">
+                          <span className="eyebrow">Conversion</span>
+                          <strong>{freshUpConversionRate}%</strong>
+                          <small>Submissions divided by page views.</small>
+                        </div>
+                      </div>
+
+                      <div className="analytics-breakdown">
+                        <div className="analytics-card">
+                          <span className="eyebrow">Top links</span>
+                          <div className="analytics-chip-row">
+                            {(freshUpAnalytics.clicks_by_link_type || []).length ? (
+                              freshUpAnalytics.clicks_by_link_type.map((item) => (
+                                <span key={`freshup-link-type-${item.label}`} className="analytics-chip">
+                                  {freshUpAnalyticsLabel(item.label)} · {item.count}
+                                </span>
+                              ))
+                            ) : (
+                              <span className="admin-note">No link clicks yet.</span>
+                            )}
+                          </div>
+                        </div>
+                        <div className="analytics-card">
+                          <span className="eyebrow">Clicks by store</span>
+                          <div className="analytics-chip-row">
+                            {(freshUpAnalytics.clicks_by_store || []).length ? (
+                              freshUpAnalytics.clicks_by_store.map((item) => (
+                                <span key={`freshup-store-clicks-${item.label}`} className="analytics-chip">
+                                  {item.label} · {item.count}
+                                </span>
+                              ))
+                            ) : (
+                              <span className="admin-note">No store click data yet.</span>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="analytics-card">
+                        <span className="eyebrow">Recent activity</span>
+                        <div className="analytics-list">
+                          {(freshUpAnalytics.recent || []).length ? (
+                            freshUpAnalytics.recent.map((entry) => (
+                              <article key={`freshup-analytics-${entry.id}`} className="analytics-list__item">
+                                <div>
+                                  <strong>{freshUpAnalyticsLabel(entry.event_type)}</strong>
+                                  <small>
+                                    {entry.salesperson_name || "Unassigned"} · {entry.store_dealership || entry.salesperson_dealership || "No store"}
+                                  </small>
+                                </div>
+                                <div className="analytics-list__meta">
+                                  {entry.link_type ? <span>{freshUpAnalyticsLabel(entry.link_type)}</span> : null}
+                                  <span>{dateTimeLabel(entry.event_at)}</span>
+                                </div>
+                              </article>
+                            ))
+                          ) : (
+                            <div className="admin-note">No analytics events yet.</div>
+                          )}
+                        </div>
+                      </div>
                     </div>
 
                     <div className="stack">
