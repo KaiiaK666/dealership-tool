@@ -106,6 +106,9 @@ export const apiBase = API_BASE;
 export const adminLogin = (payload) => request("/api/admin/login", { method: "POST", body: payload });
 export const getAdminSession = (token) => request("/api/admin/session", { headers: adminHeaders(token) });
 export const getSalespeople = (params = {}) => request(`/api/salespeople${qs({ include_inactive: params.includeInactive })}`);
+export const getFreshUpLog = (params = {}) =>
+  request(`/api/freshup/log${qs({ salesperson_id: params.salespersonId, limit: params.limit })}`);
+export const createFreshUpLog = (payload) => request("/api/freshup/log", { method: "POST", body: payload });
 export const createSalesperson = (token, payload) =>
   request("/api/admin/salespeople", { method: "POST", body: payload, headers: adminHeaders(token) });
 export const updateSalesperson = (token, id, payload) =>

@@ -4,6 +4,7 @@ import {
   adminLogin,
   assignBdcLead,
   clearBdcHistory,
+  createFreshUpLog,
   createBdcAgent,
   createSalesperson,
   createServiceDriveTraffic,
@@ -17,6 +18,7 @@ import {
   getBdcLog,
   getBdcReport,
   getBdcState,
+  getFreshUpLog,
   getBdcDistribution,
   getBdcUndoSettings,
   getMarketplaceTemplate,
@@ -52,7 +54,7 @@ const TABS = [
   { id: "bdc", label: "BDC Assign" },
   { id: "reports", label: "BDC Reports" },
   { id: "traffic", label: "Service Drive Traffic" },
-  { id: "freshUp", label: "Fresh Up Quick Add" },
+  { id: "freshUp", label: "Freshup Log" },
   { id: "marketplace", label: "Facebook Marketplace" },
   { id: "quote", label: "Quote Tool" },
   { id: "specials", label: "Specials" },
@@ -117,14 +119,9 @@ const FRESH_UP_STORAGE_KEY = "dealer_tool_fresh_up_form";
 const FRESH_UP_DEFAULTS = {
   customerName: "",
   phone: "",
-  email: "",
-  vehicleInterest: "",
-  stockNumber: "",
   salespersonId: "",
-  source: "Walk-in",
-  tradeIn: "Unknown",
-  nextStep: "Needs TO",
-  notes: "",
+  salespersonQuery: "",
+  source: "Desk",
 };
 const CREDIT_TIERS = [
   { label: "400s", min: 400, max: 499 },
@@ -388,15 +385,57 @@ function freshUpSummaryText(form, salespersonName) {
     `Fresh Up - ${freshUpTimestampLabel()}`,
     `Customer: ${String(form.customerName || "").trim() || "Not added"}`,
     `Phone: ${String(form.phone || "").trim() || "Not added"}`,
-    `Email: ${String(form.email || "").trim() || "Not added"}`,
-    `Vehicle: ${String(form.vehicleInterest || "").trim() || "Not added"}`,
-    `Stock #: ${String(form.stockNumber || "").trim() || "Not added"}`,
-    `Assigned Salesperson: ${salespersonName || "Not selected"}`,
-    `Lead Source: ${String(form.source || "").trim() || "Not added"}`,
-    `Trade-In: ${String(form.tradeIn || "").trim() || "Unknown"}`,
-    `Next Step: ${String(form.nextStep || "").trim() || "Not added"}`,
-    `Notes: ${String(form.notes || "").trim() || "None"}`,
+    `Salesperson: ${salespersonName || "Not selected"}`,
+    `Source: ${String(form.source || "").trim() || "Desk"}`,
   ].join("\n");
+}
+
+function readFreshUpLaunchContext() {
+  if (typeof window === "undefined") return { cardMode: false, salespersonId: "", tab: "" };
+  const search = new URLSearchParams(window.location.search);
+  return {
+    cardMode: search.get("freshup") === "card" || search.get("nfc") === "1",
+    salespersonId: String(search.get("salesperson") || "").trim(),
+    tab: String(search.get("tab") || "").trim(),
+  };
+}
+
+function initialTabValue() {
+  const context = readFreshUpLaunchContext();
+  if (context.cardMode || context.tab === "freshUp") return "freshUp";
+  return "serviceCalendar";
+}
+
+function normalizeLookupText(value) {
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "");
+}
+
+function findSalespersonMatch(people, value) {
+  const normalized = normalizeLookupText(value);
+  if (!normalized) return null;
+  return (
+    people.find((person) => normalizeLookupText(person.name) === normalized) ||
+    people.find((person) => normalizeLookupText(person.name).startsWith(normalized)) ||
+    null
+  );
+}
+
+function formatPhoneInput(value) {
+  const digits = String(value || "").replace(/\D/g, "").slice(0, 10);
+  if (digits.length <= 3) return digits;
+  if (digits.length <= 6) return `(${digits.slice(0, 3)}) ${digits.slice(3)}`;
+  return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
+}
+
+function freshUpCardUrl(salespersonId) {
+  if (typeof window === "undefined" || !salespersonId) return "";
+  const url = new URL(window.location.href);
+  url.search = "";
+  url.searchParams.set("freshup", "card");
+  url.searchParams.set("salesperson", String(salespersonId));
+  return url.toString();
 }
 
 async function copyTextValue(value) {
@@ -462,6 +501,30 @@ function LogTable({ entries, empty }) {
           ))}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+function FreshUpLogList({ entries, empty }) {
+  if (!entries.length) return <div className="empty">{empty}</div>;
+  return (
+    <div className="freshup-log-list">
+      {entries.map((entry) => (
+        <article key={entry.id} className="freshup-log-item">
+          <div className="freshup-log-item__top">
+            <div>
+              <strong>{entry.customer_name}</strong>
+              <small>{entry.customer_phone || "No phone"}</small>
+            </div>
+            <span>{dateTimeLabel(entry.created_at)}</span>
+          </div>
+          <div className="freshup-log-item__meta">
+            <span>{entry.salesperson_name || "Unassigned"}</span>
+            <span>{entry.salesperson_dealership || "No store"}</span>
+            <span>{entry.source || "Desk"}</span>
+          </div>
+        </article>
+      ))}
     </div>
   );
 }
@@ -546,8 +609,9 @@ function TrafficDayPicker({ cells, countsByDate, selectedDate, today, onSelect, 
 }
 
 export default function App() {
-  const [tab, setTab] = useState("serviceCalendar");
+  const [tab, setTab] = useState(() => initialTabValue());
   const [adminSection, setAdminSection] = useState("staff");
+  const [freshUpLaunchContext] = useState(() => readFreshUpLaunchContext());
   const [month, setMonth] = useState(currentMonth());
   const [daysOffMonth, setDaysOffMonth] = useState(currentMonth());
   const [trafficMonth, setTrafficMonth] = useState(currentMonth());
@@ -621,8 +685,17 @@ export default function App() {
     vapAmount: "0",
     months: "72",
   });
-  const [freshUpForm, setFreshUpForm] = useState(() => readFreshUpDraft());
-  const [freshUpCopiedAt, setFreshUpCopiedAt] = useState("");
+  const [freshUpForm, setFreshUpForm] = useState(() => {
+    const context = readFreshUpLaunchContext();
+    return {
+      ...readFreshUpDraft(),
+      salespersonId: context.salespersonId || readFreshUpDraft().salespersonId || "",
+      source: context.cardMode ? "NFC Card" : readFreshUpDraft().source || "Desk",
+    };
+  });
+  const [freshUpLog, setFreshUpLog] = useState({ total: 0, entries: [] });
+  const [freshUpStatus, setFreshUpStatus] = useState("");
+  const freshUpCopiedAt = "";
   const [marketplaceGuideStatus, setMarketplaceGuideStatus] = useState("");
   const [trafficRowUploadFiles, setTrafficRowUploadFiles] = useState({});
   const [trafficRowUploadKeys, setTrafficRowUploadKeys] = useState({});
@@ -726,17 +799,18 @@ export default function App() {
       : 0;
   const quoteTotalPaid = quotePayment * quoteMonths;
   const quoteTotalInterest = Math.max(0, quoteTotalPaid - quotePrincipal);
-  const freshUpAssignedSalesperson = salespeople.find((person) => String(person.id) === String(freshUpForm.salespersonId)) || null;
+  const freshUpAssignedSalesperson =
+    salespeople.find((person) => String(person.id) === String(freshUpForm.salespersonId)) ||
+    findSalespersonMatch(activeSales, freshUpForm.salespersonQuery) ||
+    null;
   const freshUpSummary = freshUpSummaryText(freshUpForm, freshUpAssignedSalesperson?.name || "");
   const freshUpFilledCount = [
     freshUpForm.customerName,
     freshUpForm.phone,
-    freshUpForm.email,
-    freshUpForm.vehicleInterest,
-    freshUpForm.stockNumber,
-    freshUpForm.salespersonId,
-    freshUpForm.notes,
+    freshUpAssignedSalesperson?.id || freshUpForm.salespersonId,
   ].filter((value) => String(value || "").trim()).length;
+  const freshUpCardMode = freshUpLaunchContext.cardMode;
+  const freshUpCardHref = freshUpAssignedSalesperson ? freshUpCardUrl(freshUpAssignedSalesperson.id) : "";
   const marketplaceBuilderTemplate = buildMarketplaceTemplateFromBuilder(marketplaceBuilder);
   const marketplacePreviewData = {
     ...MARKETPLACE_PREVIEW_SAMPLE,
@@ -865,6 +939,14 @@ export default function App() {
     setMarketplaceTemplate(data);
     setMarketplaceBuilder(marketplaceBuilderFromTemplate(data));
     setResourceLoadState((current) => ({ ...current, marketplaceTemplate: true }));
+  }
+
+  async function refreshFreshUpLog(nextSalespersonId) {
+    const data = await getFreshUpLog({
+      salespersonId: freshUpCardMode ? nextSalespersonId || freshUpForm.salespersonId || freshUpLaunchContext.salespersonId : undefined,
+      limit: freshUpCardMode ? 12 : 60,
+    });
+    setFreshUpLog(data);
   }
 
   function updateQuoteRateDraft(brand, tier, value) {
@@ -1115,10 +1197,10 @@ export default function App() {
   }, [adminSection, resourceLoadState.specials, tab]);
 
   useEffect(() => {
-    if (!adminSession && tab !== "admin" && !visibleTabIds.has(tab)) {
+    if (!adminSession && !freshUpCardMode && tab !== "admin" && !visibleTabIds.has(tab)) {
       setTab("serviceCalendar");
     }
-  }, [adminSession, tab, visibleTabIds]);
+  }, [adminSession, freshUpCardMode, tab, visibleTabIds]);
 
   useEffect(() => {
     if (!selectedSpecialId && specials.length) {
@@ -1134,6 +1216,38 @@ export default function App() {
     if (typeof window === "undefined") return;
     window.localStorage.setItem(FRESH_UP_STORAGE_KEY, JSON.stringify(freshUpForm));
   }, [freshUpForm]);
+
+  useEffect(() => {
+    if (!freshUpLaunchContext.salespersonId || !salespeople.length) return;
+    const matched = salespeople.find((person) => String(person.id) === String(freshUpLaunchContext.salespersonId));
+    if (!matched) return;
+    setFreshUpForm((current) => ({
+      ...current,
+      salespersonId: current.salespersonId || String(matched.id),
+      salespersonQuery: current.salespersonQuery || matched.name,
+      source: freshUpLaunchContext.cardMode ? "NFC Card" : current.source || "Desk",
+    }));
+  }, [freshUpLaunchContext.cardMode, freshUpLaunchContext.salespersonId, salespeople]);
+
+  useEffect(() => {
+    if (!(tab === "freshUp" || freshUpCardMode)) return;
+    let active = true;
+    const run = async () => {
+      try {
+        const data = await getFreshUpLog({
+          salespersonId: freshUpCardMode ? freshUpForm.salespersonId || freshUpLaunchContext.salespersonId : undefined,
+          limit: freshUpCardMode ? 12 : 60,
+        });
+        if (active) setFreshUpLog(data);
+      } catch (errorValue) {
+        if (active) setError(errText(errorValue));
+      }
+    };
+    run();
+    return () => {
+      active = false;
+    };
+  }, [freshUpCardMode, freshUpForm.salespersonId, freshUpLaunchContext.salespersonId, tab]);
 
   useEffect(() => {
     if (!leadForm.bdcAgentId && activeBdc.length) {
@@ -1782,19 +1896,78 @@ export default function App() {
     }
   }
 
+  function applyFreshUpSalespersonQuery(value) {
+    const match = findSalespersonMatch(activeSales, value);
+    setFreshUpForm((current) => ({
+      ...current,
+      salespersonQuery: value,
+      salespersonId: match ? String(match.id) : "",
+    }));
+    if (match) {
+      setFreshUpStatus("");
+    }
+  }
+
   async function copyFreshUpSummary() {
     try {
       setError("");
       await copyTextValue(freshUpSummary);
-      setFreshUpCopiedAt(new Date().toISOString());
+      setFreshUpStatus("Summary copied.");
     } catch (errorValue) {
       setError(errText(errorValue));
     }
   }
 
   function resetFreshUpForm() {
-    setFreshUpForm(FRESH_UP_DEFAULTS);
-    setFreshUpCopiedAt("");
+    setFreshUpForm({
+      ...FRESH_UP_DEFAULTS,
+      salespersonId: freshUpCardMode ? freshUpLaunchContext.salespersonId || "" : "",
+      salespersonQuery: freshUpCardMode ? freshUpAssignedSalesperson?.name || "" : "",
+      source: freshUpCardMode ? "NFC Card" : "Desk",
+    });
+    setFreshUpStatus("");
+  }
+
+  async function copyFreshUpCardLink() {
+    if (!freshUpCardHref) return;
+    try {
+      await copyTextValue(freshUpCardHref);
+      setFreshUpStatus("NFC link copied.");
+    } catch (errorValue) {
+      setError(errText(errorValue));
+    }
+  }
+
+  async function submitFreshUpLog() {
+    setBusy("freshup-submit");
+    setError("");
+    try {
+      const salespersonId =
+        freshUpAssignedSalesperson?.id || (freshUpForm.salespersonId ? Number(freshUpForm.salespersonId) : undefined);
+      if (!salespersonId) {
+        throw new Error("Pick the salesperson first.");
+      }
+      await createFreshUpLog({
+        customer_name: freshUpForm.customerName,
+        customer_phone: freshUpForm.phone,
+        salesperson_id: salespersonId,
+        source: freshUpCardMode ? "NFC Card" : "Desk",
+      });
+      await refreshFreshUpLog(String(salespersonId));
+      setFreshUpForm((current) => ({
+        ...current,
+        customerName: "",
+        phone: "",
+        salespersonId: String(salespersonId),
+        salespersonQuery: freshUpAssignedSalesperson?.name || current.salespersonQuery,
+        source: freshUpCardMode ? "NFC Card" : "Desk",
+      }));
+      setFreshUpStatus(freshUpCardMode ? "Info captured. Thank you." : "Freshup logged.");
+    } catch (errorValue) {
+      setError(errText(errorValue));
+    } finally {
+      setBusy("");
+    }
   }
 
   async function copyChromeExtensionsLink() {
@@ -1809,6 +1982,7 @@ export default function App() {
   return (
     <div className="shell">
       <main className="app">
+        {!freshUpCardMode ? (
         <header className="hero">
           <div className="hero-brand">
             <div className="hero-brand__top">
@@ -1855,19 +2029,22 @@ export default function App() {
             <small>{adminSession ? "Management actions unlocked" : "Only the admin tab requires login"}</small>
           </div>
         </header>
+        ) : null}
 
-        <nav className="tabs">
-            {tabsToShow.map((item) => (
-              <button
-                key={item.id}
-                type="button"
-              className={`tab ${tab === item.id ? "is-active" : ""}`}
-              onClick={() => setTab(item.id)}
-            >
-              {item.label}
-            </button>
-          ))}
-        </nav>
+        {!freshUpCardMode ? (
+          <nav className="tabs">
+              {tabsToShow.map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                className={`tab ${tab === item.id ? "is-active" : ""}`}
+                onClick={() => setTab(item.id)}
+              >
+                {item.label}
+              </button>
+            ))}
+          </nav>
+        ) : null}
 
         {error ? <div className="notice error">{error}</div> : null}
         {loading ? <div className="notice">Loading...</div> : null}
@@ -2816,6 +2993,166 @@ export default function App() {
         ) : null}
 
         {tab === "freshUp" ? (
+          <section className={`stack freshup-shell ${freshUpCardMode ? "freshup-shell--card" : ""}`}>
+            <div className="panel freshup-hero">
+              <div>
+                <span className="eyebrow">{freshUpCardMode ? "NFC Contact Capture" : "Freshup Log"}</span>
+                <h2>{freshUpCardMode ? "Leave your info and we will reach out fast." : "Fast contact capture for the lot."}</h2>
+                <p>
+                  {freshUpCardMode
+                    ? "This page is built for a tap-to-open business card. Keep it dead simple: customer name, phone number, done."
+                    : "This is now a lightweight mobile-first log. Pick the salesperson, capture the customer name and phone, and everything lands in the running log below."}
+                </p>
+              </div>
+              <div className="freshup-hero__status">
+                <span>Ready state</span>
+                <strong>{freshUpFilledCount}/3 filled</strong>
+                <small>{freshUpCardMode ? "Built for phone tap traffic." : "Optimized for quick desk or lot entry."}</small>
+              </div>
+            </div>
+
+            <div className="freshup-layout">
+              <form
+                className="panel freshup-capture"
+                onSubmit={(event) => {
+                  event.preventDefault();
+                  submitFreshUpLog();
+                }}
+              >
+                <div className="freshup-capture__header">
+                  <div>
+                    <span className="eyebrow">Quick Entry</span>
+                    <h3>{freshUpCardMode ? "Customer form" : "Fresh up input"}</h3>
+                  </div>
+                  <button type="button" className="secondary" onClick={resetFreshUpForm}>
+                    Clear
+                  </button>
+                </div>
+
+                <div className="freshup-form">
+                  <label>
+                    <span>Customer Name</span>
+                    <input
+                      value={freshUpForm.customerName}
+                      onChange={(event) => setFreshUpForm((current) => ({ ...current, customerName: event.target.value }))}
+                      placeholder="Full name"
+                      autoComplete="name"
+                    />
+                  </label>
+
+                  <label>
+                    <span>Phone Number</span>
+                    <input
+                      type="tel"
+                      inputMode="tel"
+                      autoComplete="tel"
+                      value={freshUpForm.phone}
+                      onChange={(event) =>
+                        setFreshUpForm((current) => ({ ...current, phone: formatPhoneInput(event.target.value) }))
+                      }
+                      placeholder="(956) 555-1234"
+                    />
+                  </label>
+
+                  {freshUpCardMode ? (
+                    <div className="freshup-lockbox">
+                      <span>Salesperson</span>
+                      <strong>{freshUpAssignedSalesperson?.name || "Salesperson not set"}</strong>
+                      <small>{freshUpAssignedSalesperson?.dealership || "This NFC link needs a salesperson selected."}</small>
+                    </div>
+                  ) : (
+                    <label>
+                      <span>Salesperson</span>
+                      <input
+                        list="freshup-salespeople"
+                        value={freshUpForm.salespersonQuery}
+                        onChange={(event) => applyFreshUpSalespersonQuery(event.target.value)}
+                        placeholder="Start typing the salesperson name"
+                        autoComplete="off"
+                      />
+                      <small>
+                        {freshUpAssignedSalesperson
+                          ? `Matched to ${freshUpAssignedSalesperson.name} · ${freshUpAssignedSalesperson.dealership}`
+                          : "Type the salesperson name and pick the match."}
+                      </small>
+                    </label>
+                  )}
+
+                  <datalist id="freshup-salespeople">
+                    {activeSales.map((person) => (
+                      <option key={`freshup-person-${person.id}`} value={person.name}>
+                        {person.dealership}
+                      </option>
+                    ))}
+                  </datalist>
+
+                  <div className="freshup-actions">
+                    <button
+                      type="submit"
+                      disabled={busy === "freshup-submit" || !freshUpAssignedSalesperson || !freshUpForm.customerName || !freshUpForm.phone}
+                    >
+                      {busy === "freshup-submit" ? "Saving..." : freshUpCardMode ? "Send My Info" : "Log Freshup"}
+                    </button>
+                    {!freshUpCardMode ? (
+                      <button type="button" className="secondary" onClick={copyFreshUpSummary}>
+                        Copy Recap
+                      </button>
+                    ) : null}
+                  </div>
+
+                  {freshUpStatus ? <div className="notice success">{freshUpStatus}</div> : null}
+                </div>
+              </form>
+
+              <div className="panel freshup-nfc">
+                <span className="eyebrow">NFC Card Side</span>
+                <h3>Program one link per salesperson</h3>
+                <p>
+                  Put this link on the NFC business card. When a customer taps, it opens a stripped-down contact capture page with the salesperson already attached.
+                </p>
+                <div className="freshup-nfc__link">
+                  <strong>{freshUpAssignedSalesperson?.name || "Select a salesperson first"}</strong>
+                  <code>{freshUpCardHref || "Pick a salesperson to generate the NFC link."}</code>
+                </div>
+                <div className="freshup-actions">
+                  <button type="button" onClick={copyFreshUpCardLink} disabled={!freshUpCardHref}>
+                    Copy NFC Link
+                  </button>
+                  <button
+                    type="button"
+                    className="secondary"
+                    onClick={() => window.open(freshUpCardHref, "_blank", "noopener,noreferrer")}
+                    disabled={!freshUpCardHref}
+                  >
+                    Preview Tap Page
+                  </button>
+                </div>
+                <div className="marketplace-callout">
+                  <strong>How the tap works</strong>
+                  <span>
+                    The NFC card just opens a URL. This page collects the name and phone number, tags the salesperson, and drops the entry into the log below.
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div className="panel freshup-log-panel">
+              <div className="row">
+                <div>
+                  <span className="eyebrow">Live Log</span>
+                  <h3>{freshUpCardMode ? "Recent taps for this salesperson" : "Newest freshups first"}</h3>
+                </div>
+                <small>{freshUpLog.total} total logged</small>
+              </div>
+              <FreshUpLogList
+                entries={freshUpLog.entries}
+                empty={freshUpCardMode ? "No NFC captures yet for this salesperson." : "No freshups logged yet."}
+              />
+            </div>
+          </section>
+        ) : null}
+
+        {false && tab === "freshUp" ? (
           <section className="stack fresh-up-section">
             <div className="panel fresh-up-hero">
               <div>

@@ -234,6 +234,30 @@ class BdcLogOut(BaseModel):
     entries: List[BdcAssignmentOut]
 
 
+class FreshUpLogCreateIn(BaseModel):
+    customer_name: str
+    customer_phone: str
+    salesperson_id: Optional[int] = None
+    source: str = "Desk"
+
+
+class FreshUpLogOut(BaseModel):
+    id: int
+    created_ts: float
+    created_at: str
+    customer_name: str
+    customer_phone: str
+    salesperson_id: Optional[int] = None
+    salesperson_name: str = ""
+    salesperson_dealership: str = ""
+    source: str = "Desk"
+
+
+class FreshUpLogListOut(BaseModel):
+    total: int
+    entries: List[FreshUpLogOut]
+
+
 class BdcReportRowOut(BaseModel):
     salesperson_id: Optional[int] = None
     salesperson_name: str
@@ -936,6 +960,21 @@ def init_db() -> None:
     ensure_column("bdc_assignment_log", "distribution_mode", "TEXT NOT NULL DEFAULT 'franchise'")
     db_execute(
         """
+        CREATE TABLE IF NOT EXISTS freshup_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            created_ts REAL NOT NULL,
+            created_at TEXT NOT NULL,
+            customer_name TEXT NOT NULL,
+            customer_phone TEXT NOT NULL DEFAULT '',
+            salesperson_id INTEGER,
+            salesperson_name TEXT NOT NULL DEFAULT '',
+            salesperson_dealership TEXT NOT NULL DEFAULT '',
+            source TEXT NOT NULL DEFAULT 'Desk'
+        )
+        """
+    )
+    db_execute(
+        """
         CREATE TABLE IF NOT EXISTS service_drive_notes (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             appointment_at TEXT NOT NULL,
@@ -1100,6 +1139,20 @@ def bdc_log_out(row: Dict[str, Any]) -> BdcAssignmentOut:
         salesperson_dealership=str(row.get("salesperson_dealership") or ""),
         customer_name=str(row.get("customer_name") or ""),
         customer_phone=str(row.get("customer_phone") or ""),
+    )
+
+
+def freshup_log_out(row: Dict[str, Any]) -> FreshUpLogOut:
+    return FreshUpLogOut(
+        id=int(row.get("id") or 0),
+        created_ts=float(row.get("created_ts") or 0.0),
+        created_at=str(row.get("created_at") or ""),
+        customer_name=str(row.get("customer_name") or ""),
+        customer_phone=str(row.get("customer_phone") or ""),
+        salesperson_id=int(row["salesperson_id"]) if row.get("salesperson_id") is not None else None,
+        salesperson_name=str(row.get("salesperson_name") or ""),
+        salesperson_dealership=str(row.get("salesperson_dealership") or ""),
+        source=str(row.get("source") or "Desk"),
     )
 
 
@@ -1896,6 +1949,64 @@ def fetch_bdc_log(
         params + (safe_limit,),
     )
     return BdcLogOut(total=int(count_row.get("count") or 0), entries=[bdc_log_out(row) for row in rows])
+
+
+def create_freshup_log(payload: FreshUpLogCreateIn) -> FreshUpLogOut:
+    customer_name = normalize_name(payload.customer_name, "customer_name")
+    customer_phone = normalize_short_text(payload.customer_phone, "customer_phone", max_len=40)
+    if not customer_phone:
+        raise HTTPException(status_code=400, detail="customer_phone is required")
+    source = normalize_short_text(payload.source or "Desk", "source", max_len=40) or "Desk"
+
+    salesperson_id: Optional[int] = None
+    salesperson_name = ""
+    salesperson_dealership = ""
+    if payload.salesperson_id is not None:
+        row = get_salesperson_row(int(payload.salesperson_id))
+        if not row:
+            raise HTTPException(status_code=404, detail="salesperson not found")
+        salesperson_id = int(row.get("id") or 0)
+        salesperson_name = str(row.get("name") or "")
+        salesperson_dealership = str(row.get("dealership") or "")
+
+    created_id = db_insert(
+        """
+        INSERT INTO freshup_log (
+            created_ts, created_at, customer_name, customer_phone, salesperson_id, salesperson_name,
+            salesperson_dealership, source
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            time.time(),
+            now_iso(),
+            customer_name,
+            customer_phone,
+            salesperson_id,
+            salesperson_name,
+            salesperson_dealership,
+            source,
+        ),
+    )
+    row = db_query_one("SELECT * FROM freshup_log WHERE id = ?", (created_id,))
+    if not row:
+        raise HTTPException(status_code=500, detail="failed to create freshup log")
+    return freshup_log_out(row)
+
+
+def fetch_freshup_log(salesperson_id: Optional[int] = None, limit: int = 100) -> FreshUpLogListOut:
+    clauses: List[str] = []
+    params: List[Any] = []
+    if salesperson_id is not None:
+        clauses.append("salesperson_id = ?")
+        params.append(int(salesperson_id))
+    where_sql = f" WHERE {' AND '.join(clauses)}" if clauses else ""
+    safe_limit = max(1, min(int(limit or 100), 250))
+    count_row = db_query_one(f"SELECT COUNT(*) AS count FROM freshup_log{where_sql}", tuple(params)) or {}
+    rows = db_query_all(
+        f"SELECT * FROM freshup_log{where_sql} ORDER BY created_ts DESC, id DESC LIMIT ?",
+        tuple(params + [safe_limit]),
+    )
+    return FreshUpLogListOut(total=int(count_row.get("count") or 0), entries=[freshup_log_out(row) for row in rows])
 
 
 def fetch_bdc_report(
@@ -3159,6 +3270,16 @@ def get_bdc_undo_settings_public() -> BdcUndoSettingsOut:
 @app.get("/api/tabs/visibility", response_model=TabVisibilityOut)
 def get_tabs_visibility_public() -> TabVisibilityOut:
     return get_tab_visibility()
+
+
+@app.get("/api/freshup/log", response_model=FreshUpLogListOut)
+def get_freshup_log(salesperson_id: Optional[int] = None, limit: int = 100) -> FreshUpLogListOut:
+    return fetch_freshup_log(salesperson_id=salesperson_id, limit=limit)
+
+
+@app.post("/api/freshup/log", response_model=FreshUpLogOut)
+def post_freshup_log(payload: FreshUpLogCreateIn) -> FreshUpLogOut:
+    return create_freshup_log(payload)
 
 
 @app.post("/api/bdc/assign", response_model=BdcAssignmentOut)

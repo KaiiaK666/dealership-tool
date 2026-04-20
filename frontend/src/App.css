@@ -3080,3 +3080,213 @@ button.special-card:hover:not(:disabled) {
     grid-template-columns: 1fr;
   }
 }
+
+.freshup-shell,
+.freshup-layout,
+.freshup-form,
+.freshup-log-list,
+.freshup-nfc,
+.freshup-capture {
+  display: grid;
+  gap: 18px;
+}
+
+.freshup-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(220px, 0.9fr);
+  gap: 20px;
+  align-items: stretch;
+}
+
+.freshup-hero p {
+  color: var(--muted);
+  max-width: 72ch;
+}
+
+.freshup-hero__status {
+  display: grid;
+  gap: 8px;
+  align-content: center;
+  padding: 18px;
+  border-radius: 22px;
+  background:
+    radial-gradient(circle at top right, rgba(196, 102, 52, 0.18), transparent 38%),
+    rgba(37, 48, 59, 0.96);
+  color: #fff;
+}
+
+.freshup-hero__status span,
+.freshup-lockbox span,
+.freshup-log-item__meta span {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.74rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.freshup-hero__status strong {
+  font-size: clamp(1.7rem, 4vw, 2.5rem);
+}
+
+.freshup-hero__status small,
+.freshup-capture small,
+.freshup-lockbox small {
+  color: rgba(255, 255, 255, 0.72);
+}
+
+.freshup-layout {
+  grid-template-columns: minmax(0, 1.05fr) minmax(320px, 0.95fr);
+}
+
+.freshup-capture,
+.freshup-nfc,
+.freshup-log-panel {
+  border: 1px solid rgba(210, 198, 182, 0.72);
+  background: rgba(255, 255, 255, 0.66);
+}
+
+.freshup-capture__header {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.freshup-form label {
+  display: grid;
+  gap: 8px;
+}
+
+.freshup-form label span {
+  font-size: 0.86rem;
+  font-weight: 700;
+  color: var(--muted);
+}
+
+.freshup-form input {
+  min-height: 56px;
+  font-size: 1rem;
+}
+
+.freshup-lockbox {
+  display: grid;
+  gap: 8px;
+  padding: 14px 16px;
+  border-radius: 18px;
+  background: rgba(37, 48, 59, 0.96);
+  color: #fff;
+}
+
+.freshup-lockbox strong {
+  font-size: 1.15rem;
+}
+
+.freshup-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.freshup-actions button {
+  min-height: 52px;
+}
+
+.freshup-nfc__link {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.84);
+  border: 1px solid rgba(210, 198, 182, 0.72);
+}
+
+.freshup-nfc__link code {
+  display: block;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: rgba(37, 48, 59, 0.96);
+  color: #fff;
+  font-size: 0.85rem;
+  line-height: 1.6;
+  word-break: break-word;
+}
+
+.freshup-log-list {
+  gap: 12px;
+}
+
+.freshup-log-item {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border-radius: 18px;
+  border: 1px solid rgba(210, 198, 182, 0.64);
+  background: rgba(255, 255, 255, 0.82);
+}
+
+.freshup-log-item__top {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.freshup-log-item__top strong {
+  display: block;
+  font-size: 1rem;
+}
+
+.freshup-log-item__top small {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+}
+
+.freshup-log-item__top span {
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.freshup-log-item__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.freshup-log-item__meta span {
+  padding: 8px 10px;
+  border-radius: 999px;
+  background: rgba(196, 102, 52, 0.1);
+  color: var(--accent-deep);
+}
+
+@media (max-width: 860px) {
+  .freshup-hero,
+  .freshup-layout,
+  .freshup-actions {
+    grid-template-columns: 1fr;
+  }
+
+  .freshup-shell--card .tabs,
+  .freshup-shell--card .hero {
+    display: none;
+  }
+
+  .freshup-capture,
+  .freshup-nfc,
+  .freshup-log-panel {
+    padding: 18px;
+  }
+
+  .freshup-capture__header,
+  .freshup-log-item__top {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .freshup-form input,
+  .freshup-actions button {
+    min-height: 58px;
+    font-size: 1rem;
+  }
+}
