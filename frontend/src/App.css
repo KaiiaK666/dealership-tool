@@ -3098,9 +3098,84 @@ button.special-card:hover:not(:disabled) {
   align-items: stretch;
 }
 
+.freshup-hero--card,
+.freshup-shell--card .freshup-capture,
+.freshup-shell--card .freshup-nfc,
+.freshup-shell--card .freshup-log-panel {
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background:
+    radial-gradient(circle at top, rgba(255, 255, 255, 0.08), transparent 38%),
+    linear-gradient(180deg, rgba(18, 22, 34, 0.96), rgba(11, 14, 23, 0.98));
+  box-shadow: 0 28px 80px rgba(5, 7, 14, 0.28);
+  color: #fff;
+}
+
+.freshup-brand-stack {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 18px;
+}
+
+.freshup-brand-avatar,
+.freshup-brand-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.freshup-brand-avatar {
+  width: 88px;
+  height: 88px;
+  padding: 8px;
+  border-radius: 999px;
+  background: #fff;
+  box-shadow: 0 20px 45px rgba(0, 0, 0, 0.28);
+}
+
+.freshup-brand-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 30px;
+}
+
+.freshup-brand-mark {
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  backdrop-filter: blur(12px);
+}
+
+.freshup-brand-mark__image {
+  width: 42px;
+  height: 42px;
+  object-fit: contain;
+}
+
+.freshup-brand-mark__image--rounded {
+  border-radius: 14px;
+}
+
+.freshup-brand-mark span {
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
 .freshup-hero p {
   color: var(--muted);
   max-width: 72ch;
+}
+
+.freshup-shell--card .freshup-hero p,
+.freshup-shell--card .freshup-nfc p,
+.freshup-shell--card .freshup-capture small,
+.freshup-shell--card .freshup-lockbox small,
+.freshup-shell--card .admin-note {
+  color: rgba(255, 255, 255, 0.72);
 }
 
 .freshup-hero__status {
@@ -3163,6 +3238,14 @@ button.special-card:hover:not(:disabled) {
   color: var(--muted);
 }
 
+.freshup-shell--card .freshup-form label span,
+.freshup-shell--card .freshup-capture__header h3,
+.freshup-shell--card .freshup-nfc h3,
+.freshup-shell--card .freshup-log-panel h3,
+.freshup-shell--card .freshup-store-card h4 {
+  color: #fff;
+}
+
 .freshup-form input {
   min-height: 56px;
   font-size: 1rem;
@@ -3179,6 +3262,37 @@ button.special-card:hover:not(:disabled) {
 
 .freshup-lockbox strong {
   font-size: 1.15rem;
+}
+
+.freshup-social-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 20px;
+}
+
+.freshup-social-row--card {
+  margin-top: 0;
+}
+
+.freshup-social-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 46px;
+  height: 46px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: #fff;
+  text-decoration: none;
+  font-weight: 800;
+  transition: transform 160ms ease, background 160ms ease;
+}
+
+.freshup-social-pill:hover {
+  transform: translateY(-1px);
+  background: rgba(255, 255, 255, 0.16);
 }
 
 .freshup-actions {
@@ -3222,15 +3336,66 @@ button.special-card:hover:not(:disabled) {
   gap: 12px;
 }
 
+.freshup-store-grid {
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+}
+
 .freshup-store-card {
-  padding: 16px;
+  padding: 18px;
+  border-radius: 26px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background:
+    linear-gradient(180deg, var(--freshup-tint, rgba(255, 255, 255, 0.12)), rgba(255, 255, 255, 0.04)),
+    rgba(9, 12, 19, 0.72);
+}
+
+.freshup-store-card--primary {
+  box-shadow: 0 18px 55px rgba(0, 0, 0, 0.24);
+}
+
+.freshup-store-card__header,
+.freshup-store-card__brand {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.freshup-store-card__brand {
+  align-items: flex-start;
+}
+
+.freshup-store-card__logo-wrap {
+  display: inline-flex;
+  width: 58px;
+  height: 58px;
+  align-items: center;
+  justify-content: center;
   border-radius: 18px;
-  border: 1px solid rgba(210, 198, 182, 0.64);
-  background: rgba(255, 255, 255, 0.82);
+  background: rgba(255, 255, 255, 0.94);
+  box-shadow: 0 12px 24px rgba(0, 0, 0, 0.14);
+}
+
+.freshup-store-card__logo {
+  width: 34px;
+  height: 34px;
+  object-fit: contain;
+}
+
+.freshup-store-card__logo--rounded {
+  width: 42px;
+  height: 42px;
+  border-radius: 14px;
+}
+
+.freshup-store-card p {
+  margin: 6px 0 0;
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 0.92rem;
 }
 
 .freshup-store-card h4 {
   margin: 4px 0 0;
+  color: #fff;
 }
 
 .freshup-store-card__actions a {
@@ -3238,17 +3403,34 @@ button.special-card:hover:not(:disabled) {
   text-align: center;
 }
 
+.freshup-link-btn,
 .secondary-link {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 12px 14px;
-  border-radius: 14px;
-  border: 1px solid rgba(37, 48, 59, 0.16);
-  background: rgba(37, 48, 59, 0.08);
-  color: var(--ink);
+  min-height: 56px;
+  padding: 14px 16px;
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: #fff;
+  color: #0f1523;
   text-decoration: none;
   font-weight: 700;
+}
+
+.freshup-link-btn--dark {
+  background: rgba(0, 0, 0, 0.88);
+  color: #fff;
+}
+
+.freshup-link-btn--blue {
+  background: #1f7cf6;
+  color: #fff;
+}
+
+.freshup-link-btn--soft {
+  background: rgba(255, 255, 255, 0.16);
+  color: #fff;
 }
 
 .freshup-log-item {
@@ -3296,6 +3478,69 @@ button.special-card:hover:not(:disabled) {
   color: var(--accent-deep);
 }
 
+.freshup-admin-group {
+  border: 1px solid rgba(210, 198, 182, 0.72);
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.78);
+}
+
+.freshup-admin-group summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 18px 20px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.freshup-admin-group summary::-webkit-details-marker {
+  display: none;
+}
+
+.freshup-admin-group summary strong {
+  display: block;
+}
+
+.freshup-admin-group summary small {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+}
+
+.freshup-admin-group > .editor-list {
+  padding: 0 20px 20px;
+}
+
+.freshup-admin-summary,
+.freshup-admin-summary__brand {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.freshup-admin-summary__logo {
+  display: inline-flex;
+  width: 50px;
+  height: 50px;
+  align-items: center;
+  justify-content: center;
+  border-radius: 16px;
+  background: rgba(37, 48, 59, 0.08);
+}
+
+.freshup-admin-summary__logo-image {
+  width: 30px;
+  height: 30px;
+  object-fit: contain;
+}
+
+.freshup-admin-summary__logo-image--rounded {
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+}
+
 @media (max-width: 860px) {
   .freshup-hero,
   .freshup-layout,
@@ -3308,6 +3553,10 @@ button.special-card:hover:not(:disabled) {
     display: none;
   }
 
+  .freshup-shell--card {
+    gap: 14px;
+  }
+
   .freshup-capture,
   .freshup-nfc,
   .freshup-log-panel {
@@ -3315,7 +3564,9 @@ button.special-card:hover:not(:disabled) {
   }
 
   .freshup-capture__header,
-  .freshup-log-item__top {
+  .freshup-log-item__top,
+  .freshup-store-card__header,
+  .freshup-store-card__brand {
     flex-direction: column;
     align-items: flex-start;
   }
@@ -3324,5 +3575,24 @@ button.special-card:hover:not(:disabled) {
   .freshup-actions button {
     min-height: 58px;
     font-size: 1rem;
+  }
+
+  .freshup-brand-avatar {
+    width: 82px;
+    height: 82px;
+  }
+
+  .freshup-brand-mark {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .freshup-store-card {
+    padding: 16px;
+  }
+
+  .freshup-link-btn,
+  .secondary-link {
+    min-height: 54px;
   }
 }

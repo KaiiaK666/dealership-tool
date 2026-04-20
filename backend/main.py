@@ -262,6 +262,13 @@ class FreshUpLogListOut(BaseModel):
 class FreshUpLinkStoreOut(BaseModel):
     dealership: str
     display_name: str
+    call_label: str = ""
+    call_url: str = ""
+    maps_label: str = ""
+    maps_url: str = ""
+    instagram_url: str = ""
+    facebook_url: str = ""
+    youtube_url: str = ""
     soft_pull_label: str
     soft_pull_url: str
     hard_pull_label: str
@@ -653,6 +660,13 @@ def default_freshup_links_config() -> FreshUpLinksConfigOut:
             FreshUpLinkStoreOut(
                 dealership="Kia",
                 display_name="Mission Kia",
+                call_label="Call us now",
+                call_url="tel:(956) 429 8898",
+                maps_label="Google Maps",
+                maps_url="https://www.google.com/maps/place/Bert+Ogden+Mission+Kia/@26.1969595,-98.2927102,17z/data=!3m1!4b1!4m6!3m5!1s0x8665a7eced82c205:0x3fe685adeab8c28e!8m2!3d26.1969595!4d-98.2901353!16s%2Fg%2F1tjdgmn5?entry=ttu&g_ep=EgoyMDI2MDIyMi4wIKXMDSoASAFQAw%3D%3D",
+                instagram_url="https://www.instagram.com/bertogdenkiamission/",
+                facebook_url="https://www.facebook.com/BertOgdenMissionKia",
+                youtube_url="https://www.youtube.com/channel/UCGVeQ1vKWK3bLq396D8P_4A",
                 soft_pull_label="Quick Qualify",
                 soft_pull_url="https://www.700dealer.com/QuickQualify/fcb574d194ea477c945ec558b605c0f7-202061",
                 hard_pull_label="Quick Application",
@@ -663,6 +677,13 @@ def default_freshup_links_config() -> FreshUpLinksConfigOut:
             FreshUpLinkStoreOut(
                 dealership="Mazda",
                 display_name="Mission Mazda",
+                call_label="",
+                call_url="",
+                maps_label="",
+                maps_url="",
+                instagram_url="",
+                facebook_url="",
+                youtube_url="",
                 soft_pull_label="Quick Qualify",
                 soft_pull_url="https://www.700dealer.com/QuickQualify/3019d192efae4e3684cc49a88095425a-202061",
                 hard_pull_label="Quick Application",
@@ -673,6 +694,13 @@ def default_freshup_links_config() -> FreshUpLinksConfigOut:
             FreshUpLinkStoreOut(
                 dealership="Outlet",
                 display_name="Mission Auto Outlet",
+                call_label="",
+                call_url="",
+                maps_label="",
+                maps_url="",
+                instagram_url="",
+                facebook_url="",
+                youtube_url="",
                 soft_pull_label="Quick Qualify",
                 soft_pull_url="https://www.700dealer.com/QuickQualify/88a0b45934bf4a4e8937c8ccb61c463f-202061",
                 hard_pull_label="Quick Application",
@@ -706,6 +734,13 @@ def update_freshup_links_config(payload: FreshUpLinksConfigIn) -> FreshUpLinksCo
             FreshUpLinkStoreOut(
                 dealership=normalize_dealership(store.dealership),
                 display_name=normalize_short_text(store.display_name, "display_name", max_len=120),
+                call_label=normalize_short_text(store.call_label, "call_label", max_len=80),
+                call_url=normalize_short_text(store.call_url, "call_url", max_len=500),
+                maps_label=normalize_short_text(store.maps_label, "maps_label", max_len=80),
+                maps_url=normalize_short_text(store.maps_url, "maps_url", max_len=500),
+                instagram_url=normalize_short_text(store.instagram_url, "instagram_url", max_len=500),
+                facebook_url=normalize_short_text(store.facebook_url, "facebook_url", max_len=500),
+                youtube_url=normalize_short_text(store.youtube_url, "youtube_url", max_len=500),
                 soft_pull_label=normalize_short_text(store.soft_pull_label, "soft_pull_label", max_len=80),
                 soft_pull_url=normalize_short_text(store.soft_pull_url, "soft_pull_url", max_len=500),
                 hard_pull_label=normalize_short_text(store.hard_pull_label, "hard_pull_label", max_len=80),
