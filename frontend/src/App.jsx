@@ -18,6 +18,7 @@ import {
   getAdminSession,
   getBdcAgents,
   getNotificationConfig,
+  sendNotificationTestEmail,
   sendNotificationTestSms,
   getBdcLog,
   getBdcReport,
@@ -1095,6 +1096,8 @@ export default function App() {
   });
   const [smsTestPhone, setSmsTestPhone] = useState("");
   const [smsTestFeedback, setSmsTestFeedback] = useState(null);
+  const [emailTestAddress, setEmailTestAddress] = useState("");
+  const [emailTestFeedback, setEmailTestFeedback] = useState(null);
   const [leadForm, setLeadForm] = useState({ bdcAgentId: "", leadStore: "Kia", customerName: "", customerPhone: "" });
   const [trafficEntryForm, setTrafficEntryForm] = useState({
     brand: "Kia",
@@ -1470,6 +1473,21 @@ export default function App() {
       setSmsTestFeedback({ kind: "success", message: result.status });
     } catch (errorValue) {
       setSmsTestFeedback({ kind: "error", message: errText(errorValue) });
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function submitEmailTest(event) {
+    event.preventDefault();
+    setBusy("notification-email-test");
+    setEmailTestFeedback(null);
+    try {
+      const result = await sendNotificationTestEmail(adminToken, { email: emailTestAddress });
+      setEmailTestAddress(result.email);
+      setEmailTestFeedback({ kind: "success", message: result.status });
+    } catch (errorValue) {
+      setEmailTestFeedback({ kind: "error", message: errText(errorValue) });
     } finally {
       setBusy("");
     }
@@ -5078,25 +5096,26 @@ export default function App() {
                         </div>
                         <div>
                           <strong>Email setup</strong>
-                          <small>`RESEND_API_KEY`, `BDC_NOTIFY_EMAIL_FROM`</small>
+                          <small>`RESEND_API_KEY`, `BDC_NOTIFY_EMAIL_FROM`, `BDC_NOTIFY_EMAIL_REPLY_TO` (optional)</small>
                         </div>
                       </div>
-                      <form className="notification-test-form" onSubmit={submitSmsTest}>
-                        <label>
-                          <span>Send a test text</span>
-                          <input
-                            type="tel"
-                            value={smsTestPhone}
-                            onChange={(event) => {
-                              setSmsTestPhone(event.target.value);
-                              setSmsTestFeedback(null);
-                            }}
-                            placeholder="(956) 555-1234 or +19565551234"
-                          />
-                        </label>
-                        <div className="notification-test-actions">
-                          <button
-                            type="submit"
+                      <div className="notification-test-grid">
+                        <form className="notification-test-form" onSubmit={submitSmsTest}>
+                          <label>
+                            <span>Send a test text</span>
+                            <input
+                              type="tel"
+                              value={smsTestPhone}
+                              onChange={(event) => {
+                                setSmsTestPhone(event.target.value);
+                                setSmsTestFeedback(null);
+                              }}
+                              placeholder="(956) 555-1234 or +19565551234"
+                            />
+                          </label>
+                          <div className="notification-test-actions">
+                            <button
+                              type="submit"
                             disabled={
                               busy === "notification-sms-test" ||
                               !notificationConfig.sms_configured ||
@@ -5117,6 +5136,43 @@ export default function App() {
                           </div>
                         ) : null}
                       </form>
+                      <form className="notification-test-form" onSubmit={submitEmailTest}>
+                        <label>
+                          <span>Send a test email</span>
+                          <input
+                            type="email"
+                            value={emailTestAddress}
+                            onChange={(event) => {
+                              setEmailTestAddress(event.target.value);
+                              setEmailTestFeedback(null);
+                            }}
+                            placeholder="you@example.com"
+                          />
+                        </label>
+                        <div className="notification-test-actions">
+                          <button
+                            type="submit"
+                            disabled={
+                              busy === "notification-email-test" ||
+                              !notificationConfig.email_configured ||
+                              !emailTestAddress.trim()
+                            }
+                          >
+                            {busy === "notification-email-test" ? "Sending..." : "Send test email"}
+                          </button>
+                          <small>Uses the current Resend sender from Render.</small>
+                        </div>
+                        {emailTestFeedback ? (
+                          <div
+                            className={`notification-test-feedback ${
+                              emailTestFeedback.kind === "error" ? "is-error" : "is-success"
+                            }`}
+                          >
+                            {emailTestFeedback.message}
+                          </div>
+                        ) : null}
+                      </form>
+                    </div>
                     </div>
 
                     <div className="panel">

@@ -256,6 +256,15 @@ class NotificationTestSmsOut(BaseModel):
     status: str
 
 
+class NotificationTestEmailIn(BaseModel):
+    email: str
+
+
+class NotificationTestEmailOut(BaseModel):
+    email: str
+    status: str
+
+
 class BdcStateOut(BaseModel):
     dealership: Optional[str] = None
     next_index: int
@@ -731,6 +740,40 @@ def send_notification_test_sms(raw_phone_number: str) -> NotificationTestSmsOut:
     return NotificationTestSmsOut(
         phone_number=sms_target,
         status=f"Test text sent to {sms_target}",
+    )
+
+
+def build_test_notification_email_subject() -> str:
+    return "Dealership Tool email test"
+
+
+def build_test_notification_email_body() -> str:
+    lines = [
+        "Dealership Tool email test.",
+        "If you received this email, Resend is configured correctly.",
+        f"Sent at: {now_iso()}",
+        f"From: {BDC_NOTIFY_EMAIL_FROM or 'Resend sender'}",
+    ]
+    if BDC_NOTIFY_EMAIL_REPLY_TO:
+        lines.append(f"Reply-To: {BDC_NOTIFY_EMAIL_REPLY_TO}")
+    if APP_BASE_URL:
+        lines.extend(["", f"Open the app: {APP_BASE_URL}"])
+    return "\n".join(lines)
+
+
+def send_notification_test_email(raw_email: str) -> NotificationTestEmailOut:
+    if not email_notifications_configured():
+        raise HTTPException(status_code=400, detail="Resend is not configured")
+    email_target = normalize_optional_email(raw_email, "email")
+    if not email_target:
+        raise HTTPException(status_code=400, detail="email is required")
+    try:
+        send_resend_email(email_target, build_test_notification_email_subject(), build_test_notification_email_body())
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=compact_error_text(exc)) from exc
+    return NotificationTestEmailOut(
+        email=email_target,
+        status=f"Test email sent to {email_target}",
     )
 
 
@@ -3990,6 +4033,15 @@ def post_admin_notification_test_sms(
 ) -> NotificationTestSmsOut:
     require_admin(x_admin_token)
     return send_notification_test_sms(payload.phone_number)
+
+
+@app.post("/api/admin/notifications/test-email", response_model=NotificationTestEmailOut)
+def post_admin_notification_test_email(
+    payload: NotificationTestEmailIn,
+    x_admin_token: Optional[str] = Header(default=None),
+) -> NotificationTestEmailOut:
+    require_admin(x_admin_token)
+    return send_notification_test_email(payload.email)
 
 
 @app.post("/api/admin/salespeople", response_model=SalespersonAdminOut)
