@@ -49,6 +49,13 @@ Backend env vars:
 - `DEALER_ADMIN_USERNAME=admin`
 - `DEALER_ADMIN_PASSWORD=change-this-to-a-real-password`
 - `DEALER_CORS_ORIGINS=https://app.yourdomain.com`
+- `DEALER_APP_BASE_URL=https://app.yourdomain.com`
+- `TWILIO_ACCOUNT_SID=...`
+- `TWILIO_AUTH_TOKEN=...`
+- `TWILIO_FROM_NUMBER=+1...`
+- `RESEND_API_KEY=...`
+- `BDC_NOTIFY_EMAIL_FROM=BDC Alerts <alerts@yourdomain.com>`
+- `BDC_NOTIFY_EMAIL_REPLY_TO=sales@yourdomain.com` (optional)
 
 Frontend service:
 
@@ -104,6 +111,54 @@ Once DNS is live, update env vars to:
 - `DEALER_CORS_ORIGINS=https://app.yourdomain.com`
 
 Then redeploy both services.
+
+## 5.1 BDC assignment notifications
+
+The BDC assignment board can now notify the assigned salesperson immediately by:
+
+- text message through `Twilio`
+- email through `Resend`
+
+Recommended setup:
+
+- SMS: Twilio
+- Email: Resend
+
+Why:
+
+- Twilio is the simplest reliable U.S. SMS option for immediate one-way alerts.
+- Resend is simple to wire into Python and does not require production approval to start sending.
+
+One-time setup outside Render:
+
+1. In Twilio:
+   - create an account
+   - buy or provision an SMS-capable number
+   - copy:
+     - `TWILIO_ACCOUNT_SID`
+     - `TWILIO_AUTH_TOKEN`
+     - `TWILIO_FROM_NUMBER`
+2. In Resend:
+   - create an account
+   - verify your sending domain
+   - create an API key
+   - choose a sender address for `BDC_NOTIFY_EMAIL_FROM`
+3. In Render:
+   - open `dealership-tool-api`
+   - go to `Environment`
+   - add the env vars above
+   - save and redeploy
+
+After deploy:
+
+1. Open `Admin > Staff`
+2. Add each salesperson's:
+   - phone number
+   - email
+   - text/email notification preference
+3. Use the BDC assignment board normally
+
+The last assignment card will show whether text/email was sent or skipped.
 
 ## 6. Registrar DNS
 

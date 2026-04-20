@@ -20,6 +20,20 @@ services:
         sync: false
       - key: DEALER_CORS_ORIGINS
         sync: false
+      - key: DEALER_APP_BASE_URL
+        sync: false
+      - key: TWILIO_ACCOUNT_SID
+        sync: false
+      - key: TWILIO_AUTH_TOKEN
+        sync: false
+      - key: TWILIO_FROM_NUMBER
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false
+      - key: BDC_NOTIFY_EMAIL_FROM
+        sync: false
+      - key: BDC_NOTIFY_EMAIL_REPLY_TO
+        sync: false
     disk:
       name: dealership-data
       mountPath: /var/data
