@@ -35,6 +35,7 @@ LEGACY_STATUS_MAP = {
 LEGACY_DEMO_USERS = {"Kai Rivers", "Maya Chen", "Jordan Reed", "Ava Martinez", "Luis Gomez"}
 LEGACY_DEMO_BOARDS = {"Showroom Appointments", "Service Lane Follow Up", "Used Car Specials"}
 PREVIOUS_ORGTOOL_USERS = {"Miguel Castillo", "Kai Ammons", "Pearl Medina", "Marcus Ramirez", "Sales Person"}
+MAX_TASK_SCREENSHOTS = 8
 
 
 def iso_today(offset_days: int = 0) -> str:
@@ -59,6 +60,18 @@ def unique_username(username: str, existing: list[dict], exclude_user_id: int | 
     while f"{base}{suffix}" in taken:
         suffix += 1
     return f"{base}{suffix}"
+
+
+def normalize_screenshots(value: list[str] | tuple[str, ...] | None) -> list[str]:
+    screenshots: list[str] = []
+    for item in value or []:
+        text = str(item or "").strip()
+        if not text:
+            continue
+        screenshots.append(text)
+        if len(screenshots) >= MAX_TASK_SCREENSHOTS:
+            break
+    return screenshots
 
 
 SEED_DATA = {
@@ -427,7 +440,7 @@ def normalize_store(store: dict) -> dict:
             task.setdefault("due_date", None)
             task.setdefault("effort", 1)
             task.setdefault("notes", "")
-            task.setdefault("screenshots", [])
+            task["screenshots"] = normalize_screenshots(task.get("screenshots"))
             task.setdefault("custom_fields", {})
 
     return normalized
@@ -814,6 +827,7 @@ def create_task(payload: TaskCreate) -> dict:
     if not any(int(group["id"]) == int(payload.group_id) for group in board["groups"]):
         raise HTTPException(status_code=404, detail="Group not found")
     task = payload.model_dump()
+    task["screenshots"] = normalize_screenshots(task.get("screenshots"))
     task["id"] = next_id(board["tasks"])
     board["tasks"].append(task)
     write_store(store)
@@ -828,6 +842,8 @@ def update_task(board_id: int, task_id: int, payload: TaskPatch) -> dict:
     if not task:
         raise HTTPException(status_code=404, detail="Task not found")
     updates = payload.model_dump(exclude_unset=True)
+    if "screenshots" in updates:
+        updates["screenshots"] = normalize_screenshots(updates.get("screenshots"))
     if "group_id" in updates and not any(int(group["id"]) == int(updates["group_id"]) for group in board["groups"]):
         raise HTTPException(status_code=404, detail="Group not found")
     for key, value in updates.items():
