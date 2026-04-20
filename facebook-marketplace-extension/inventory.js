@@ -179,6 +179,10 @@
       urlParts.vin ||
       queryMeta(['meta[itemprop="vehicleIdentificationNumber"]']);
     const stock = firstMatch(pageText, [/Stock[^A-Z0-9-]*([A-Z0-9-]+)/i]);
+    const transmission = firstMatch(pageText, [/Transmission[^A-Za-z0-9]*([A-Za-z0-9 /-]+)/i]);
+    const fuelType = firstMatch(pageText, [/Fuel(?: Type)?[^A-Za-z0-9]*([A-Za-z0-9 /-]+)/i]);
+    const exteriorColor = firstMatch(pageText, [/Exterior(?: Color)?[^A-Za-z0-9]*([A-Za-z0-9 /-]+)/i]);
+    const interiorColor = firstMatch(pageText, [/Interior(?: Color)?[^A-Za-z0-9]*([A-Za-z0-9 /-]+)/i]);
     const parts = {
       year: titleParts.year || jsonLd.year || urlParts.year,
       make: titleParts.make || jsonLd.make || urlParts.make,
@@ -200,6 +204,10 @@
       stock: normalizeText(stock),
       condition,
       body_style: inferBodyStyle(`${rawTitle} ${parts.model}`),
+      transmission: normalizeText(transmission),
+      fuel_type: normalizeText(fuelType),
+      exterior_color: normalizeText(exteriorColor),
+      interior_color: normalizeText(interiorColor),
       url: location.href,
       images: collectImages(),
     };

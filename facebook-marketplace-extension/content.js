@@ -244,10 +244,14 @@
     for (const candidate of candidateValues) {
       dispatchMouseSequence(trigger);
       await wait(450);
-      const option = findOptionByText(candidate);
+      let option = findOptionByText(candidate);
+      if (!option) {
+        await wait(450);
+        option = findOptionByText(candidate);
+      }
       if (!option) continue;
       dispatchMouseSequence(option);
-      await wait(350);
+      await wait(500);
       const nextValue = normalizeText(getComboboxValue(trigger)).toLowerCase();
       if (!nextValue || nextValue.includes(candidate.toLowerCase()) || candidate.toLowerCase().includes(nextValue)) {
         return true;
@@ -277,6 +281,130 @@
   async function pickBodyStyle(value) {
     const candidates = bodyStyleCandidates(value);
     return await selectOption(["body style"], candidates[0], candidates.slice(1));
+  }
+
+  function actionButtonText(node) {
+    return normalizeText(node?.textContent || node?.getAttribute("aria-label") || "").toLowerCase();
+  }
+
+  function isDisabledButton(node) {
+    if (!node) return true;
+    return node.disabled || node.getAttribute("aria-disabled") === "true";
+  }
+
+  function findActionButton(labels) {
+    const candidates = Array.from(document.querySelectorAll('button, [role="button"]')).filter(isVisible);
+    return candidates.find((node) => labels.some((label) => actionButtonText(node) === label || actionButtonText(node).includes(label)));
+  }
+
+  function findNextButton() {
+    return findActionButton(["next"]);
+  }
+
+  function findPublishButton() {
+    return findActionButton(["publish", "publish now", "publish listing", "list item"]);
+  }
+
+  function findProgressLabel() {
+    return Array.from(document.querySelectorAll('[aria-label]'))
+      .map((node) => normalizeText(node.getAttribute("aria-label")))
+      .find((text) => /currently on step/i.test(text));
+  }
+
+  async function fillTextField(hints, value, results, successLabel, failureLabel) {
+    if (value == null || value === "") return false;
+    const ok = setNodeValue(findTextField(hints), value);
+    results.push(ok ? successLabel : failureLabel);
+    if (ok) await wait(250);
+    return ok;
+  }
+
+  async function fillSelectField(hints, value, results, successLabel, failureLabel, fallbacks = []) {
+    if (value == null || value === "") return false;
+    const ok = await selectOption(hints, value, fallbacks);
+    results.push(ok ? successLabel : failureLabel);
+    if (ok) await wait(450);
+    return ok;
+  }
+
+  async function fillSelectOrTextField(hints, value, results, successLabel, failureLabel, fallbacks = []) {
+    if (value == null || value === "") return false;
+    const selectOk = await selectOption(hints, value, fallbacks);
+    if (selectOk) {
+      results.push(successLabel);
+      await wait(450);
+      return true;
+    }
+    const textOk = setNodeValue(findTextField(hints), value);
+    results.push(textOk ? successLabel : failureLabel);
+    if (textOk) await wait(250);
+    return textOk;
+  }
+
+  async function clickNextStep(results) {
+    const nextButton = findNextButton();
+    if (!nextButton) {
+      results.push("Could not find next button");
+      return false;
+    }
+    if (isDisabledButton(nextButton)) {
+      results.push("Next button stayed disabled");
+      return false;
+    }
+    dispatchMouseSequence(nextButton);
+    results.push("Opened final review step");
+    await wait(1600);
+    return true;
+  }
+
+  async function waitForFinalReview() {
+    for (let attempt = 0; attempt < 12; attempt += 1) {
+      const progress = findProgressLabel() || "";
+      if (/step 2 of 2/i.test(progress) || findPublishButton()) {
+        return true;
+      }
+      await wait(700);
+    }
+    return false;
+  }
+
+  async function fillAdditionalVehicleDetails(vehicle, results) {
+    await fillSelectField(
+      ["body style"],
+      vehicle.body_style || "Sedan",
+      results,
+      "Filled body style",
+      "Could not find body style field",
+      bodyStyleCandidates(vehicle.body_style || "Sedan").slice(1)
+    );
+    await fillSelectField(
+      ["exterior color"],
+      vehicle.exterior_color || "",
+      results,
+      "Filled exterior color",
+      "Could not find exterior color field"
+    );
+    await fillSelectField(
+      ["interior color"],
+      vehicle.interior_color || "",
+      results,
+      "Filled interior color",
+      "Could not find interior color field"
+    );
+    await fillSelectField(
+      ["fuel type"],
+      vehicle.fuel_type || "",
+      results,
+      "Filled fuel type",
+      "Could not find fuel type field"
+    );
+    await fillSelectField(
+      ["transmission"],
+      vehicle.transmission || "",
+      results,
+      "Filled transmission",
+      "Could not find transmission field"
+    );
   }
 
   function findAddPhotosButton() {
@@ -397,40 +525,37 @@
         return { ok: false, appliedCount: 0, failedCount: 1 };
       }
     }
+    await wait(1200);
 
-    const priceOk = setNodeValue(findTextField(["price", "asking price"]), dealerDraft.price || "");
-    results.push(priceOk ? "Filled price" : "Could not find price field");
+    await fillTextField(["price", "asking price"], dealerDraft.price || "", results, "Filled price", "Could not find price field");
 
-    const yearOk =
-      (await selectOption(["year"], vehicle.year || "")) ||
-      setNodeValue(findTextField(["year"]), vehicle.year || "");
-    results.push(yearOk ? "Filled year" : "Could not find year field");
+    await fillSelectOrTextField(["year"], vehicle.year || "", results, "Filled year", "Could not find year field");
+    await wait(800);
 
-    const makeOk =
-      (await selectOption(["make"], vehicle.make || "")) ||
-      setNodeValue(findTextField(["make"]), vehicle.make || "");
-    results.push(makeOk ? "Filled make" : "Could not find make field");
+    await fillSelectOrTextField(["make"], vehicle.make || "", results, "Filled make", "Could not find make field");
+    await wait(800);
 
-    const modelOk =
-      (await selectOption(["model"], modelValue)) ||
-      setNodeValue(findTextField(["model"]), modelValue);
-    results.push(modelOk ? "Filled model" : "Could not find model field");
+    await fillSelectOrTextField(["model"], modelValue, results, "Filled model", "Could not find model field");
 
-    const mileageOk =
-      (await selectOption(["mileage", "odometer"], mileageValue)) ||
-      setNodeValue(findTextField(["mileage", "odometer"]), mileageValue);
-    results.push(mileageOk ? "Filled mileage" : "Could not find mileage field");
+    await fillSelectOrTextField(
+      ["mileage", "odometer"],
+      mileageValue,
+      results,
+      "Filled mileage",
+      "Could not find mileage field"
+    );
 
-    const descOk = setNodeValue(findDescriptionField(), dealerDraft.description || "");
-    results.push(descOk ? "Filled description" : "Could not find description field");
+    await fillTextField(["description"], dealerDraft.description || "", results, "Filled description", "Could not find description field");
 
-    const conditionOk =
-      (await selectOption(["condition"], vehicle.condition || "")) ||
-      setNodeValue(findTextField(["condition"]), vehicle.condition || "");
-    results.push(conditionOk ? "Filled condition" : "Could not find condition field");
+    await fillSelectOrTextField(
+      ["condition"],
+      vehicle.condition || "",
+      results,
+      "Filled condition",
+      "Could not find condition field"
+    );
 
-    const bodyStyleOk = await pickBodyStyle(vehicle.body_style || "Sedan");
-    results.push(bodyStyleOk ? "Filled body style" : "Could not find body style field");
+    await fillAdditionalVehicleDetails(vehicle, results);
 
     const warningLines = [];
     if (Array.isArray(dealerDraft.images) && dealerDraft.images.length) {
@@ -441,6 +566,24 @@
         warningLines.push(`Images found on vehicle page: ${dealerDraft.images.length}`);
         warningLines.push("Photo upload could not be automated on this Facebook layout.");
       }
+    }
+
+    const nextClicked = await clickNextStep(results);
+    if (nextClicked) {
+      const finalReady = await waitForFinalReview();
+      if (finalReady) {
+        await fillTextField(["title", "listing title", "vehicle title"], dealerDraft.title || "", results, "Filled final title", "Could not find final title field");
+        await fillTextField(["description"], dealerDraft.description || "", results, "Filled final description", "Could not find final description field");
+        if (findPublishButton()) {
+          results.push("Reached final publish screen");
+        } else {
+          warningLines.push("Moved past step one, but the final publish button was not found yet.");
+        }
+      } else {
+        warningLines.push("Clicked Next, but Facebook did not fully load the final review step in time.");
+      }
+    } else {
+      warningLines.push("Step one stayed incomplete, so the helper did not move to the final publish screen.");
     }
 
     const failedCount = results.filter((line) => line.startsWith("Could not")).length;
