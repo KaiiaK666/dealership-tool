@@ -427,6 +427,7 @@ def normalize_store(store: dict) -> dict:
             task.setdefault("due_date", None)
             task.setdefault("effort", 1)
             task.setdefault("notes", "")
+            task.setdefault("screenshots", [])
             task.setdefault("custom_fields", {})
 
     return normalized
@@ -582,6 +583,7 @@ class TaskCreate(BaseModel):
     due_date: str | None = None
     effort: int = Field(default=1, ge=1, le=13)
     notes: str = ""
+    screenshots: list[str] = Field(default_factory=list)
     custom_fields: dict[str, str | int | float | bool | None] = Field(default_factory=dict)
 
 
@@ -599,6 +601,7 @@ class TaskPatch(BaseModel):
     due_date: str | None = None
     effort: int | None = Field(default=None, ge=1, le=13)
     notes: str | None = None
+    screenshots: list[str] | None = None
     custom_fields: dict[str, str | int | float | bool | None] | None = None
 
 
