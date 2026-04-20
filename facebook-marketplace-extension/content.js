@@ -136,6 +136,13 @@
     return findEditable(hints, { exact: true }) || findEditable(hints);
   }
 
+  function findCheckboxByHints(hints) {
+    return Array.from(document.querySelectorAll('input[type="checkbox"]')).find((node) => {
+      if (!isVisible(node) && node.closest("label") && !isVisible(node.closest("label"))) return false;
+      return matchesHint(collectFieldText(node), hints, false);
+    });
+  }
+
   function findFieldGroupTitle(title) {
     return Array.from(document.querySelectorAll("span, div, h1, h2, h3")).find((node) =>
       isVisible(node) && normalizeText(node.textContent).toLowerCase() === normalizeText(title).toLowerCase()
@@ -151,6 +158,16 @@
     node.dispatchEvent(new Event("input", { bubbles: true }));
     node.dispatchEvent(new Event("change", { bubbles: true }));
     return true;
+  }
+
+  function setNativeChecked(node, checked) {
+    if (!node) return false;
+    const descriptor = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "checked");
+    if (!descriptor?.set) return false;
+    descriptor.set.call(node, checked);
+    node.dispatchEvent(new Event("input", { bubbles: true }));
+    node.dispatchEvent(new Event("change", { bubbles: true }));
+    return node.checked === checked;
   }
 
   function setNodeValue(node, value) {
@@ -219,6 +236,30 @@
     if (source.includes("convert")) return ["Convertible", "Sedan"];
     if (source.includes("van")) return ["Van", "Minivan", "Sedan"];
     return [normalizeText(value || "Sedan"), "Sedan"];
+  }
+
+  function conditionCandidates(value) {
+    const source = normalizeText(value).toLowerCase();
+    if (!source || source === "used") return ["Very Good", "Good", "Excellent", "Fair"];
+    if (source === "new") return ["New", "Excellent", "Very Good"];
+    if (source.includes("excellent")) return ["Excellent", "Very Good", "Good"];
+    if (source.includes("very good")) return ["Very Good", "Good", "Excellent"];
+    if (source.includes("good")) return ["Very Good", "Good", "Excellent"];
+    if (source.includes("fair")) return ["Fair", "Good", "Very Good"];
+    if (source.includes("salvage")) return ["Fair", "Poor"];
+    return [normalizeText(value), "Very Good", "Good"];
+  }
+
+  function fuelTypeCandidates(value) {
+    const source = normalizeText(value).toLowerCase();
+    if (!source) return [];
+    if (source.includes("plug") && source.includes("hybrid")) return ["Plug-in Hybrid", "Hybrid"];
+    if (source.includes("hybrid")) return ["Hybrid", "Plug-in Hybrid"];
+    if (source.includes("electric") || source === "ev") return ["Electric"];
+    if (source.includes("diesel")) return ["Diesel"];
+    if (source.includes("flex")) return ["Flex Fuel", "Gasoline"];
+    if (/(gas|gasoline|unleaded|petrol)/i.test(source)) return ["Gasoline", "Gas"];
+    return [normalizeText(value)];
   }
 
   function vehicleTypeCandidates() {
@@ -341,8 +382,36 @@
     return textOk;
   }
 
+  async function ensureCheckboxChecked(hints, checked, results, successLabel, failureLabel) {
+    const checkbox = findCheckboxByHints(hints);
+    if (!checkbox) {
+      results.push(failureLabel);
+      return false;
+    }
+    if (checkbox.checked === checked) {
+      results.push(successLabel);
+      return true;
+    }
+    const target = checkbox.closest('label, [role="checkbox"], [role="button"]') || checkbox.parentElement || checkbox;
+    dispatchMouseSequence(target);
+    await wait(250);
+    if (checkbox.checked === checked) {
+      results.push(successLabel);
+      return true;
+    }
+    const ok = setNativeChecked(checkbox, checked);
+    results.push(ok ? successLabel : failureLabel);
+    if (ok) await wait(250);
+    return ok;
+  }
+
   async function clickNextStep(results) {
-    const nextButton = findNextButton();
+    let nextButton = null;
+    for (let attempt = 0; attempt < 12; attempt += 1) {
+      nextButton = findNextButton();
+      if (nextButton && !isDisabledButton(nextButton)) break;
+      await wait(700);
+    }
     if (!nextButton) {
       results.push("Could not find next button");
       return false;
@@ -369,6 +438,7 @@
   }
 
   async function fillAdditionalVehicleDetails(vehicle, results) {
+    const fuelCandidates = fuelTypeCandidates(vehicle.fuel_type || "");
     await fillSelectField(
       ["body style"],
       vehicle.body_style || "Sedan",
@@ -393,10 +463,11 @@
     );
     await fillSelectField(
       ["fuel type"],
-      vehicle.fuel_type || "",
+      fuelCandidates[0] || "",
       results,
       "Filled fuel type",
-      "Could not find fuel type field"
+      "Could not find fuel type field",
+      fuelCandidates.slice(1)
     );
     await fillSelectField(
       ["transmission"],
@@ -414,11 +485,42 @@
   }
 
   function findImageInput() {
-    return Array.from(document.querySelectorAll('input[type="file"][multiple], input[type="file"]')).find((node) => {
+    const candidates = Array.from(document.querySelectorAll('input[type="file"][multiple], input[type="file"]')).filter((node) => {
       if (!isVisible(node) && node.closest("label") && !isVisible(node.closest("label"))) return false;
       const accept = String(node.getAttribute("accept") || "").toLowerCase();
-      return (!accept || accept.includes("image")) && node.hasAttribute("multiple");
+      return !accept || accept.includes("image");
     });
+    return candidates.find((node) => node.hasAttribute("multiple")) || candidates[0] || null;
+  }
+
+  function findPhotoDropTarget(input) {
+    return input?.closest("label") || input?.parentElement || findAddPhotosButton() || null;
+  }
+
+  function getPhotoCount() {
+    const texts = Array.from(document.querySelectorAll("span, div"))
+      .filter(isVisible)
+      .map((node) => normalizeText(node.textContent))
+      .filter(Boolean);
+    let best = 0;
+    for (const text of texts) {
+      const match = text.match(/photos?\s*[·•]?\s*(\d+)\s*\/\s*(\d+)/i);
+      if (match) {
+        best = Math.max(best, Number(match[1] || 0));
+      }
+    }
+    return best;
+  }
+
+  async function waitForPhotoUpload(previousCount, minimumAdded) {
+    for (let attempt = 0; attempt < 18; attempt += 1) {
+      const count = getPhotoCount();
+      if (count >= previousCount + minimumAdded || count > previousCount) {
+        return count;
+      }
+      await wait(650);
+    }
+    return getPhotoCount();
   }
 
   async function uploadImages(imageUrls) {
@@ -429,6 +531,7 @@
       input = findImageInput();
     }
     if (!input || !Array.isArray(imageUrls) || !imageUrls.length) return { ok: false, uploaded: 0 };
+    const startingCount = getPhotoCount();
     const dataTransfer = new DataTransfer();
     let uploaded = 0;
     for (let index = 0; index < Math.min(imageUrls.length, 10); index += 1) {
@@ -446,17 +549,26 @@
       }
     }
     if (!uploaded) return { ok: false, uploaded: 0 };
-    input.files = dataTransfer.files;
+    const filesDescriptor = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "files");
+    if (filesDescriptor?.set) {
+      filesDescriptor.set.call(input, dataTransfer.files);
+    } else {
+      input.files = dataTransfer.files;
+    }
     input.dispatchEvent(new Event("click", { bubbles: true }));
-    input.dispatchEvent(new Event("change", { bubbles: true }));
     input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+    const dropTarget = findPhotoDropTarget(input);
     try {
+      dropTarget?.dispatchEvent(new DragEvent("dragenter", { bubbles: true, dataTransfer }));
+      dropTarget?.dispatchEvent(new DragEvent("dragover", { bubbles: true, dataTransfer }));
+      dropTarget?.dispatchEvent(new DragEvent("drop", { bubbles: true, dataTransfer }));
       input.dispatchEvent(new DragEvent("drop", { bubbles: true, dataTransfer }));
     } catch {
       // DragEvent is not always constructible in Chrome extension contexts.
     }
-    await wait(800);
-    return { ok: true, uploaded };
+    const endingCount = await waitForPhotoUpload(startingCount, Math.min(uploaded, 1));
+    return { ok: endingCount > startingCount, uploaded, photoCount: endingCount };
   }
 
   function getStatusNode() {
@@ -547,12 +659,23 @@
 
     await fillTextField(["description"], dealerDraft.description || "", results, "Filled description", "Could not find description field");
 
+    await ensureCheckboxChecked(
+      ["clean title"],
+      vehicle.clean_title !== false,
+      results,
+      "Checked clean title",
+      "Could not find clean title checkbox"
+    );
+
+    const conditionOptions = conditionCandidates(vehicle.marketplace_condition || vehicle.condition || "Very Good");
+
     await fillSelectOrTextField(
       ["condition"],
-      vehicle.condition || "",
+      conditionOptions[0] || "Very Good",
       results,
       "Filled condition",
-      "Could not find condition field"
+      "Could not find condition field",
+      conditionOptions.slice(1)
     );
 
     await fillAdditionalVehicleDetails(vehicle, results);
@@ -561,10 +684,11 @@
     if (Array.isArray(dealerDraft.images) && dealerDraft.images.length) {
       const uploadResult = await uploadImages(dealerDraft.images);
       if (uploadResult.ok) {
-        results.push(`Queued ${uploadResult.uploaded} photo${uploadResult.uploaded === 1 ? "" : "s"}`);
+        const finalPhotoCount = Math.max(uploadResult.photoCount || 0, uploadResult.uploaded);
+        results.push(`Uploaded ${finalPhotoCount} photo${finalPhotoCount === 1 ? "" : "s"}`);
       } else {
         warningLines.push(`Images found on vehicle page: ${dealerDraft.images.length}`);
-        warningLines.push("Photo upload could not be automated on this Facebook layout.");
+        warningLines.push("Photo upload did not stick on this Facebook layout yet.");
       }
     }
 

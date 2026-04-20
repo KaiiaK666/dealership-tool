@@ -50,6 +50,17 @@
     return "Sedan";
   }
 
+  function inferMarketplaceCondition(condition) {
+    const source = normalizeText(condition).toLowerCase();
+    if (!source || source === "used") return "Very Good";
+    if (source === "new") return "New";
+    if (source.includes("certified")) return "Excellent";
+    if (source.includes("excellent")) return "Excellent";
+    if (source.includes("good")) return "Very Good";
+    if (source.includes("fair")) return "Fair";
+    return "Very Good";
+  }
+
   function parseTitleParts(title) {
     const clean = normalizeText(title).replace(/\s+[|-].*$/, "");
     const match = clean.match(/(20\d{2})\s+([A-Za-z]+)\s+(.+)/);
@@ -203,6 +214,8 @@
       vin: normalizeText(vin),
       stock: normalizeText(stock),
       condition,
+      marketplace_condition: inferMarketplaceCondition(condition),
+      clean_title: true,
       body_style: inferBodyStyle(`${rawTitle} ${parts.model}`),
       transmission: normalizeText(transmission),
       fuel_type: normalizeText(fuelType),
