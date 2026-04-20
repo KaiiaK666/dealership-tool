@@ -8,6 +8,17 @@
     return String(text || "").replace(/\s+/g, " ").trim();
   }
 
+  function simplifyText(text) {
+    return normalizeText(text).toLowerCase().replace(/[^a-z0-9]+/g, "");
+  }
+
+  function valueMatches(currentValue, candidate) {
+    const current = simplifyText(currentValue);
+    const target = simplifyText(candidate);
+    if (!current || !target) return false;
+    return current === target || current.includes(target) || target.includes(current);
+  }
+
   function isVisible(node) {
     if (!node || !node.isConnected) return false;
     const style = window.getComputedStyle(node);
@@ -136,7 +147,25 @@
     return findEditable(hints, { exact: true }) || findEditable(hints);
   }
 
+  function findCleanTitleCheckbox() {
+    const markers = Array.from(document.querySelectorAll("div, span, p, label"))
+      .filter((node) => isVisible(node) && /clean title/i.test(normalizeText(node.textContent || "")));
+    for (const marker of markers) {
+      let current = marker;
+      for (let depth = 0; current && depth < 5; depth += 1) {
+        const checkbox = current.querySelector?.('input[type="checkbox"]');
+        if (checkbox) return checkbox;
+        current = current.parentElement;
+      }
+    }
+    return null;
+  }
+
   function findCheckboxByHints(hints) {
+    if (hints.some((hint) => /clean title/i.test(hint))) {
+      const cleanTitleCheckbox = findCleanTitleCheckbox();
+      if (cleanTitleCheckbox) return cleanTitleCheckbox;
+    }
     return Array.from(document.querySelectorAll('input[type="checkbox"]')).find((node) => {
       if (!isVisible(node) && node.closest("label") && !isVisible(node.closest("label"))) return false;
       return matchesHint(collectFieldText(node), hints, false);
@@ -195,16 +224,16 @@
     return exactCandidates.find((node) => matchesHint(collectFieldText(node), hints, false));
   }
 
-  function findOptionByText(values) {
+  function findOptionByText(values, root = document) {
     const targets = (Array.isArray(values) ? values : [values])
       .map((value) => normalizeText(value).toLowerCase())
       .filter(Boolean);
     if (!targets.length) return null;
 
     const exactCandidates = Array.from(
-      document.querySelectorAll('[role="option"], [role="menuitemradio"], [role="menuitem"], [aria-selected="true"], [aria-selected="false"]')
+      root.querySelectorAll('[role="option"], [role="menuitemradio"], [role="menuitem"], [aria-selected="true"], [aria-selected="false"]')
     ).filter(isVisible);
-    const broadCandidates = Array.from(document.querySelectorAll("li, span, div"))
+    const broadCandidates = Array.from(root.querySelectorAll("li, span, div"))
       .filter((node) => isVisible(node) && !node.querySelector("input, textarea") && normalizeText(node.textContent).length <= 64);
     const candidates = [...exactCandidates, ...broadCandidates];
 
@@ -224,6 +253,11 @@
       .sort((left, right) => right.score - left.score || left.textLength - right.textLength);
 
     return scored[0]?.node || null;
+  }
+
+  function getVisibleOptionScopes() {
+    const scopes = Array.from(document.querySelectorAll('[role="listbox"], [role="menu"], [role="dialog"]')).filter(isVisible);
+    return scopes.length ? scopes : [document];
   }
 
   function bodyStyleCandidates(value) {
@@ -258,7 +292,7 @@
     if (source.includes("electric") || source === "ev") return ["Electric"];
     if (source.includes("diesel")) return ["Diesel"];
     if (source.includes("flex")) return ["Flex Fuel", "Gasoline"];
-    if (/(gas|gasoline|unleaded|petrol)/i.test(source)) return ["Gasoline", "Gas"];
+    if (/(gas|gasoline|unleaded|petrol)/i.test(source)) return ["Petrol", "Gasoline", "Gas", "Other"];
     return [normalizeText(value)];
   }
 
@@ -277,25 +311,33 @@
     const trigger = findSelectTrigger(hints);
     if (!trigger) return false;
 
-    const currentValue = normalizeText(getComboboxValue(trigger)).toLowerCase();
-    if (candidateValues.some((candidate) => currentValue === candidate.toLowerCase())) {
+    const currentValue = normalizeText(getComboboxValue(trigger));
+    if (candidateValues.some((candidate) => valueMatches(currentValue, candidate))) {
       return true;
     }
 
     for (const candidate of candidateValues) {
       dispatchMouseSequence(trigger);
-      await wait(450);
-      let option = findOptionByText(candidate);
-      if (!option) {
-        await wait(450);
-        option = findOptionByText(candidate);
+      await wait(500);
+      let option = null;
+      for (let attempt = 0; attempt < 4 && !option; attempt += 1) {
+        const scopes = getVisibleOptionScopes();
+        option =
+          scopes.map((scope) => findOptionByText(candidate, scope)).find(Boolean) ||
+          findOptionByText(candidate);
+        if (!option) {
+          await wait(350);
+        }
       }
       if (!option) continue;
       dispatchMouseSequence(option);
-      await wait(500);
-      const nextValue = normalizeText(getComboboxValue(trigger)).toLowerCase();
-      if (!nextValue || nextValue.includes(candidate.toLowerCase()) || candidate.toLowerCase().includes(nextValue)) {
-        return true;
+      for (let settle = 0; settle < 6; settle += 1) {
+        await wait(280);
+        const liveTrigger = findSelectTrigger(hints) || trigger;
+        const nextValue = normalizeText(getComboboxValue(liveTrigger));
+        if (valueMatches(nextValue, candidate)) {
+          return true;
+        }
       }
     }
 
@@ -484,7 +526,16 @@
     );
   }
 
+  function findPhotoUploadLabel() {
+    return Array.from(document.querySelectorAll("label, div, [role='button']")).find((node) => {
+      return isVisible(node) && /add photos/i.test(normalizeText(node.textContent || node.getAttribute("aria-label") || ""));
+    });
+  }
+
   function findImageInput() {
+    const photoLabel = findPhotoUploadLabel();
+    const labeledInput = photoLabel?.querySelector?.('input[type="file"]');
+    if (labeledInput) return labeledInput;
     const candidates = Array.from(document.querySelectorAll('input[type="file"][multiple], input[type="file"]')).filter((node) => {
       if (!isVisible(node) && node.closest("label") && !isVisible(node.closest("label"))) return false;
       const accept = String(node.getAttribute("accept") || "").toLowerCase();
@@ -494,7 +545,7 @@
   }
 
   function findPhotoDropTarget(input) {
-    return input?.closest("label") || input?.parentElement || findAddPhotosButton() || null;
+    return findPhotoUploadLabel() || input?.closest("label") || input?.parentElement || findAddPhotosButton() || null;
   }
 
   function getPhotoCount() {
@@ -549,26 +600,65 @@
       }
     }
     if (!uploaded) return { ok: false, uploaded: 0 };
-    const filesDescriptor = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "files");
-    if (filesDescriptor?.set) {
-      filesDescriptor.set.call(input, dataTransfer.files);
-    } else {
-      input.files = dataTransfer.files;
+    let endingCount = startingCount;
+    let assignedCount = 0;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      input = findImageInput() || input;
+      const dropTarget = findPhotoDropTarget(input);
+      const filesDescriptor = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "files");
+      if (filesDescriptor?.set) {
+        filesDescriptor.set.call(input, dataTransfer.files);
+      } else {
+        input.files = dataTransfer.files;
+      }
+      assignedCount = Math.max(assignedCount, Number(input.files?.length || 0));
+      input.dispatchEvent(new Event("click", { bubbles: true }));
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+      input.dispatchEvent(new Event("change", { bubbles: true }));
+      dropTarget?.dispatchEvent(new Event("input", { bubbles: true }));
+      dropTarget?.dispatchEvent(new Event("change", { bubbles: true }));
+      try {
+        dropTarget?.dispatchEvent(new DragEvent("dragenter", { bubbles: true, dataTransfer }));
+        dropTarget?.dispatchEvent(new DragEvent("dragover", { bubbles: true, dataTransfer }));
+        dropTarget?.dispatchEvent(new DragEvent("drop", { bubbles: true, dataTransfer }));
+        input.dispatchEvent(new DragEvent("drop", { bubbles: true, dataTransfer }));
+      } catch {
+        // DragEvent is not always constructible in Chrome extension contexts.
+      }
+      endingCount = await waitForPhotoUpload(startingCount, Math.min(uploaded, 1));
+      if (endingCount > startingCount) {
+        return { ok: true, uploaded, photoCount: endingCount, assignedCount };
+      }
+      dispatchMouseSequence(dropTarget || input);
+      await wait(450);
     }
-    input.dispatchEvent(new Event("click", { bubbles: true }));
-    input.dispatchEvent(new Event("input", { bubbles: true }));
-    input.dispatchEvent(new Event("change", { bubbles: true }));
-    const dropTarget = findPhotoDropTarget(input);
-    try {
-      dropTarget?.dispatchEvent(new DragEvent("dragenter", { bubbles: true, dataTransfer }));
-      dropTarget?.dispatchEvent(new DragEvent("dragover", { bubbles: true, dataTransfer }));
-      dropTarget?.dispatchEvent(new DragEvent("drop", { bubbles: true, dataTransfer }));
-      input.dispatchEvent(new DragEvent("drop", { bubbles: true, dataTransfer }));
-    } catch {
-      // DragEvent is not always constructible in Chrome extension contexts.
-    }
-    const endingCount = await waitForPhotoUpload(startingCount, Math.min(uploaded, 1));
-    return { ok: endingCount > startingCount, uploaded, photoCount: endingCount };
+    return { ok: false, uploaded, photoCount: endingCount, assignedCount };
+  }
+
+  function getSelectValue(hints) {
+    const trigger = findSelectTrigger(hints);
+    return normalizeText(getComboboxValue(trigger));
+  }
+
+  function getFormSnapshot() {
+    const cleanTitleCheckbox = findCheckboxByHints(["clean title"]);
+    return {
+      cleanTitle: Boolean(cleanTitleCheckbox?.checked),
+      condition: getSelectValue(["condition"]),
+      fuelType: getSelectValue(["fuel type"]),
+      transmission: getSelectValue(["transmission"]),
+      photos: getPhotoCount(),
+    };
+  }
+
+  function missingSnapshotFields(snapshot) {
+    const missing = [];
+    if (!snapshot.cleanTitle) missing.push("clean title");
+    if (!snapshot.condition) missing.push("condition");
+    if (!snapshot.fuelType) missing.push("fuel type");
+    if (!snapshot.transmission) missing.push("transmission");
+    if (!snapshot.photos) missing.push("photos");
+    return missing;
   }
 
   function getStatusNode() {
@@ -688,8 +778,46 @@
         results.push(`Uploaded ${finalPhotoCount} photo${finalPhotoCount === 1 ? "" : "s"}`);
       } else {
         warningLines.push(`Images found on vehicle page: ${dealerDraft.images.length}`);
-        warningLines.push("Photo upload did not stick on this Facebook layout yet.");
+        warningLines.push(`Photo input accepted ${uploadResult.assignedCount || 0} file${uploadResult.assignedCount === 1 ? "" : "s"}, but Facebook still shows ${uploadResult.photoCount || 0} photo${uploadResult.photoCount === 1 ? "" : "s"}.`);
       }
+    }
+
+    let snapshot = getFormSnapshot();
+    if (!snapshot.cleanTitle) {
+      await ensureCheckboxChecked(
+        ["clean title"],
+        true,
+        results,
+        "Retried clean title",
+        "Clean title still did not check"
+      );
+      snapshot = getFormSnapshot();
+    }
+    if (!snapshot.fuelType) {
+      const fuelCandidates = fuelTypeCandidates(vehicle.fuel_type || "");
+      await fillSelectField(
+        ["fuel type"],
+        fuelCandidates[0] || "",
+        results,
+        "Retried fuel type",
+        "Fuel type stayed blank",
+        fuelCandidates.slice(1)
+      );
+      snapshot = getFormSnapshot();
+    }
+    if (!snapshot.transmission && vehicle.transmission) {
+      await fillSelectField(
+        ["transmission"],
+        vehicle.transmission,
+        results,
+        "Retried transmission",
+        "Transmission stayed blank"
+      );
+      snapshot = getFormSnapshot();
+    }
+    const missingBeforeNext = missingSnapshotFields(snapshot);
+    if (missingBeforeNext.length) {
+      warningLines.push(`Still missing before Next: ${missingBeforeNext.join(", ")}`);
     }
 
     const nextClicked = await clickNextStep(results);
