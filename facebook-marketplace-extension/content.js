@@ -221,6 +221,15 @@
     return [normalizeText(value || "Sedan"), "Sedan"];
   }
 
+  function vehicleTypeCandidates() {
+    return ["Car/Truck", "Car / Truck", "Cars & Trucks", "Car", "Truck"];
+  }
+
+  function isVehicleTypeReady(value) {
+    const text = normalizeText(value).toLowerCase();
+    return text === "car/truck" || text === "car / truck" || text === "cars & trucks" || text === "car" || text === "truck";
+  }
+
   async function selectOption(hints, value, fallbacks = []) {
     const candidateValues = [value, ...fallbacks].map((item) => normalizeText(item)).filter(Boolean);
     if (!candidateValues.length) return false;
@@ -249,8 +258,25 @@
   }
 
   async function pickVehicleType(value) {
+    const trigger = findSelectTrigger(["vehicle type"]);
+    if (!trigger) return false;
+    const currentValue = normalizeText(getComboboxValue(trigger));
+    if (isVehicleTypeReady(currentValue)) {
+      return true;
+    }
+    const candidates = vehicleTypeCandidates();
+    const changed = await selectOption(["vehicle type"], candidates[0], candidates.slice(1));
+    if (!changed) {
+      return false;
+    }
+    await wait(1100);
+    const nextValue = normalizeText(getComboboxValue(findSelectTrigger(["vehicle type"]) || trigger));
+    return isVehicleTypeReady(nextValue);
+  }
+
+  async function pickBodyStyle(value) {
     const candidates = bodyStyleCandidates(value);
-    return await selectOption(["vehicle type"], candidates[0], candidates.slice(1));
+    return await selectOption(["body style"], candidates[0], candidates.slice(1));
   }
 
   function findAddPhotosButton() {
@@ -356,6 +382,21 @@
 
     const vehicleTypeOk = await pickVehicleType(vehicle.body_style || "Sedan");
     results.push(vehicleTypeOk ? "Filled vehicle type" : "Could not find vehicle type field");
+    if (!vehicleTypeOk) {
+      const trigger = findSelectTrigger(["vehicle type"]);
+      const currentValue = normalizeText(getComboboxValue(trigger));
+      if (!isVehicleTypeReady(currentValue)) {
+        setStatus(
+          [
+            "Facebook vehicle type was not set to Car/Truck.",
+            "The rest of the fields were skipped so Facebook does not wipe them afterward.",
+            "Open the Vehicle type dropdown first, then click Apply Saved Draft again.",
+          ],
+          "warning"
+        );
+        return { ok: false, appliedCount: 0, failedCount: 1 };
+      }
+    }
 
     const priceOk = setNodeValue(findTextField(["price", "asking price"]), dealerDraft.price || "");
     results.push(priceOk ? "Filled price" : "Could not find price field");
@@ -387,6 +428,9 @@
       (await selectOption(["condition"], vehicle.condition || "")) ||
       setNodeValue(findTextField(["condition"]), vehicle.condition || "");
     results.push(conditionOk ? "Filled condition" : "Could not find condition field");
+
+    const bodyStyleOk = await pickBodyStyle(vehicle.body_style || "Sedan");
+    results.push(bodyStyleOk ? "Filled body style" : "Could not find body style field");
 
     const warningLines = [];
     if (Array.isArray(dealerDraft.images) && dealerDraft.images.length) {
