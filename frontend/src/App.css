@@ -3215,6 +3215,42 @@ button.special-card:hover:not(:disabled) {
   gap: 12px;
 }
 
+.freshup-store-grid,
+.freshup-store-card,
+.freshup-store-card__actions {
+  display: grid;
+  gap: 12px;
+}
+
+.freshup-store-card {
+  padding: 16px;
+  border-radius: 18px;
+  border: 1px solid rgba(210, 198, 182, 0.64);
+  background: rgba(255, 255, 255, 0.82);
+}
+
+.freshup-store-card h4 {
+  margin: 4px 0 0;
+}
+
+.freshup-store-card__actions a {
+  width: 100%;
+  text-align: center;
+}
+
+.secondary-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(37, 48, 59, 0.16);
+  background: rgba(37, 48, 59, 0.08);
+  color: var(--ink);
+  text-decoration: none;
+  font-weight: 700;
+}
+
 .freshup-log-item {
   display: grid;
   gap: 12px;

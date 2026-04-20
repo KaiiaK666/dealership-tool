@@ -108,7 +108,10 @@ export const getAdminSession = (token) => request("/api/admin/session", { header
 export const getSalespeople = (params = {}) => request(`/api/salespeople${qs({ include_inactive: params.includeInactive })}`);
 export const getFreshUpLog = (params = {}) =>
   request(`/api/freshup/log${qs({ salesperson_id: params.salespersonId, limit: params.limit })}`);
+export const getFreshUpLinks = () => request("/api/freshup/links");
 export const createFreshUpLog = (payload) => request("/api/freshup/log", { method: "POST", body: payload });
+export const updateFreshUpLinks = (token, payload) =>
+  request("/api/admin/freshup/links", { method: "POST", body: payload, headers: adminHeaders(token) });
 export const createSalesperson = (token, payload) =>
   request("/api/admin/salespeople", { method: "POST", body: payload, headers: adminHeaders(token) });
 export const updateSalesperson = (token, id, payload) =>

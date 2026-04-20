@@ -43,6 +43,7 @@ BDC_DISTRIBUTION_META_KEY = "bdc:distribution"
 BDC_UNDO_REQUIRE_META_KEY = "bdc:undo:require_password"
 BDC_UNDO_PASSWORD_META_KEY = "bdc:undo:password"
 TAB_VISIBILITY_META_KEY = "tabs:visibility"
+FRESHUP_LINKS_META_KEY = "freshup:links"
 TAB_VISIBILITY_IDS = (
     "serviceCalendar",
     "serviceNotes",
@@ -256,6 +257,30 @@ class FreshUpLogOut(BaseModel):
 class FreshUpLogListOut(BaseModel):
     total: int
     entries: List[FreshUpLogOut]
+
+
+class FreshUpLinkStoreOut(BaseModel):
+    dealership: str
+    display_name: str
+    soft_pull_label: str
+    soft_pull_url: str
+    hard_pull_label: str
+    hard_pull_url: str
+    inventory_label: str
+    inventory_url: str
+
+
+class FreshUpLinksConfigOut(BaseModel):
+    page_title: str
+    page_subtitle: str
+    form_title: str
+    form_subtitle: str
+    submit_label: str
+    stores: List[FreshUpLinkStoreOut]
+
+
+class FreshUpLinksConfigIn(FreshUpLinksConfigOut):
+    pass
 
 
 class BdcReportRowOut(BaseModel):
@@ -614,6 +639,84 @@ def set_tab_visibility(payload: TabVisibilityIn) -> TabVisibilityOut:
     normalized = normalize_tab_visibility_entries(payload.entries or [])
     data = {entry.tab_id: entry.visible for entry in normalized.entries}
     set_meta(TAB_VISIBILITY_META_KEY, json.dumps(data))
+    return normalized
+
+
+def default_freshup_links_config() -> FreshUpLinksConfigOut:
+    return FreshUpLinksConfigOut(
+        page_title="Start with Bert Ogden Mission",
+        page_subtitle="Drop your info first, then choose the next step that fits you best.",
+        form_title="Send us your contact info",
+        form_subtitle="A sales specialist will follow up fast.",
+        submit_label="Send My Info",
+        stores=[
+            FreshUpLinkStoreOut(
+                dealership="Kia",
+                display_name="Mission Kia",
+                soft_pull_label="Quick Qualify",
+                soft_pull_url="https://www.700dealer.com/QuickQualify/fcb574d194ea477c945ec558b605c0f7-202061",
+                hard_pull_label="Quick Application",
+                hard_pull_url="https://www.700dealer.com/QuickQualify/efdbaaebf9444bf18a6e3ca931db75f3-2020120",
+                inventory_label="View Kia New Inventory",
+                inventory_url="https://www.bertogdenmissionkia.com/new-vehicles/",
+            ),
+            FreshUpLinkStoreOut(
+                dealership="Mazda",
+                display_name="Mission Mazda",
+                soft_pull_label="Quick Qualify",
+                soft_pull_url="https://www.700dealer.com/QuickQualify/3019d192efae4e3684cc49a88095425a-202061",
+                hard_pull_label="Quick Application",
+                hard_pull_url="https://www.700dealer.com/QuickQualify/d303d5b01d0f44df9ca5aad9a8a408dd-2019930",
+                inventory_label="View Mazda New Inventory",
+                inventory_url="https://www.bertogdenmissionmazda.com/new-vehicles/",
+            ),
+            FreshUpLinkStoreOut(
+                dealership="Outlet",
+                display_name="Mission Auto Outlet",
+                soft_pull_label="Quick Qualify",
+                soft_pull_url="https://www.700dealer.com/QuickQualify/88a0b45934bf4a4e8937c8ccb61c463f-202061",
+                hard_pull_label="Quick Application",
+                hard_pull_url="https://www.700dealer.com/QuickQualify/6d6d3105f3d3447a95e729875e0f248b-2020120",
+                inventory_label="View Pre-Owned Inventory",
+                inventory_url="https://www.bertogdenmissionautooutlet.com/inventory/used-2021-kia-forte-gt-line-fwd-4d-sedan-3kpf34ad7me310864/",
+            ),
+        ],
+    )
+
+
+def fetch_freshup_links_config() -> FreshUpLinksConfigOut:
+    raw = str(get_meta(FRESHUP_LINKS_META_KEY) or "").strip()
+    if not raw:
+        return default_freshup_links_config()
+    try:
+        parsed = json.loads(raw)
+        return FreshUpLinksConfigOut(**parsed)
+    except Exception:
+        return default_freshup_links_config()
+
+
+def update_freshup_links_config(payload: FreshUpLinksConfigIn) -> FreshUpLinksConfigOut:
+    normalized = FreshUpLinksConfigOut(
+        page_title=normalize_short_text(payload.page_title, "page_title", max_len=160),
+        page_subtitle=normalize_short_text(payload.page_subtitle, "page_subtitle", max_len=320),
+        form_title=normalize_short_text(payload.form_title, "form_title", max_len=160),
+        form_subtitle=normalize_short_text(payload.form_subtitle, "form_subtitle", max_len=320),
+        submit_label=normalize_short_text(payload.submit_label, "submit_label", max_len=80),
+        stores=[
+            FreshUpLinkStoreOut(
+                dealership=normalize_dealership(store.dealership),
+                display_name=normalize_short_text(store.display_name, "display_name", max_len=120),
+                soft_pull_label=normalize_short_text(store.soft_pull_label, "soft_pull_label", max_len=80),
+                soft_pull_url=normalize_short_text(store.soft_pull_url, "soft_pull_url", max_len=500),
+                hard_pull_label=normalize_short_text(store.hard_pull_label, "hard_pull_label", max_len=80),
+                hard_pull_url=normalize_short_text(store.hard_pull_url, "hard_pull_url", max_len=500),
+                inventory_label=normalize_short_text(store.inventory_label, "inventory_label", max_len=80),
+                inventory_url=normalize_short_text(store.inventory_url, "inventory_url", max_len=500),
+            )
+            for store in payload.stores
+        ],
+    )
+    set_meta(FRESHUP_LINKS_META_KEY, normalized.model_dump_json())
     return normalized
 
 
@@ -3168,6 +3271,15 @@ def post_marketplace_template(
     return update_marketplace_template(payload)
 
 
+@app.post("/api/admin/freshup/links", response_model=FreshUpLinksConfigOut)
+def post_freshup_links(
+    payload: FreshUpLinksConfigIn,
+    x_admin_token: Optional[str] = Header(default=None),
+) -> FreshUpLinksConfigOut:
+    require_admin(x_admin_token)
+    return update_freshup_links_config(payload)
+
+
 @app.post("/api/admin/service-drive/traffic/{traffic_id}/images", response_model=ServiceDriveTrafficOut)
 def post_service_drive_traffic_images(
     traffic_id: int,
@@ -3275,6 +3387,11 @@ def get_tabs_visibility_public() -> TabVisibilityOut:
 @app.get("/api/freshup/log", response_model=FreshUpLogListOut)
 def get_freshup_log(salesperson_id: Optional[int] = None, limit: int = 100) -> FreshUpLogListOut:
     return fetch_freshup_log(salesperson_id=salesperson_id, limit=limit)
+
+
+@app.get("/api/freshup/links", response_model=FreshUpLinksConfigOut)
+def get_freshup_links() -> FreshUpLinksConfigOut:
+    return fetch_freshup_links_config()
 
 
 @app.post("/api/freshup/log", response_model=FreshUpLogOut)

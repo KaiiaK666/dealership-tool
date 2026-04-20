@@ -19,6 +19,7 @@ import {
   getBdcReport,
   getBdcState,
   getFreshUpLog,
+  getFreshUpLinks,
   getBdcDistribution,
   getBdcUndoSettings,
   getMarketplaceTemplate,
@@ -34,6 +35,7 @@ import {
   undoReynoldsServiceDriveTrafficImport,
   updateBdcAgent,
   updateBdcDistribution,
+  updateFreshUpLinks,
   undoLastBdcAssign,
   updateBdcUndoSettings,
   updateMarketplaceTemplate,
@@ -67,6 +69,7 @@ const ADMIN_SECTIONS = [
   { id: "trafficLog", label: "Traffic Log" },
   { id: "bdcDistribution", label: "Lead Distribution Type" },
   { id: "tabs", label: "Tab Visibility" },
+  { id: "freshupLinks", label: "Freshup Links" },
   { id: "marketplace", label: "Marketplace" },
   { id: "quoteRates", label: "Quote Rates" },
   { id: "specials", label: "Specials" },
@@ -122,6 +125,45 @@ const FRESH_UP_DEFAULTS = {
   salespersonId: "",
   salespersonQuery: "",
   source: "Desk",
+};
+const FRESHUP_LINKS_DEFAULTS = {
+  page_title: "Start with Bert Ogden Mission",
+  page_subtitle: "Drop your info first, then choose the next step that fits you best.",
+  form_title: "Send us your contact info",
+  form_subtitle: "A sales specialist will follow up fast.",
+  submit_label: "Send My Info",
+  stores: [
+    {
+      dealership: "Kia",
+      display_name: "Mission Kia",
+      soft_pull_label: "Quick Qualify",
+      soft_pull_url: "https://www.700dealer.com/QuickQualify/fcb574d194ea477c945ec558b605c0f7-202061",
+      hard_pull_label: "Quick Application",
+      hard_pull_url: "https://www.700dealer.com/QuickQualify/efdbaaebf9444bf18a6e3ca931db75f3-2020120",
+      inventory_label: "View Kia New Inventory",
+      inventory_url: "https://www.bertogdenmissionkia.com/new-vehicles/",
+    },
+    {
+      dealership: "Mazda",
+      display_name: "Mission Mazda",
+      soft_pull_label: "Quick Qualify",
+      soft_pull_url: "https://www.700dealer.com/QuickQualify/3019d192efae4e3684cc49a88095425a-202061",
+      hard_pull_label: "Quick Application",
+      hard_pull_url: "https://www.700dealer.com/QuickQualify/d303d5b01d0f44df9ca5aad9a8a408dd-2019930",
+      inventory_label: "View Mazda New Inventory",
+      inventory_url: "https://www.bertogdenmissionmazda.com/new-vehicles/",
+    },
+    {
+      dealership: "Outlet",
+      display_name: "Mission Auto Outlet",
+      soft_pull_label: "Quick Qualify",
+      soft_pull_url: "https://www.700dealer.com/QuickQualify/88a0b45934bf4a4e8937c8ccb61c463f-202061",
+      hard_pull_label: "Quick Application",
+      hard_pull_url: "https://www.700dealer.com/QuickQualify/6d6d3105f3d3447a95e729875e0f248b-2020120",
+      inventory_label: "View Pre-Owned Inventory",
+      inventory_url: "https://www.bertogdenmissionautooutlet.com/inventory/used-2021-kia-forte-gt-line-fwd-4d-sedan-3kpf34ad7me310864/",
+    },
+  ],
 };
 const CREDIT_TIERS = [
   { label: "400s", min: 400, max: 499 },
@@ -668,6 +710,7 @@ export default function App() {
     specials: false,
     quoteRates: false,
     marketplaceTemplate: false,
+    freshUpLinks: false,
   });
   const [quoteRates, setQuoteRates] = useState([]);
   const [quoteRateDraft, setQuoteRateDraft] = useState({});
@@ -696,6 +739,7 @@ export default function App() {
   const [freshUpLog, setFreshUpLog] = useState({ total: 0, entries: [] });
   const [freshUpStatus, setFreshUpStatus] = useState("");
   const freshUpCopiedAt = "";
+  const [freshUpLinksConfig, setFreshUpLinksConfig] = useState(FRESHUP_LINKS_DEFAULTS);
   const [marketplaceGuideStatus, setMarketplaceGuideStatus] = useState("");
   const [trafficRowUploadFiles, setTrafficRowUploadFiles] = useState({});
   const [trafficRowUploadKeys, setTrafficRowUploadKeys] = useState({});
@@ -811,6 +855,11 @@ export default function App() {
   ].filter((value) => String(value || "").trim()).length;
   const freshUpCardMode = freshUpLaunchContext.cardMode;
   const freshUpCardHref = freshUpAssignedSalesperson ? freshUpCardUrl(freshUpAssignedSalesperson.id) : "";
+  const freshUpStoreCards = [...(freshUpLinksConfig.stores || [])].sort((left, right) => {
+    const leftPriority = left.dealership === freshUpAssignedSalesperson?.dealership ? 0 : 1;
+    const rightPriority = right.dealership === freshUpAssignedSalesperson?.dealership ? 0 : 1;
+    return leftPriority - rightPriority || String(left.display_name || "").localeCompare(String(right.display_name || ""));
+  });
   const marketplaceBuilderTemplate = buildMarketplaceTemplateFromBuilder(marketplaceBuilder);
   const marketplacePreviewData = {
     ...MARKETPLACE_PREVIEW_SAMPLE,
@@ -947,6 +996,12 @@ export default function App() {
       limit: freshUpCardMode ? 12 : 60,
     });
     setFreshUpLog(data);
+  }
+
+  async function refreshFreshUpLinks() {
+    const data = await getFreshUpLinks();
+    setFreshUpLinksConfig(data);
+    setResourceLoadState((current) => ({ ...current, freshUpLinks: true }));
   }
 
   function updateQuoteRateDraft(brand, tier, value) {
@@ -1155,6 +1210,26 @@ export default function App() {
       active = false;
     };
   }, [adminSection, resourceLoadState.marketplaceTemplate, tab]);
+
+  useEffect(() => {
+    if (resourceLoadState.freshUpLinks) return;
+    if (!(tab === "freshUp" || (tab === "admin" && adminSection === "freshupLinks") || freshUpCardMode)) return;
+    let active = true;
+    const run = async () => {
+      try {
+        const data = await getFreshUpLinks();
+        if (!active) return;
+        setFreshUpLinksConfig(data);
+        setResourceLoadState((current) => ({ ...current, freshUpLinks: true }));
+      } catch (errorValue) {
+        if (active) setError(errText(errorValue));
+      }
+    };
+    run();
+    return () => {
+      active = false;
+    };
+  }, [adminSection, freshUpCardMode, resourceLoadState.freshUpLinks, tab]);
 
   useEffect(() => {
     if (resourceLoadState.trafficPdfs) return;
@@ -1963,6 +2038,32 @@ export default function App() {
         source: freshUpCardMode ? "NFC Card" : "Desk",
       }));
       setFreshUpStatus(freshUpCardMode ? "Info captured. Thank you." : "Freshup logged.");
+    } catch (errorValue) {
+      setError(errText(errorValue));
+    } finally {
+      setBusy("");
+    }
+  }
+
+  function setFreshUpLinkField(field, value) {
+    setFreshUpLinksConfig((current) => ({ ...current, [field]: value }));
+  }
+
+  function setFreshUpStoreField(dealership, field, value) {
+    setFreshUpLinksConfig((current) => ({
+      ...current,
+      stores: (current.stores || []).map((store) => (store.dealership === dealership ? { ...store, [field]: value } : store)),
+    }));
+  }
+
+  async function saveFreshUpLinksSettings() {
+    setBusy("freshup-links");
+    setError("");
+    try {
+      const updated = await updateFreshUpLinks(adminToken, freshUpLinksConfig);
+      setFreshUpLinksConfig(updated);
+      setFreshUpStatus("Freshup customer page saved.");
+      setResourceLoadState((current) => ({ ...current, freshUpLinks: true }));
     } catch (errorValue) {
       setError(errText(errorValue));
     } finally {
@@ -3022,7 +3123,8 @@ export default function App() {
                 <div className="freshup-capture__header">
                   <div>
                     <span className="eyebrow">Quick Entry</span>
-                    <h3>{freshUpCardMode ? "Customer form" : "Fresh up input"}</h3>
+                    <h3>{freshUpCardMode ? freshUpLinksConfig.form_title : "Fresh up input"}</h3>
+                    {freshUpCardMode ? <p className="admin-note">{freshUpLinksConfig.form_subtitle}</p> : null}
                   </div>
                   <button type="button" className="secondary" onClick={resetFreshUpForm}>
                     Clear
@@ -3091,7 +3193,7 @@ export default function App() {
                       type="submit"
                       disabled={busy === "freshup-submit" || !freshUpAssignedSalesperson || !freshUpForm.customerName || !freshUpForm.phone}
                     >
-                      {busy === "freshup-submit" ? "Saving..." : freshUpCardMode ? "Send My Info" : "Log Freshup"}
+                      {busy === "freshup-submit" ? "Saving..." : freshUpCardMode ? freshUpLinksConfig.submit_label : "Log Freshup"}
                     </button>
                     {!freshUpCardMode ? (
                       <button type="button" className="secondary" onClick={copyFreshUpSummary}>
@@ -3105,33 +3207,64 @@ export default function App() {
               </form>
 
               <div className="panel freshup-nfc">
-                <span className="eyebrow">NFC Card Side</span>
-                <h3>Program one link per salesperson</h3>
+                <span className="eyebrow">{freshUpCardMode ? "Start Here" : "NFC Card Side"}</span>
+                <h3>{freshUpCardMode ? freshUpLinksConfig.page_title : "Program one link per salesperson"}</h3>
                 <p>
-                  Put this link on the NFC business card. When a customer taps, it opens a stripped-down contact capture page with the salesperson already attached.
+                  {freshUpCardMode
+                    ? freshUpLinksConfig.page_subtitle
+                    : "Put this link on the NFC business card. When a customer taps, it opens a customer-facing landing page with contact capture at the top and financing / inventory links underneath."}
                 </p>
                 <div className="freshup-nfc__link">
                   <strong>{freshUpAssignedSalesperson?.name || "Select a salesperson first"}</strong>
-                  <code>{freshUpCardHref || "Pick a salesperson to generate the NFC link."}</code>
+                  <code>
+                    {freshUpCardMode
+                      ? `${freshUpAssignedSalesperson?.dealership || "Mission"} customer page`
+                      : freshUpCardHref || "Pick a salesperson to generate the NFC link."}
+                  </code>
                 </div>
-                <div className="freshup-actions">
-                  <button type="button" onClick={copyFreshUpCardLink} disabled={!freshUpCardHref}>
-                    Copy NFC Link
-                  </button>
-                  <button
-                    type="button"
-                    className="secondary"
-                    onClick={() => window.open(freshUpCardHref, "_blank", "noopener,noreferrer")}
-                    disabled={!freshUpCardHref}
-                  >
-                    Preview Tap Page
-                  </button>
-                </div>
+                {!freshUpCardMode ? (
+                  <div className="freshup-actions">
+                    <button type="button" onClick={copyFreshUpCardLink} disabled={!freshUpCardHref}>
+                      Copy NFC Link
+                    </button>
+                    <button
+                      type="button"
+                      className="secondary"
+                      onClick={() => window.open(freshUpCardHref, "_blank", "noopener,noreferrer")}
+                      disabled={!freshUpCardHref}
+                    >
+                      Preview Tap Page
+                    </button>
+                  </div>
+                ) : null}
                 <div className="marketplace-callout">
-                  <strong>How the tap works</strong>
+                  <strong>{freshUpCardMode ? freshUpLinksConfig.form_title : "How the tap works"}</strong>
                   <span>
-                    The NFC card just opens a URL. This page collects the name and phone number, tags the salesperson, and drops the entry into the log below.
+                    {freshUpCardMode
+                      ? freshUpLinksConfig.form_subtitle
+                      : "The NFC card just opens a URL. This page collects the name and phone number, tags the salesperson, and drops the entry into the log below."}
                   </span>
+                </div>
+                <div className="freshup-store-grid">
+                  {freshUpStoreCards.map((store) => (
+                    <article key={store.dealership} className="freshup-store-card">
+                      <div>
+                        <span className="eyebrow">{store.dealership === freshUpAssignedSalesperson?.dealership ? "Primary Store" : "Store Link"}</span>
+                        <h4>{store.display_name}</h4>
+                      </div>
+                      <div className="freshup-store-card__actions">
+                        <a className="asset-link" href={store.soft_pull_url} target="_blank" rel="noreferrer">
+                          {store.soft_pull_label}
+                        </a>
+                        <a className="asset-link" href={store.hard_pull_url} target="_blank" rel="noreferrer">
+                          {store.hard_pull_label}
+                        </a>
+                        <a className="asset-link secondary-link" href={store.inventory_url} target="_blank" rel="noreferrer">
+                          {store.inventory_label}
+                        </a>
+                      </div>
+                    </article>
+                  ))}
                 </div>
               </div>
             </div>
@@ -4843,6 +4976,119 @@ export default function App() {
                     <button type="button" onClick={saveTabVisibilitySettings} disabled={busy === "tab-visibility"}>
                       {busy === "tab-visibility" ? "Saving..." : "Save Tab Visibility"}
                     </button>
+                  </div>
+                ) : null}
+
+                {adminSection === "freshupLinks" ? (
+                  <div className="stack">
+                    <div className="panel">
+                      <div className="row">
+                        <div>
+                          <span className="eyebrow">Freshup customer page</span>
+                          <h3>Linktree-style landing page</h3>
+                          <p className="admin-note">
+                            This controls the customer-facing salesperson page used by the Freshup NFC link. The contact form stays at the top and the links render underneath it.
+                          </p>
+                        </div>
+                        <button type="button" onClick={saveFreshUpLinksSettings} disabled={busy === "freshup-links"}>
+                          {busy === "freshup-links" ? "Saving..." : "Save Freshup Links"}
+                        </button>
+                      </div>
+
+                      <div className="editor-list editor-list--two-up">
+                        <label>
+                          <span>Page title</span>
+                          <input
+                            value={freshUpLinksConfig.page_title}
+                            onChange={(event) => setFreshUpLinkField("page_title", event.target.value)}
+                          />
+                        </label>
+                        <label>
+                          <span>Submit button label</span>
+                          <input
+                            value={freshUpLinksConfig.submit_label}
+                            onChange={(event) => setFreshUpLinkField("submit_label", event.target.value)}
+                          />
+                        </label>
+                        <label className="editor-list__wide">
+                          <span>Page subtitle</span>
+                          <textarea
+                            value={freshUpLinksConfig.page_subtitle}
+                            onChange={(event) => setFreshUpLinkField("page_subtitle", event.target.value)}
+                          />
+                        </label>
+                        <label>
+                          <span>Form title</span>
+                          <input
+                            value={freshUpLinksConfig.form_title}
+                            onChange={(event) => setFreshUpLinkField("form_title", event.target.value)}
+                          />
+                        </label>
+                        <label className="editor-list__wide">
+                          <span>Form subtitle</span>
+                          <textarea
+                            value={freshUpLinksConfig.form_subtitle}
+                            onChange={(event) => setFreshUpLinkField("form_subtitle", event.target.value)}
+                          />
+                        </label>
+                      </div>
+                    </div>
+
+                    <div className="editor-list editor-list--three-up">
+                      {(freshUpLinksConfig.stores || []).map((store) => (
+                        <EditorCard key={`freshup-links-${store.dealership}`} title={store.display_name}>
+                          <label>
+                            <span>Store name</span>
+                            <input
+                              value={store.display_name}
+                              onChange={(event) => setFreshUpStoreField(store.dealership, "display_name", event.target.value)}
+                            />
+                          </label>
+                          <label>
+                            <span>Soft pull button label</span>
+                            <input
+                              value={store.soft_pull_label}
+                              onChange={(event) => setFreshUpStoreField(store.dealership, "soft_pull_label", event.target.value)}
+                            />
+                          </label>
+                          <label>
+                            <span>Soft pull URL</span>
+                            <input
+                              value={store.soft_pull_url}
+                              onChange={(event) => setFreshUpStoreField(store.dealership, "soft_pull_url", event.target.value)}
+                            />
+                          </label>
+                          <label>
+                            <span>Hard pull button label</span>
+                            <input
+                              value={store.hard_pull_label}
+                              onChange={(event) => setFreshUpStoreField(store.dealership, "hard_pull_label", event.target.value)}
+                            />
+                          </label>
+                          <label>
+                            <span>Hard pull URL</span>
+                            <input
+                              value={store.hard_pull_url}
+                              onChange={(event) => setFreshUpStoreField(store.dealership, "hard_pull_url", event.target.value)}
+                            />
+                          </label>
+                          <label>
+                            <span>Inventory button label</span>
+                            <input
+                              value={store.inventory_label}
+                              onChange={(event) => setFreshUpStoreField(store.dealership, "inventory_label", event.target.value)}
+                            />
+                          </label>
+                          <label>
+                            <span>Inventory URL</span>
+                            <input
+                              value={store.inventory_url}
+                              onChange={(event) => setFreshUpStoreField(store.dealership, "inventory_url", event.target.value)}
+                            />
+                          </label>
+                        </EditorCard>
+                      ))}
+                    </div>
                   </div>
                 ) : null}
 
