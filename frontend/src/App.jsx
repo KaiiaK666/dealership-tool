@@ -189,13 +189,13 @@ const FRESHUP_LINKS_DEFAULTS = {
 };
 const STORE_BRAND_META = {
   Kia: {
-    logo: "/logo-kia.svg",
+    logo: "/logo-kia.jpg",
     badge: "Kia",
     accent: "#1f7cf6",
     tint: "rgba(31, 124, 246, 0.18)",
   },
   Mazda: {
-    logo: "/logo-mazda.svg",
+    logo: "/logo-mazda.jpeg",
     badge: "Mazda",
     accent: "#d8dce3",
     tint: "rgba(216, 220, 227, 0.16)",
@@ -3149,66 +3149,79 @@ export default function App() {
 
         {tab === "freshUp" ? (
           <section className={`stack freshup-shell ${freshUpCardMode ? "freshup-shell--card" : ""}`}>
-            <div className={`panel freshup-hero ${freshUpCardMode ? "freshup-hero--card" : ""}`}>
-              <div>
-                {freshUpCardMode ? (
-                  <div className="freshup-brand-stack">
-                    <div className="freshup-brand-avatar">
-                      <img src="/logo-facebook.png" alt="Bert Ogden heart logo" />
-                    </div>
-                    <div className="freshup-brand-mark">
-                      <img
-                        src={freshUpPrimaryBrand.logo}
-                        alt={`${freshUpPrimaryStore?.dealership || "Bert Ogden"} logo`}
-                        className={freshUpPrimaryStore?.dealership === "Outlet" ? "freshup-brand-mark__image freshup-brand-mark__image--rounded" : "freshup-brand-mark__image"}
-                      />
-                      <span>{freshUpPrimaryStore?.display_name || freshUpAssignedSalesperson?.dealership || "Bert Ogden Mission"}</span>
-                    </div>
-                  </div>
-                ) : null}
-                <span className="eyebrow">{freshUpCardMode ? "Tap-To-Open Customer Page" : "Freshup Log"}</span>
-                <h2>{freshUpCardMode ? freshUpAssignedSalesperson?.name || freshUpLinksConfig.page_title : "Fast contact capture for the lot."}</h2>
-                <p>
-                  {freshUpCardMode
-                    ? freshUpLinksConfig.page_subtitle
-                    : "This is now a lightweight mobile-first log. Pick the salesperson, capture the customer name and phone, and everything lands in the running log below."}
-                </p>
-                {freshUpCardMode && freshUpPrimarySocials.length ? (
-                  <div className="freshup-social-row">
-                    {freshUpPrimarySocials.map((item) => (
-                      <a
-                        key={`freshup-social-${item.key}`}
-                        className="freshup-social-pill"
-                        href={freshUpPrimaryStore[item.key]}
-                        target="_blank"
-                        rel="noreferrer"
-                        aria-label={item.label}
-                      >
-                        <span>{item.icon}</span>
-                      </a>
-                    ))}
-                  </div>
-                ) : null}
+            {!freshUpCardMode ? (
+              <div className="panel freshup-hero">
+                <div>
+                  <span className="eyebrow">Freshup Log</span>
+                  <h2>Fast contact capture for the lot.</h2>
+                  <p>
+                    This is now a lightweight mobile-first log. Pick the salesperson, capture the customer name and phone,
+                    and everything lands in the running log below.
+                  </p>
+                </div>
+                <div className="freshup-hero__status">
+                  <span>Ready state</span>
+                  <strong>{freshUpFilledCount}/3 filled</strong>
+                  <small>Optimized for quick desk or lot entry.</small>
+                </div>
               </div>
-              <div className="freshup-hero__status">
-                <span>{freshUpCardMode ? "Customer capture" : "Ready state"}</span>
-                <strong>{freshUpFilledCount}/3 filled</strong>
-                <small>
-                  {freshUpCardMode
-                    ? `${freshUpPrimaryStore?.display_name || "Mission"} links sit underneath the form so the customer can move right into the next action.`
-                    : "Optimized for quick desk or lot entry."}
-                </small>
-              </div>
-            </div>
+            ) : null}
 
             <div className="freshup-layout">
               <form
-                className="panel freshup-capture"
+                className={`panel freshup-capture ${freshUpCardMode ? "freshup-capture--card" : ""}`}
                 onSubmit={(event) => {
                   event.preventDefault();
                   submitFreshUpLog();
                 }}
               >
+                {freshUpCardMode ? (
+                  <div className="freshup-card-intro">
+                    <div className="freshup-brand-stack">
+                      <div className="freshup-brand-avatar">
+                        <img src="/logo-facebook.png" alt="Bert Ogden heart logo" />
+                      </div>
+                      <div className="freshup-brand-mark">
+                        <img
+                          src={freshUpPrimaryBrand.logo}
+                          alt={`${freshUpPrimaryStore?.dealership || "Bert Ogden"} logo`}
+                          className={
+                            freshUpPrimaryStore?.dealership === "Outlet"
+                              ? "freshup-brand-mark__image freshup-brand-mark__image--rounded"
+                              : "freshup-brand-mark__image"
+                          }
+                        />
+                        <span>{freshUpPrimaryStore?.display_name || freshUpAssignedSalesperson?.dealership || "Bert Ogden Mission"}</span>
+                      </div>
+                    </div>
+                    <span className="eyebrow">Tap-To-Open Customer Page</span>
+                    <h2>{freshUpAssignedSalesperson?.name || freshUpLinksConfig.page_title}</h2>
+                    <p>{freshUpLinksConfig.page_subtitle}</p>
+                    {freshUpPrimarySocials.length ? (
+                      <div className="freshup-social-row">
+                        {freshUpPrimarySocials.map((item) => (
+                          <a
+                            key={`freshup-social-${item.key}`}
+                            className="freshup-social-pill"
+                            href={freshUpPrimaryStore[item.key]}
+                            target="_blank"
+                            rel="noreferrer"
+                            aria-label={item.label}
+                          >
+                            <span>{item.icon}</span>
+                          </a>
+                        ))}
+                      </div>
+                    ) : null}
+                    <div className="freshup-hero__status freshup-hero__status--inline">
+                      <span>Customer capture</span>
+                      <strong>{freshUpFilledCount}/3 filled</strong>
+                      <small>
+                        {`${freshUpPrimaryStore?.display_name || "Mission"} links sit underneath the form so the customer can move right into the next action.`}
+                      </small>
+                    </div>
+                  </div>
+                ) : null}
                 <div className="freshup-capture__header">
                   <div>
                     <span className="eyebrow">Quick Entry</span>
