@@ -844,6 +844,35 @@ function answerTrafficAnalysisQuestion(question, analysis, monthKey) {
   return `${monthName} currently shows ${analysis.totalRows} traffic rows across ${analysis.activeDays} active day${analysis.activeDays === 1 ? "" : "s"}, with ${analysis.noteCoverage}% note coverage. The busiest day was ${busiestLabel}, and ${strongestOwner} is carrying the largest appointment load right now.`;
 }
 
+function TrafficAnalysisHint({ text }) {
+  if (!text) return null;
+  return (
+    <span className="traffic-analysis-hint" tabIndex={0} aria-label={text}>
+      <span className="traffic-analysis-hint__icon">i</span>
+      <span className="traffic-analysis-hint__bubble">{text}</span>
+    </span>
+  );
+}
+
+function TrafficAnalysisSection({ eyebrow, title, hint, summary, defaultOpen = false, children, className = "" }) {
+  return (
+    <details className={`panel traffic-analysis-panel traffic-analysis-section ${className}`.trim()} open={defaultOpen}>
+      <summary className="traffic-analysis-section__summary">
+        <div>
+          <span className="eyebrow">{eyebrow}</span>
+          <h3>{title}</h3>
+        </div>
+        <div className="traffic-analysis-section__meta">
+          {summary ? <small>{summary}</small> : null}
+          <TrafficAnalysisHint text={hint} />
+          <span className="traffic-analysis-section__toggle">Details</span>
+        </div>
+      </summary>
+      <div className="traffic-analysis-section__body">{children}</div>
+    </details>
+  );
+}
+
 function LogTable({ entries, empty }) {
   if (!entries.length) return <div className="empty">{empty}</div>;
   return (
@@ -3598,9 +3627,8 @@ export default function App() {
                 <span className="eyebrow">Service drive intelligence</span>
                 <h2>Traffic analysis command center</h2>
                 <p>
-                  This proof of concept turns the service drive board into a live dashboard. It tracks volume, note
-                  coverage, open follow-up gaps, and lets you ask direct questions about the traffic and notes already in
-                  the system.
+                  A denser month view for traffic volume, note coverage, owner load, and unanswered follow-up. Ask the
+                  page direct questions about the notes and rows already on the board.
                 </p>
               </div>
               <div className="traffic-analysis-hero__controls">
@@ -3618,22 +3646,34 @@ export default function App() {
 
             <div className="traffic-analysis-stats">
               <article className="traffic-analysis-stat">
-                <span>Total Traffic</span>
+                <div className="traffic-analysis-stat__label">
+                  <span>Total Traffic</span>
+                  <TrafficAnalysisHint text="Total service drive traffic rows loaded for the selected month, across all visible traffic dates." />
+                </div>
                 <strong>{trafficAnalysis.totalRows}</strong>
                 <small>{trafficAnalysis.activeDays} active day{trafficAnalysis.activeDays === 1 ? "" : "s"} in month</small>
               </article>
               <article className="traffic-analysis-stat">
-                <span>Note Coverage</span>
+                <div className="traffic-analysis-stat__label">
+                  <span>Note Coverage</span>
+                  <TrafficAnalysisHint text="Percent of traffic rows that already have salesperson notes saved." />
+                </div>
                 <strong>{trafficAnalysis.noteCoverage}%</strong>
                 <small>{trafficAnalysis.rowsWithNotes} rows with notes saved</small>
               </article>
               <article className="traffic-analysis-stat">
-                <span>Open Follow-Ups</span>
+                <div className="traffic-analysis-stat__label">
+                  <span>Open Follow-Ups</span>
+                  <TrafficAnalysisHint text="Traffic rows that still do not have any saved salesperson notes." />
+                </div>
                 <strong>{trafficAnalysis.pendingCount}</strong>
                 <small>Rows still missing salesperson notes</small>
               </article>
               <article className="traffic-analysis-stat">
-                <span>Busiest Day</span>
+                <div className="traffic-analysis-stat__label">
+                  <span>Busiest Day</span>
+                  <TrafficAnalysisHint text="The highest-volume traffic day in the selected month, based on imported and manually added rows." />
+                </div>
                 <strong>{trafficAnalysis.busiestDay ? trafficAnalysis.busiestDay.count : 0}</strong>
                 <small>
                   {trafficAnalysis.busiestDay ? longDateLabel(trafficAnalysis.busiestDay.date) : "No traffic yet"}
@@ -3653,7 +3693,11 @@ export default function App() {
                 {trafficAnalysis.timeline.length ? (
                   <div className="traffic-analysis-bars">
                     {trafficAnalysis.timeline.map((item) => (
-                      <div key={item.date} className="traffic-analysis-bars__item">
+                      <div
+                        key={item.date}
+                        className="traffic-analysis-bars__item"
+                        title={`${longDateLabel(item.date)}: ${item.count} traffic row${item.count === 1 ? "" : "s"}`}
+                      >
                         <span>{dateParts(item.date).dayNumber}</span>
                         <div className="traffic-analysis-bars__track">
                           <div
@@ -3669,7 +3713,7 @@ export default function App() {
                   <div className="empty">No traffic rows exist for this month yet.</div>
                 )}
                 {trafficAnalysisInsights.length ? (
-                  <div className="traffic-analysis-insights">
+                  <div className="traffic-analysis-insights traffic-analysis-insights--compact">
                     {trafficAnalysisInsights.map((item) => (
                       <div key={item} className="traffic-analysis-insights__item">
                         {item}
@@ -3679,9 +3723,13 @@ export default function App() {
                 ) : null}
               </div>
 
-              <div className="panel traffic-analysis-panel">
-                <span className="eyebrow">Brand split</span>
-                <h3>Kia vs Mazda</h3>
+              <TrafficAnalysisSection
+                eyebrow="Brand split"
+                title="Kia vs Mazda"
+                summary={`${trafficAnalysis.brandCards[0]?.rows || 0} Kia · ${trafficAnalysis.brandCards[1]?.rows || 0} Mazda`}
+                hint="Compares franchise traffic volume and note coverage for the selected month."
+                defaultOpen
+              >
                 <div className="traffic-analysis-brand-list">
                   {trafficAnalysis.brandCards.map((item) => (
                     <div key={item.brand} className="traffic-analysis-brand-card">
@@ -3698,11 +3746,14 @@ export default function App() {
                     </div>
                   ))}
                 </div>
-              </div>
+              </TrafficAnalysisSection>
 
-              <div className="panel traffic-analysis-panel">
-                <span className="eyebrow">Ownership</span>
-                <h3>Top appointment owners</h3>
+              <TrafficAnalysisSection
+                eyebrow="Ownership"
+                title="Top appointment owners"
+                summary={trafficAnalysis.topAssignees[0] ? `${trafficAnalysis.topAssignees[0].label} leads` : "No owner data"}
+                hint="Pulled from imported assignee or appointment-owner fields inside the traffic data."
+              >
                 {trafficAnalysis.topAssignees.length ? (
                   <div className="traffic-analysis-list">
                     {trafficAnalysis.topAssignees.map((item) => (
@@ -3718,11 +3769,14 @@ export default function App() {
                 ) : (
                   <div className="empty">No assignee data found in the imported traffic yet.</div>
                 )}
-              </div>
+              </TrafficAnalysisSection>
 
-              <div className="panel traffic-analysis-panel">
-                <span className="eyebrow">Execution</span>
-                <h3>Note activity</h3>
+              <TrafficAnalysisSection
+                eyebrow="Execution"
+                title="Note activity"
+                summary={`${trafficAnalysis.topAuthors.length} active note author${trafficAnalysis.topAuthors.length === 1 ? "" : "s"}`}
+                hint="Shows who is actually saving notes and the themes appearing most often in the note text."
+              >
                 <div className="traffic-analysis-list">
                   {trafficAnalysis.topAuthors.length ? (
                     trafficAnalysis.topAuthors.map((item) => (
@@ -3741,21 +3795,28 @@ export default function App() {
                 {trafficAnalysis.topTerms.length ? (
                   <div className="traffic-analysis-tags">
                     {trafficAnalysis.topTerms.map((item) => (
-                      <span key={item.label} className="traffic-analysis-tag">
+                      <span key={item.label} className="traffic-analysis-tag" title={`${item.count} notes mention ${item.label}`}>
                         {item.label} · {item.count}
                       </span>
                     ))}
                   </div>
                 ) : null}
-              </div>
+              </TrafficAnalysisSection>
 
-              <div className="panel traffic-analysis-panel">
-                <span className="eyebrow">Follow-up queue</span>
-                <h3>Rows still needing notes</h3>
+              <TrafficAnalysisSection
+                eyebrow="Follow-up queue"
+                title="Rows still needing notes"
+                summary={`${trafficAnalysis.pendingCount} open row${trafficAnalysis.pendingCount === 1 ? "" : "s"}`}
+                hint="Traffic rows without a saved salesperson note yet. This is the fastest queue to work from."
+              >
                 {trafficAnalysis.pendingRows.length ? (
                   <div className="traffic-analysis-list">
                     {trafficAnalysis.pendingRows.map((entry) => (
-                      <div key={`pending-${entry.id}`} className="traffic-analysis-list__item traffic-analysis-list__item--stacked">
+                      <div
+                        key={`pending-${entry.id}`}
+                        className="traffic-analysis-list__item traffic-analysis-list__item--stacked"
+                        title={`${entry.customer_name || "Unnamed customer"} · ${entry.brand} · ${[entry.traffic_date, entry.appointment_label].filter(Boolean).join(" · ")}`}
+                      >
                         <div>
                           <strong>{entry.customer_name || "Unnamed customer"}</strong>
                           <small>
@@ -3769,7 +3830,7 @@ export default function App() {
                 ) : (
                   <div className="empty">Everything in this month already has notes saved.</div>
                 )}
-              </div>
+              </TrafficAnalysisSection>
 
               <div className="panel traffic-analysis-panel traffic-analysis-panel--chat">
                 <div className="row">
