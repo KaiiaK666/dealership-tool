@@ -913,7 +913,6 @@ export default function App() {
   });
   const freshUpPrimaryStore = freshUpStoreCards[0] || null;
   const freshUpPrimaryBrand = freshUpStoreBrandMeta(freshUpPrimaryStore?.dealership);
-  const freshUpPrimarySocials = FRESHUP_SOCIAL_LINKS.filter(({ key }) => String(freshUpPrimaryStore?.[key] || "").trim());
   const marketplaceBuilderTemplate = buildMarketplaceTemplateFromBuilder(marketplaceBuilder);
   const marketplacePreviewData = {
     ...MARKETPLACE_PREVIEW_SAMPLE,
@@ -1046,8 +1045,8 @@ export default function App() {
 
   async function refreshFreshUpLog(nextSalespersonId) {
     const data = await getFreshUpLog({
-      salespersonId: freshUpCardMode ? nextSalespersonId || freshUpForm.salespersonId || freshUpLaunchContext.salespersonId : undefined,
-      limit: freshUpCardMode ? 12 : 60,
+      salespersonId: nextSalespersonId || undefined,
+      limit: 60,
     });
     setFreshUpLog(data);
   }
@@ -1359,13 +1358,13 @@ export default function App() {
   }, [freshUpLaunchContext.cardMode, freshUpLaunchContext.salespersonId, salespeople]);
 
   useEffect(() => {
-    if (!(tab === "freshUp" || freshUpCardMode)) return;
+    if (freshUpCardMode || tab !== "freshUp") return;
     let active = true;
     const run = async () => {
       try {
         const data = await getFreshUpLog({
-          salespersonId: freshUpCardMode ? freshUpForm.salespersonId || freshUpLaunchContext.salespersonId : undefined,
-          limit: freshUpCardMode ? 12 : 60,
+          salespersonId: undefined,
+          limit: 60,
         });
         if (active) setFreshUpLog(data);
       } catch (errorValue) {
@@ -1376,7 +1375,7 @@ export default function App() {
     return () => {
       active = false;
     };
-  }, [freshUpCardMode, freshUpForm.salespersonId, freshUpLaunchContext.salespersonId, tab]);
+  }, [freshUpCardMode, tab]);
 
   useEffect(() => {
     if (!leadForm.bdcAgentId && activeBdc.length) {
@@ -2082,7 +2081,9 @@ export default function App() {
         salesperson_id: salespersonId,
         source: freshUpCardMode ? "NFC Card" : "Desk",
       });
-      await refreshFreshUpLog(String(salespersonId));
+      if (!freshUpCardMode) {
+        await refreshFreshUpLog();
+      }
       setFreshUpForm((current) => ({
         ...current,
         customerName: "",
@@ -2091,7 +2092,16 @@ export default function App() {
         salespersonQuery: freshUpAssignedSalesperson?.name || current.salespersonQuery,
         source: freshUpCardMode ? "NFC Card" : "Desk",
       }));
-      setFreshUpStatus(freshUpCardMode ? "Info captured. Thank you." : "Freshup logged.");
+      setFreshUpStatus(
+        freshUpCardMode
+          ? `Thanks. ${freshUpAssignedSalesperson?.name || "Our team"} will reach out soon.`
+          : "Freshup logged."
+      );
+      if (freshUpCardMode && typeof document !== "undefined") {
+        window.setTimeout(() => {
+          document.getElementById("freshup-links")?.scrollIntoView({ behavior: "smooth", block: "start" });
+        }, 150);
+      }
     } catch (errorValue) {
       setError(errText(errorValue));
     } finally {
@@ -3194,58 +3204,46 @@ export default function App() {
                         <span>{freshUpPrimaryStore?.display_name || freshUpAssignedSalesperson?.dealership || "Bert Ogden Mission"}</span>
                       </div>
                     </div>
-                    <span className="eyebrow">Tap-To-Open Customer Page</span>
+                    <span className="eyebrow">Contact {freshUpAssignedSalesperson?.name || "Our Team"}</span>
                     <h2>{freshUpAssignedSalesperson?.name || freshUpLinksConfig.page_title}</h2>
                     <p>{freshUpLinksConfig.page_subtitle}</p>
-                    {freshUpPrimarySocials.length ? (
-                      <div className="freshup-social-row">
-                        {freshUpPrimarySocials.map((item) => (
-                          <a
-                            key={`freshup-social-${item.key}`}
-                            className="freshup-social-pill"
-                            href={freshUpPrimaryStore[item.key]}
-                            target="_blank"
-                            rel="noreferrer"
-                            aria-label={item.label}
-                          >
-                            <span>{item.icon}</span>
-                          </a>
-                        ))}
-                      </div>
-                    ) : null}
-                    <div className="freshup-hero__status freshup-hero__status--inline">
-                      <span>Customer capture</span>
-                      <strong>{freshUpFilledCount}/3 filled</strong>
-                      <small>
-                        {`${freshUpPrimaryStore?.display_name || "Mission"} links sit underneath the form so the customer can move right into the next action.`}
-                      </small>
+                    <div className="freshup-contact-strip">
+                      <strong>{freshUpPrimaryStore?.display_name || "Bert Ogden Mission"}</strong>
+                      <span>{freshUpLinksConfig.form_subtitle}</span>
                     </div>
                   </div>
                 ) : null}
-                <div className="freshup-capture__header">
-                  <div>
-                    <span className="eyebrow">Quick Entry</span>
-                    <h3>{freshUpCardMode ? freshUpLinksConfig.form_title : "Fresh up input"}</h3>
-                    {freshUpCardMode ? <p className="admin-note">{freshUpLinksConfig.form_subtitle}</p> : null}
+                {!freshUpCardMode ? (
+                  <div className="freshup-capture__header">
+                    <div>
+                      <span className="eyebrow">Quick Entry</span>
+                      <h3>Fresh up input</h3>
+                    </div>
+                    <button type="button" className="secondary" onClick={resetFreshUpForm}>
+                      Clear
+                    </button>
                   </div>
-                  <button type="button" className="secondary" onClick={resetFreshUpForm}>
-                    Clear
-                  </button>
-                </div>
+                ) : (
+                  <div className="freshup-capture__header freshup-capture__header--compact">
+                    <div>
+                      <h3>{freshUpLinksConfig.form_title}</h3>
+                    </div>
+                  </div>
+                )}
 
                 <div className="freshup-form">
                   <label>
-                    <span>Customer Name</span>
+                    <span>{freshUpCardMode ? "Your Name" : "Customer Name"}</span>
                     <input
                       value={freshUpForm.customerName}
                       onChange={(event) => setFreshUpForm((current) => ({ ...current, customerName: event.target.value }))}
-                      placeholder="Full name"
+                      placeholder={freshUpCardMode ? "Enter your name" : "Full name"}
                       autoComplete="name"
                     />
                   </label>
 
                   <label>
-                    <span>Phone Number</span>
+                    <span>{freshUpCardMode ? "Best Phone Number" : "Phone Number"}</span>
                     <input
                       type="tel"
                       inputMode="tel"
@@ -3254,13 +3252,12 @@ export default function App() {
                       onChange={(event) =>
                         setFreshUpForm((current) => ({ ...current, phone: formatPhoneInput(event.target.value) }))
                       }
-                      placeholder="(956) 555-1234"
+                      placeholder={freshUpCardMode ? "(956) 555-1234" : "(956) 555-1234"}
                     />
                   </label>
 
                   {freshUpCardMode ? (
-                    <div className="freshup-lockbox">
-                      <span>Salesperson</span>
+                    <div className="freshup-lockbox freshup-lockbox--customer">
                       <strong>{freshUpAssignedSalesperson?.name || "Salesperson not set"}</strong>
                       <small>{freshUpAssignedSalesperson?.dealership || "This NFC link needs a salesperson selected."}</small>
                     </div>
@@ -3308,12 +3305,12 @@ export default function App() {
                 </div>
               </form>
 
-              <div className={`panel freshup-nfc ${freshUpCardMode ? "freshup-nfc--card" : ""}`}>
-                <span className="eyebrow">{freshUpCardMode ? "Choose A Next Step" : "NFC Card Side"}</span>
+              <div id={freshUpCardMode ? "freshup-links" : undefined} className={`panel freshup-nfc ${freshUpCardMode ? "freshup-nfc--card" : ""}`}>
+                <span className="eyebrow">{freshUpCardMode ? "Helpful Links" : "NFC Card Side"}</span>
                 <h3>{freshUpCardMode ? freshUpPrimaryStore?.display_name || freshUpLinksConfig.page_title : "Program one link per salesperson"}</h3>
                 <p>
                   {freshUpCardMode
-                    ? "After the customer drops their info, keep them moving with one-tap buttons for financing, inventory, maps, or a direct call."
+                    ? "Use the links below for financing, inventory, maps, or a direct call."
                     : "Put this link on the NFC business card. When a customer taps, it opens a customer-facing landing page with contact capture at the top and the right links underneath."}
                 </p>
                 {!freshUpCardMode ? (
@@ -3415,19 +3412,18 @@ export default function App() {
               </div>
             </div>
 
-            <div className="panel freshup-log-panel">
-              <div className="row">
-                <div>
-                  <span className="eyebrow">Live Log</span>
-                  <h3>{freshUpCardMode ? "Recent taps for this salesperson" : "Newest freshups first"}</h3>
+            {!freshUpCardMode ? (
+              <div className="panel freshup-log-panel">
+                <div className="row">
+                  <div>
+                    <span className="eyebrow">Live Log</span>
+                    <h3>Newest freshups first</h3>
+                  </div>
+                  <small>{freshUpLog.total} total logged</small>
                 </div>
-                <small>{freshUpLog.total} total logged</small>
+                <FreshUpLogList entries={freshUpLog.entries} empty="No freshups logged yet." />
               </div>
-              <FreshUpLogList
-                entries={freshUpLog.entries}
-                empty={freshUpCardMode ? "No NFC captures yet for this salesperson." : "No freshups logged yet."}
-              />
-            </div>
+            ) : null}
           </section>
         ) : null}
 

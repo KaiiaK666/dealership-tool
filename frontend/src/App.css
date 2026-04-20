@@ -3099,8 +3099,7 @@ button.special-card:hover:not(:disabled) {
 }
 
 .freshup-shell--card .freshup-capture,
-.freshup-shell--card .freshup-nfc,
-.freshup-shell--card .freshup-log-panel {
+.freshup-shell--card .freshup-nfc {
   border: 1px solid rgba(255, 255, 255, 0.08);
   background:
     radial-gradient(circle at top, rgba(255, 255, 255, 0.08), transparent 38%),
@@ -3166,8 +3165,8 @@ button.special-card:hover:not(:disabled) {
 
 .freshup-card-intro {
   display: grid;
-  gap: 14px;
-  margin-bottom: 12px;
+  gap: 10px;
+  margin-bottom: 8px;
 }
 
 .freshup-hero p {
@@ -3180,7 +3179,11 @@ button.special-card:hover:not(:disabled) {
 .freshup-shell--card .freshup-capture small,
 .freshup-shell--card .freshup-lockbox small,
 .freshup-shell--card .admin-note {
-  color: rgba(255, 255, 255, 0.72);
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.freshup-shell--card .eyebrow {
+  color: rgba(255, 255, 255, 0.54);
 }
 
 .freshup-hero__status {
@@ -3193,11 +3196,6 @@ button.special-card:hover:not(:disabled) {
     radial-gradient(circle at top right, rgba(196, 102, 52, 0.18), transparent 38%),
     rgba(37, 48, 59, 0.96);
   color: #fff;
-}
-
-.freshup-hero__status--inline {
-  padding: 14px 16px;
-  border-radius: 18px;
 }
 
 .freshup-hero__status span,
@@ -3237,9 +3235,14 @@ button.special-card:hover:not(:disabled) {
   gap: 16px;
 }
 
+.freshup-capture__header--compact {
+  justify-content: flex-start;
+  margin-bottom: 2px;
+}
+
 .freshup-form label {
   display: grid;
-  gap: 8px;
+  gap: 6px;
 }
 
 .freshup-form label span {
@@ -3272,6 +3275,32 @@ button.special-card:hover:not(:disabled) {
 
 .freshup-lockbox strong {
   font-size: 1.15rem;
+}
+
+.freshup-lockbox--customer {
+  gap: 4px;
+  padding: 10px 14px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.freshup-contact-strip {
+  display: grid;
+  gap: 4px;
+  padding: 10px 14px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.freshup-contact-strip strong {
+  color: #fff;
+  font-size: 0.95rem;
+}
+
+.freshup-contact-strip span {
+  color: rgba(255, 255, 255, 0.78);
+  font-size: 0.92rem;
 }
 
 .freshup-social-row {
@@ -3564,18 +3593,18 @@ button.special-card:hover:not(:disabled) {
   }
 
   .freshup-shell--card {
-    gap: 14px;
+    gap: 12px;
   }
 
   .freshup-card-intro {
-    gap: 12px;
-    margin-bottom: 8px;
+    gap: 8px;
+    margin-bottom: 4px;
   }
 
   .freshup-capture,
   .freshup-nfc,
   .freshup-log-panel {
-    padding: 18px;
+    padding: 16px;
   }
 
   .freshup-capture__header,
@@ -3588,18 +3617,50 @@ button.special-card:hover:not(:disabled) {
 
   .freshup-form input,
   .freshup-actions button {
-    min-height: 58px;
+    min-height: 54px;
     font-size: 1rem;
   }
 
   .freshup-brand-avatar {
-    width: 82px;
-    height: 82px;
+    width: 68px;
+    height: 68px;
+    padding: 6px;
   }
 
   .freshup-brand-mark {
     width: 100%;
     justify-content: flex-start;
+    padding: 8px 12px;
+  }
+
+  .freshup-brand-mark__image {
+    width: 34px;
+    height: 34px;
+  }
+
+  .freshup-shell--card .freshup-card-intro h2 {
+    font-size: 1.9rem;
+    line-height: 1.05;
+    margin: 0;
+  }
+
+  .freshup-shell--card .freshup-card-intro p {
+    margin: 0;
+    font-size: 0.98rem;
+    line-height: 1.35;
+  }
+
+  .freshup-shell--card .freshup-social-row {
+    display: none;
+  }
+
+  .freshup-shell--card .freshup-form {
+    gap: 12px;
+  }
+
+  .freshup-shell--card .freshup-capture__header h3 {
+    margin: 0;
+    font-size: 1.45rem;
   }
 
   .freshup-store-card {
