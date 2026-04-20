@@ -1340,6 +1340,34 @@ button.traffic-day-tile:hover:not(:disabled) {
   line-height: 1.45;
 }
 
+.bdc-last-assigned__notifications {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.bdc-last-assigned__notification {
+  display: inline-flex;
+  align-items: center;
+  padding: 8px 12px;
+  border-radius: 999px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  line-height: 1.3;
+}
+
+.bdc-last-assigned__notification.is-success {
+  background: rgba(191, 255, 221, 0.18);
+  border: 1px solid rgba(191, 255, 221, 0.24);
+  color: #f4fffb;
+}
+
+.bdc-last-assigned__notification.is-warning {
+  background: rgba(255, 235, 210, 0.16);
+  border: 1px solid rgba(255, 235, 210, 0.22);
+  color: #fff3e8;
+}
+
 .next-up,
 .filters,
 .form,
@@ -1478,6 +1506,69 @@ th {
 
 .editor-list--two-up {
   grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.notification-toggle-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.notification-setup-panel {
+  gap: 18px;
+}
+
+.notification-status-grid {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.notification-status-card {
+  display: grid;
+  gap: 8px;
+  padding: 16px 18px;
+  border-radius: 22px;
+  border: 1px solid rgba(212, 198, 180, 0.7);
+  background: rgba(255, 255, 255, 0.78);
+}
+
+.notification-status-card.is-ready {
+  background:
+    radial-gradient(circle at top right, rgba(32, 151, 116, 0.12), transparent 38%),
+    rgba(255, 255, 255, 0.82);
+  border-color: rgba(32, 151, 116, 0.2);
+}
+
+.notification-status-card.is-missing {
+  background:
+    radial-gradient(circle at top right, rgba(196, 102, 52, 0.12), transparent 38%),
+    rgba(255, 255, 255, 0.82);
+  border-color: rgba(196, 102, 52, 0.22);
+}
+
+.notification-status-card strong {
+  font-size: 1.1rem;
+  line-height: 1.1;
+}
+
+.notification-status-card small {
+  color: var(--muted);
+}
+
+.notification-setup-list {
+  display: grid;
+  gap: 12px;
+}
+
+.notification-setup-list div {
+  display: grid;
+  gap: 4px;
+}
+
+.notification-setup-list small {
+  color: var(--muted);
+  word-break: break-word;
 }
 
 .editor-list {
@@ -4265,5 +4356,10 @@ button.special-card:hover:not(:disabled) {
     left: 0;
     right: auto;
     width: min(220px, 78vw);
+  }
+
+  .notification-toggle-grid,
+  .notification-status-grid {
+    grid-template-columns: 1fr;
   }
 }

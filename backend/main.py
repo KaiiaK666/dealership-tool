@@ -1,4 +1,5 @@
 import calendar
+import base64
 import json
 import csv
 import io
@@ -7,6 +8,9 @@ import secrets
 import sqlite3
 import threading
 import time
+import urllib.error
+import urllib.parse
+import urllib.request
 from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 from zoneinfo import ZoneInfo
@@ -35,6 +39,13 @@ RULES_TIMEZONE = os.getenv("DEALER_TIMEZONE", "America/Chicago").strip() or "Ame
 ADMIN_USERNAME = os.getenv("DEALER_ADMIN_USERNAME", "admin").strip() or "admin"
 ADMIN_PASSWORD = os.getenv("DEALER_ADMIN_PASSWORD", "admin123").strip() or "admin123"
 SESSION_SECONDS = max(900, int(os.getenv("DEALER_ADMIN_SESSION_SECONDS", "43200") or 43200))
+APP_BASE_URL = os.getenv("DEALER_APP_BASE_URL", "https://app.bertogden123.com").strip() or "https://app.bertogden123.com"
+TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID", "").strip()
+TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN", "").strip()
+TWILIO_FROM_NUMBER = os.getenv("TWILIO_FROM_NUMBER", "").strip()
+RESEND_API_KEY = os.getenv("RESEND_API_KEY", "").strip()
+BDC_NOTIFY_EMAIL_FROM = os.getenv("BDC_NOTIFY_EMAIL_FROM", "").strip()
+BDC_NOTIFY_EMAIL_REPLY_TO = os.getenv("BDC_NOTIFY_EMAIL_REPLY_TO", "").strip()
 DEALERSHIPS = ("Kia", "Mazda", "Outlet")
 SERVICE_BRANDS = ("Kia", "Mazda")
 QUOTE_BRANDS = ("Kia New", "Mazda New", "Used")
@@ -114,6 +125,10 @@ class SalespersonIn(BaseModel):
     dealership: str
     weekly_days_off: List[int] = []
     active: bool = True
+    phone_number: str = ""
+    email: str = ""
+    notify_sms: bool = False
+    notify_email: bool = False
 
 
 class SalespersonOut(BaseModel):
@@ -124,6 +139,13 @@ class SalespersonOut(BaseModel):
     active: bool
     created_ts: float
     updated_ts: float
+
+
+class SalespersonAdminOut(SalespersonOut):
+    phone_number: str = ""
+    email: str = ""
+    notify_sms: bool = False
+    notify_email: bool = False
 
 
 class BdcAgentIn(BaseModel):
@@ -214,6 +236,15 @@ class BdcAssignmentOut(BaseModel):
     salesperson_dealership: str
     customer_name: str = ""
     customer_phone: str = ""
+    notification_sms_status: str = ""
+    notification_email_status: str = ""
+
+
+class NotificationConfigOut(BaseModel):
+    sms_provider: str = "Twilio"
+    sms_configured: bool = False
+    email_provider: str = "Resend"
+    email_configured: bool = False
 
 
 class BdcStateOut(BaseModel):
@@ -581,6 +612,17 @@ def normalize_short_text(value: str, field_name: str, max_len: int = 160) -> str
     return text
 
 
+def normalize_optional_phone(value: str, field_name: str = "phone_number") -> str:
+    return normalize_short_text(value, field_name, max_len=40)
+
+
+def normalize_optional_email(value: str, field_name: str = "email") -> str:
+    text = normalize_short_text(value, field_name, max_len=160).lower()
+    if text and ("@" not in text or "." not in text.split("@", 1)[-1]):
+        raise HTTPException(status_code=400, detail=f"{field_name} must be a valid email address")
+    return text
+
+
 def normalize_notes(value: str, field_name: str, max_len: int = 4000) -> str:
     text = str(value or "").replace("\r\n", "\n").strip()
     if len(text) > max_len:
@@ -601,6 +643,193 @@ def normalize_optional_dealership(value: Optional[str]) -> Optional[str]:
     if not text:
         return None
     return normalize_dealership(text)
+
+
+def normalize_sms_phone(value: str) -> Optional[str]:
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    digits = "".join(char for char in raw if char.isdigit())
+    if raw.startswith("+") and 8 <= len(digits) <= 15:
+        return f"+{digits}"
+    if len(digits) == 10:
+        return f"+1{digits}"
+    if len(digits) == 11 and digits.startswith("1"):
+        return f"+{digits}"
+    return None
+
+
+def mask_phone(value: str) -> str:
+    digits = "".join(char for char in str(value or "") if char.isdigit())
+    if len(digits) >= 4:
+        return f"***{digits[-4:]}"
+    return str(value or "").strip() or "unknown number"
+
+
+def mask_email(value: str) -> str:
+    text = str(value or "").strip()
+    if "@" not in text:
+        return text or "unknown email"
+    local, domain = text.split("@", 1)
+    visible = local[:2] if len(local) > 2 else local[:1]
+    return f"{visible}***@{domain}"
+
+
+def compact_error_text(error: Exception) -> str:
+    text = " ".join(str(error or "").strip().split())
+    if len(text) > 120:
+        return f"{text[:117]}..."
+    return text or "unexpected error"
+
+
+def sms_notifications_configured() -> bool:
+    return bool(TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN and TWILIO_FROM_NUMBER)
+
+
+def email_notifications_configured() -> bool:
+    return bool(RESEND_API_KEY and BDC_NOTIFY_EMAIL_FROM)
+
+
+def get_notification_config() -> NotificationConfigOut:
+    return NotificationConfigOut(
+        sms_configured=sms_notifications_configured(),
+        email_configured=email_notifications_configured(),
+    )
+
+
+def build_assignment_notification_subject(assignment_row: Dict[str, Any]) -> str:
+    customer_name = str(assignment_row.get("customer_name") or "").strip() or "New customer"
+    lead_store = str(assignment_row.get("lead_store") or assignment_row.get("salesperson_dealership") or "").strip() or "BDC"
+    return f"New BDC lead: {customer_name} ({lead_store})"
+
+
+def build_assignment_notification_body(assignment_row: Dict[str, Any]) -> str:
+    customer_name = str(assignment_row.get("customer_name") or "").strip() or "No customer name entered"
+    customer_phone = str(assignment_row.get("customer_phone") or "").strip() or "No customer phone entered"
+    bdc_agent_name = str(assignment_row.get("bdc_agent_name") or "").strip() or "BDC"
+    lead_store = str(assignment_row.get("lead_store") or assignment_row.get("salesperson_dealership") or "").strip() or "BDC"
+    salesperson_name = str(assignment_row.get("salesperson_name") or "").strip() or "Salesperson"
+    assigned_at = str(assignment_row.get("assigned_at") or now_iso())
+    lines = [
+        f"New BDC lead assigned to {salesperson_name}.",
+        "",
+        f"Store: {lead_store}",
+        f"Customer: {customer_name}",
+        f"Phone: {customer_phone}",
+        f"Assigned by: {bdc_agent_name}",
+        f"Assigned at: {assigned_at}",
+    ]
+    if APP_BASE_URL:
+        lines.extend(["", f"Open the app: {APP_BASE_URL}"])
+    return "\n".join(lines)
+
+
+def send_twilio_sms(to_number: str, body: str) -> str:
+    if not sms_notifications_configured():
+        raise RuntimeError("Twilio is not configured")
+    request_body = urllib.parse.urlencode(
+        {
+            "To": to_number,
+            "From": TWILIO_FROM_NUMBER,
+            "Body": body,
+        }
+    ).encode("utf-8")
+    auth_token = base64.b64encode(f"{TWILIO_ACCOUNT_SID}:{TWILIO_AUTH_TOKEN}".encode("utf-8")).decode("ascii")
+    request = urllib.request.Request(
+        f"https://api.twilio.com/2010-04-01/Accounts/{TWILIO_ACCOUNT_SID}/Messages.json",
+        data=request_body,
+        method="POST",
+    )
+    request.add_header("Authorization", f"Basic {auth_token}")
+    request.add_header("Content-Type", "application/x-www-form-urlencoded")
+    try:
+        with urllib.request.urlopen(request, timeout=15) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="ignore")
+        raise RuntimeError(f"Twilio HTTP {exc.code}: {detail or exc.reason}") from exc
+    except Exception as exc:
+        raise RuntimeError(f"Twilio request failed: {compact_error_text(exc)}") from exc
+    sid = str(payload.get("sid") or "").strip()
+    if not sid:
+        raise RuntimeError("Twilio response did not include a message SID")
+    return sid
+
+
+def send_resend_email(to_email: str, subject: str, text_body: str) -> str:
+    if not email_notifications_configured():
+        raise RuntimeError("Resend is not configured")
+    payload: Dict[str, Any] = {
+        "from": BDC_NOTIFY_EMAIL_FROM,
+        "to": [to_email],
+        "subject": subject,
+        "text": text_body,
+    }
+    if BDC_NOTIFY_EMAIL_REPLY_TO:
+        payload["reply_to"] = BDC_NOTIFY_EMAIL_REPLY_TO
+    request = urllib.request.Request(
+        "https://api.resend.com/emails",
+        data=json.dumps(payload).encode("utf-8"),
+        method="POST",
+    )
+    request.add_header("Authorization", f"Bearer {RESEND_API_KEY}")
+    request.add_header("Content-Type", "application/json")
+    try:
+        with urllib.request.urlopen(request, timeout=15) as response:
+            data = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="ignore")
+        raise RuntimeError(f"Resend HTTP {exc.code}: {detail or exc.reason}") from exc
+    except Exception as exc:
+        raise RuntimeError(f"Resend request failed: {compact_error_text(exc)}") from exc
+    email_id = str(data.get("id") or "").strip()
+    if not email_id:
+        raise RuntimeError("Resend response did not include an email id")
+    return email_id
+
+
+def deliver_assignment_notifications(
+    salesperson_row: Dict[str, Any],
+    assignment_row: Dict[str, Any],
+) -> Tuple[str, str]:
+    sms_status = ""
+    email_status = ""
+    notify_sms = bool(int(salesperson_row.get("notify_sms") or 0))
+    notify_email = bool(int(salesperson_row.get("notify_email") or 0))
+    phone_number = str(salesperson_row.get("phone_number") or "").strip()
+    email = str(salesperson_row.get("email") or "").strip()
+    subject = build_assignment_notification_subject(assignment_row)
+    body = build_assignment_notification_body(assignment_row)
+
+    if notify_sms:
+        if not phone_number:
+            sms_status = "Text skipped: no phone number saved"
+        elif not sms_notifications_configured():
+            sms_status = "Text skipped: Twilio is not configured"
+        else:
+            sms_target = normalize_sms_phone(phone_number)
+            if not sms_target:
+                sms_status = "Text skipped: phone number must be a valid US or E.164 number"
+            else:
+                try:
+                    send_twilio_sms(sms_target, body)
+                    sms_status = f"Text sent to {mask_phone(phone_number)}"
+                except Exception as exc:
+                    sms_status = f"Text failed: {compact_error_text(exc)}"
+
+    if notify_email:
+        if not email:
+            email_status = "Email skipped: no email saved"
+        elif not email_notifications_configured():
+            email_status = "Email skipped: Resend is not configured"
+        else:
+            try:
+                send_resend_email(email, subject, body)
+                email_status = f"Email sent to {mask_email(email)}"
+            except Exception as exc:
+                email_status = f"Email failed: {compact_error_text(exc)}"
+
+    return sms_status, email_status
 
 
 def normalize_freshup_event_type(value: str) -> str:
@@ -1082,11 +1311,19 @@ def init_db() -> None:
             dealership TEXT NOT NULL,
             weekly_days_off TEXT NOT NULL DEFAULT '',
             active INTEGER NOT NULL DEFAULT 1,
+            phone_number TEXT NOT NULL DEFAULT '',
+            email TEXT NOT NULL DEFAULT '',
+            notify_sms INTEGER NOT NULL DEFAULT 0,
+            notify_email INTEGER NOT NULL DEFAULT 0,
             created_ts REAL NOT NULL,
             updated_ts REAL NOT NULL
         )
         """
     )
+    ensure_column("salespeople", "phone_number", "TEXT NOT NULL DEFAULT ''")
+    ensure_column("salespeople", "email", "TEXT NOT NULL DEFAULT ''")
+    ensure_column("salespeople", "notify_sms", "INTEGER NOT NULL DEFAULT 0")
+    ensure_column("salespeople", "notify_email", "INTEGER NOT NULL DEFAULT 0")
     db_execute(
         """
         CREATE TABLE IF NOT EXISTS bdc_agents (
@@ -1142,6 +1379,8 @@ def init_db() -> None:
     ensure_column("bdc_assignment_log", "customer_name", "TEXT NOT NULL DEFAULT ''")
     ensure_column("bdc_assignment_log", "customer_phone", "TEXT NOT NULL DEFAULT ''")
     ensure_column("bdc_assignment_log", "distribution_mode", "TEXT NOT NULL DEFAULT 'franchise'")
+    ensure_column("bdc_assignment_log", "notification_sms_status", "TEXT NOT NULL DEFAULT ''")
+    ensure_column("bdc_assignment_log", "notification_email_status", "TEXT NOT NULL DEFAULT ''")
     db_execute(
         """
         CREATE TABLE IF NOT EXISTS freshup_log (
@@ -1316,6 +1555,22 @@ def salesperson_out(row: Dict[str, Any]) -> SalespersonOut:
     )
 
 
+def salesperson_admin_out(row: Dict[str, Any]) -> SalespersonAdminOut:
+    return SalespersonAdminOut(
+        id=int(row.get("id") or 0),
+        name=str(row.get("name") or ""),
+        dealership=str(row.get("dealership") or ""),
+        weekly_days_off=text_to_days(row.get("weekly_days_off")),
+        active=bool(int(row.get("active") or 0)),
+        phone_number=str(row.get("phone_number") or ""),
+        email=str(row.get("email") or ""),
+        notify_sms=bool(int(row.get("notify_sms") or 0)),
+        notify_email=bool(int(row.get("notify_email") or 0)),
+        created_ts=float(row.get("created_ts") or 0.0),
+        updated_ts=float(row.get("updated_ts") or 0.0),
+    )
+
+
 def bdc_agent_out(row: Dict[str, Any]) -> BdcAgentOut:
     return BdcAgentOut(
         id=int(row.get("id") or 0),
@@ -1339,6 +1594,8 @@ def bdc_log_out(row: Dict[str, Any]) -> BdcAssignmentOut:
         salesperson_dealership=str(row.get("salesperson_dealership") or ""),
         customer_name=str(row.get("customer_name") or ""),
         customer_phone=str(row.get("customer_phone") or ""),
+        notification_sms_status=str(row.get("notification_sms_status") or ""),
+        notification_email_status=str(row.get("notification_email_status") or ""),
     )
 
 
@@ -1572,6 +1829,14 @@ def fetch_salespeople(include_inactive: bool = False) -> List[SalespersonOut]:
     return [salesperson_out(row) for row in db_query_all(query)]
 
 
+def fetch_salespeople_admin(include_inactive: bool = False) -> List[SalespersonAdminOut]:
+    query = "SELECT * FROM salespeople"
+    if not include_inactive:
+        query += " WHERE active = 1"
+    query += " ORDER BY active DESC, dealership ASC, name ASC, id ASC"
+    return [salesperson_admin_out(row) for row in db_query_all(query)]
+
+
 def fetch_round_robin_salespeople(dealership: Optional[str] = None) -> List[SalespersonOut]:
     query = "SELECT * FROM salespeople WHERE active = 1"
     params: List[Any] = []
@@ -1688,34 +1953,60 @@ def replace_days_off_month(payload: DaysOffMonthBulkIn) -> DaysOffMonthOut:
     return fetch_days_off_month(month_key)
 
 
-def create_salesperson(payload: SalespersonIn) -> SalespersonOut:
+def create_salesperson(payload: SalespersonIn) -> SalespersonAdminOut:
     name = normalize_name(payload.name, "name")
     dealership = normalize_dealership(payload.dealership)
+    phone_number = normalize_optional_phone(payload.phone_number)
+    email = normalize_optional_email(payload.email)
     assert_unique_name("salespeople", name)
     now_ts = time.time()
     created_id = db_insert(
         """
-        INSERT INTO salespeople (name, dealership, weekly_days_off, active, created_ts, updated_ts)
-        VALUES (?, ?, ?, ?, ?, ?)
+        INSERT INTO salespeople (
+            name, dealership, weekly_days_off, active, phone_number, email, notify_sms, notify_email, created_ts, updated_ts
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (name, dealership, days_to_text(payload.weekly_days_off), 1 if payload.active else 0, now_ts, now_ts),
+        (
+            name,
+            dealership,
+            days_to_text(payload.weekly_days_off),
+            1 if payload.active else 0,
+            phone_number,
+            email,
+            1 if payload.notify_sms else 0,
+            1 if payload.notify_email else 0,
+            now_ts,
+            now_ts,
+        ),
     )
     row = get_salesperson_row(created_id)
     if not row:
         raise HTTPException(status_code=500, detail="failed to create salesperson")
-    return salesperson_out(row)
+    return salesperson_admin_out(row)
 
 
-def update_salesperson(salesperson_id: int, payload: SalespersonIn) -> SalespersonOut:
+def update_salesperson(salesperson_id: int, payload: SalespersonIn) -> SalespersonAdminOut:
     if not get_salesperson_row(salesperson_id):
         raise HTTPException(status_code=404, detail="salesperson not found")
     name = normalize_name(payload.name, "name")
     dealership = normalize_dealership(payload.dealership)
+    phone_number = normalize_optional_phone(payload.phone_number)
+    email = normalize_optional_email(payload.email)
     assert_unique_name("salespeople", name, exclude_id=salesperson_id)
     db_execute(
         """
         UPDATE salespeople
-        SET name = ?, dealership = ?, weekly_days_off = ?, active = ?, updated_ts = ?
+        SET
+            name = ?,
+            dealership = ?,
+            weekly_days_off = ?,
+            active = ?,
+            phone_number = ?,
+            email = ?,
+            notify_sms = ?,
+            notify_email = ?,
+            updated_ts = ?
         WHERE id = ?
         """,
         (
@@ -1723,6 +2014,10 @@ def update_salesperson(salesperson_id: int, payload: SalespersonIn) -> Salespers
             dealership,
             days_to_text(payload.weekly_days_off),
             1 if payload.active else 0,
+            phone_number,
+            email,
+            1 if payload.notify_sms else 0,
+            1 if payload.notify_email else 0,
             time.time(),
             salesperson_id,
         ),
@@ -1730,7 +2025,7 @@ def update_salesperson(salesperson_id: int, payload: SalespersonIn) -> Salespers
     row = get_salesperson_row(salesperson_id)
     if not row:
         raise HTTPException(status_code=500, detail="failed to update salesperson")
-    return salesperson_out(row)
+    return salesperson_admin_out(row)
 
 
 def create_bdc_agent(payload: BdcAgentIn) -> BdcAgentOut:
@@ -2083,8 +2378,9 @@ def assign_next_lead(payload: BdcLeadAssignIn) -> BdcAssignmentOut:
         """
         INSERT INTO bdc_assignment_log (
             assigned_ts, assigned_at, bdc_agent_id, bdc_agent_name, lead_store, salesperson_id, salesperson_name,
-            salesperson_dealership, customer_name, customer_phone, distribution_mode
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            salesperson_dealership, customer_name, customer_phone, distribution_mode, notification_sms_status,
+            notification_email_status
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             time.time(),
@@ -2098,12 +2394,27 @@ def assign_next_lead(payload: BdcLeadAssignIn) -> BdcAssignmentOut:
             customer_name,
             customer_phone,
             distribution_mode,
+            "",
+            "",
         ),
     )
     set_meta(bdc_pointer_key(pool_key), str(next_pointer))
     row = db_query_one("SELECT * FROM bdc_assignment_log WHERE id = ?", (created_id,))
     if not row:
         raise HTTPException(status_code=500, detail="failed to create assignment log")
+    salesperson_row = get_salesperson_row(salesperson.id)
+    if salesperson_row:
+        sms_status, email_status = deliver_assignment_notifications(salesperson_row, row)
+        if sms_status or email_status:
+            db_execute(
+                """
+                UPDATE bdc_assignment_log
+                SET notification_sms_status = ?, notification_email_status = ?
+                WHERE id = ?
+                """,
+                (sms_status, email_status, created_id),
+            )
+            row = db_query_one("SELECT * FROM bdc_assignment_log WHERE id = ?", (created_id,)) or row
     return bdc_log_out(row)
 
 
@@ -3620,18 +3931,33 @@ def get_salespeople(include_inactive: bool = False) -> List[SalespersonOut]:
     return fetch_salespeople(include_inactive=include_inactive)
 
 
-@app.post("/api/admin/salespeople", response_model=SalespersonOut)
-def post_salesperson(payload: SalespersonIn, x_admin_token: Optional[str] = Header(default=None)) -> SalespersonOut:
+@app.get("/api/admin/salespeople", response_model=List[SalespersonAdminOut])
+def get_admin_salespeople(
+    include_inactive: bool = False,
+    x_admin_token: Optional[str] = Header(default=None),
+) -> List[SalespersonAdminOut]:
+    require_admin(x_admin_token)
+    return fetch_salespeople_admin(include_inactive=include_inactive)
+
+
+@app.get("/api/admin/notifications/config", response_model=NotificationConfigOut)
+def get_admin_notification_config(x_admin_token: Optional[str] = Header(default=None)) -> NotificationConfigOut:
+    require_admin(x_admin_token)
+    return get_notification_config()
+
+
+@app.post("/api/admin/salespeople", response_model=SalespersonAdminOut)
+def post_salesperson(payload: SalespersonIn, x_admin_token: Optional[str] = Header(default=None)) -> SalespersonAdminOut:
     require_admin(x_admin_token)
     return create_salesperson(payload)
 
 
-@app.put("/api/admin/salespeople/{salesperson_id}", response_model=SalespersonOut)
+@app.put("/api/admin/salespeople/{salesperson_id}", response_model=SalespersonAdminOut)
 def put_salesperson(
     salesperson_id: int,
     payload: SalespersonIn,
     x_admin_token: Optional[str] = Header(default=None),
-) -> SalespersonOut:
+) -> SalespersonAdminOut:
     require_admin(x_admin_token)
     return update_salesperson(salesperson_id, payload)
 

@@ -106,6 +106,10 @@ export const apiBase = API_BASE;
 export const adminLogin = (payload) => request("/api/admin/login", { method: "POST", body: payload });
 export const getAdminSession = (token) => request("/api/admin/session", { headers: adminHeaders(token) });
 export const getSalespeople = (params = {}) => request(`/api/salespeople${qs({ include_inactive: params.includeInactive })}`);
+export const getAdminSalespeople = (token, params = {}) =>
+  request(`/api/admin/salespeople${qs({ include_inactive: params.includeInactive })}`, { headers: adminHeaders(token) });
+export const getNotificationConfig = (token) =>
+  request("/api/admin/notifications/config", { headers: adminHeaders(token) });
 export const getFreshUpLog = (params = {}) =>
   request(`/api/freshup/log${qs({ salesperson_id: params.salespersonId, limit: params.limit })}`);
 export const getFreshUpLinks = () => request("/api/freshup/links");

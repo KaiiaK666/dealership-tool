@@ -13,9 +13,11 @@ import {
   createTrafficPdf,
   deleteServiceDriveTrafficDay,
   generateServiceDrive,
+  getAdminSalespeople,
   getAdminDaysOff,
   getAdminSession,
   getBdcAgents,
+  getNotificationConfig,
   getBdcLog,
   getBdcReport,
   getBdcState,
@@ -67,6 +69,19 @@ const TABS = [
   { id: "specials", label: "Specials" },
   { id: "admin", label: "Admin" },
 ];
+
+function emptySalesForm() {
+  return {
+    name: "",
+    dealership: "Kia",
+    weekly_days_off: [],
+    active: true,
+    phone_number: "",
+    email: "",
+    notify_sms: false,
+    notify_email: false,
+  };
+}
 
 const ADMIN_SECTIONS = [
   { id: "staff", label: "Staff Setup" },
@@ -1056,8 +1071,14 @@ export default function App() {
   const [adminToken, setAdminToken] = useState(() => localStorage.getItem("dealer_tool_admin") || "");
   const [adminSession, setAdminSession] = useState(null);
   const [login, setLogin] = useState({ username: "admin", password: "admin123" });
-  const [salesForm, setSalesForm] = useState({ name: "", dealership: "Kia", weekly_days_off: [], active: true });
+  const [salesForm, setSalesForm] = useState(() => emptySalesForm());
   const [bdcForm, setBdcForm] = useState({ name: "", active: true });
+  const [notificationConfig, setNotificationConfig] = useState({
+    sms_provider: "Twilio",
+    sms_configured: false,
+    email_provider: "Resend",
+    email_configured: false,
+  });
   const [leadForm, setLeadForm] = useState({ bdcAgentId: "", leadStore: "Kia", customerName: "", customerPhone: "" });
   const [trafficEntryForm, setTrafficEntryForm] = useState({
     brand: "Kia",
@@ -1268,10 +1289,16 @@ export default function App() {
   );
   const tabsToShow = TABS.filter((item) => item.id === "admin" || adminSession || visibleTabIds.has(item.id));
   const latestBdcAssignment = lastAssignment || bdcLog.entries?.[0] || null;
+  const latestBdcNotifications = [
+    latestBdcAssignment?.notification_sms_status,
+    latestBdcAssignment?.notification_email_status,
+  ].filter(Boolean);
 
   async function loadAll(nextMonth = month, nextFilters = filters) {
     const [sales, bdc, service, log, report, distribution, undoSettings, tabs] = await Promise.all([
-      getSalespeople({ includeInactive: true }),
+      adminSession && adminToken
+        ? getAdminSalespeople(adminToken, { includeInactive: true })
+        : getSalespeople({ includeInactive: true }),
       getBdcAgents({ includeInactive: true }),
       getServiceDrive({ month: nextMonth }),
       getBdcLog({
@@ -1401,6 +1428,20 @@ export default function App() {
     const data = await getFreshUpAnalytics(adminToken, { days: 30 });
     setFreshUpAnalytics(data);
     setResourceLoadState((current) => ({ ...current, freshUpAnalytics: true }));
+  }
+
+  async function refreshNotificationConfig() {
+    if (!adminToken) {
+      setNotificationConfig({
+        sms_provider: "Twilio",
+        sms_configured: false,
+        email_provider: "Resend",
+        email_configured: false,
+      });
+      return;
+    }
+    const data = await getNotificationConfig(adminToken);
+    setNotificationConfig(data);
   }
 
   function trackFreshUpEvent({ eventType, linkType = "", targetUrl = "", storeDealership = "" }) {
@@ -1910,13 +1951,40 @@ export default function App() {
     };
   }, [adminSession, adminToken, daysOffMonth]);
 
+  useEffect(() => {
+    let active = true;
+    const run = async () => {
+      if (!adminSession || !adminToken) {
+        setNotificationConfig({
+          sms_provider: "Twilio",
+          sms_configured: false,
+          email_provider: "Resend",
+          email_configured: false,
+        });
+        return;
+      }
+      try {
+        const data = await getNotificationConfig(adminToken);
+        if (active) setNotificationConfig(data);
+      } catch (errorValue) {
+        if (active) setError(errText(errorValue));
+      }
+    };
+    run();
+    return () => {
+      active = false;
+    };
+  }, [adminSession, adminToken]);
+
   async function refresh() {
     try {
-      await Promise.all([
+      const tasks = [
         loadAll(month, filters),
         refreshServiceTraffic(trafficMonth, selectedTrafficDate),
         refreshBdcState(leadForm.leadStore),
-      ]);
+      ];
+      if (adminSession && adminToken) tasks.push(refreshNotificationConfig());
+      await Promise.all(tasks);
     } catch (errorValue) {
       setError(errText(errorValue));
     }
@@ -2010,7 +2078,7 @@ export default function App() {
     setError("");
     try {
       await createSalesperson(adminToken, salesForm);
-      setSalesForm({ name: "", dealership: "Kia", weekly_days_off: [], active: true });
+      setSalesForm(emptySalesForm());
       await refresh();
     } catch (errorValue) {
       setError(errText(errorValue));
@@ -3459,6 +3527,20 @@ export default function App() {
                 <small>
                   {latestBdcAssignment.customer_phone || "No phone added"} · {dateTimeLabel(latestBdcAssignment.assigned_at)}
                 </small>
+                {latestBdcNotifications.length ? (
+                  <div className="bdc-last-assigned__notifications">
+                    {latestBdcNotifications.map((item) => (
+                      <span
+                        key={item}
+                        className={`bdc-last-assigned__notification ${
+                          item.toLowerCase().includes("sent") ? "is-success" : "is-warning"
+                        }`}
+                      >
+                        {item}
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
               </div>
             ) : null}
 
@@ -4849,6 +4931,47 @@ export default function App() {
                               <option value="Outlet">Outlet</option>
                             </select>
                           </label>
+                          <label>
+                            <span>Phone number for text alerts</span>
+                            <input
+                              value={salesForm.phone_number}
+                              onChange={(event) =>
+                                setSalesForm((current) => ({ ...current, phone_number: event.target.value }))
+                              }
+                              placeholder="(956) 555-1234"
+                            />
+                          </label>
+                          <label>
+                            <span>Email for assignment alerts</span>
+                            <input
+                              type="email"
+                              value={salesForm.email}
+                              onChange={(event) => setSalesForm((current) => ({ ...current, email: event.target.value }))}
+                              placeholder="rep@bertogden.com"
+                            />
+                          </label>
+                          <div className="notification-toggle-grid">
+                            <label className="checkbox">
+                              <input
+                                type="checkbox"
+                                checked={salesForm.notify_sms}
+                                onChange={(event) =>
+                                  setSalesForm((current) => ({ ...current, notify_sms: event.target.checked }))
+                                }
+                              />
+                              <span>Notify by text</span>
+                            </label>
+                            <label className="checkbox">
+                              <input
+                                type="checkbox"
+                                checked={salesForm.notify_email}
+                                onChange={(event) =>
+                                  setSalesForm((current) => ({ ...current, notify_email: event.target.checked }))
+                                }
+                              />
+                              <span>Notify by email</span>
+                            </label>
+                          </div>
                           <label className="checkbox">
                             <input
                               type="checkbox"
@@ -4885,6 +5008,47 @@ export default function App() {
                             {busy === "add-bdc" ? "Adding..." : "Add BDC Agent"}
                           </button>
                         </form>
+                      </div>
+                    </div>
+
+                    <div className="panel notification-setup-panel">
+                      <div className="row">
+                        <div>
+                          <span className="eyebrow">Lead notifications</span>
+                          <h3>Assignment alerts setup</h3>
+                        </div>
+                      </div>
+                      <div className="notification-status-grid">
+                        <div className={`notification-status-card ${notificationConfig.sms_configured ? "is-ready" : "is-missing"}`}>
+                          <span className="eyebrow">Text</span>
+                          <strong>{notificationConfig.sms_provider}</strong>
+                          <small>
+                            {notificationConfig.sms_configured
+                              ? "Ready to send assignment texts."
+                              : "Needs Twilio env vars before texts can go out."}
+                          </small>
+                        </div>
+                        <div
+                          className={`notification-status-card ${notificationConfig.email_configured ? "is-ready" : "is-missing"}`}
+                        >
+                          <span className="eyebrow">Email</span>
+                          <strong>{notificationConfig.email_provider}</strong>
+                          <small>
+                            {notificationConfig.email_configured
+                              ? "Ready to send assignment emails."
+                              : "Needs Resend env vars before emails can go out."}
+                          </small>
+                        </div>
+                      </div>
+                      <div className="notification-setup-list">
+                        <div>
+                          <strong>Text setup</strong>
+                          <small>`TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM_NUMBER`</small>
+                        </div>
+                        <div>
+                          <strong>Email setup</strong>
+                          <small>`RESEND_API_KEY`, `BDC_NOTIFY_EMAIL_FROM`</small>
+                        </div>
                       </div>
                     </div>
 
@@ -4940,6 +5104,65 @@ export default function App() {
                                           <option value="Outlet">Outlet</option>
                                         </select>
                                       </label>
+                                      <label>
+                                        <span>Phone number</span>
+                                        <input
+                                          value={person.phone_number || ""}
+                                          onChange={(event) =>
+                                            setSalespeople((current) =>
+                                              current.map((item) =>
+                                                item.id === person.id ? { ...item, phone_number: event.target.value } : item
+                                              )
+                                            )
+                                          }
+                                          placeholder="(956) 555-1234"
+                                        />
+                                      </label>
+                                      <label>
+                                        <span>Email</span>
+                                        <input
+                                          type="email"
+                                          value={person.email || ""}
+                                          onChange={(event) =>
+                                            setSalespeople((current) =>
+                                              current.map((item) =>
+                                                item.id === person.id ? { ...item, email: event.target.value } : item
+                                              )
+                                            )
+                                          }
+                                          placeholder="rep@bertogden.com"
+                                        />
+                                      </label>
+                                      <div className="notification-toggle-grid">
+                                        <label className="checkbox">
+                                          <input
+                                            type="checkbox"
+                                            checked={Boolean(person.notify_sms)}
+                                            onChange={(event) =>
+                                              setSalespeople((current) =>
+                                                current.map((item) =>
+                                                  item.id === person.id ? { ...item, notify_sms: event.target.checked } : item
+                                                )
+                                              )
+                                            }
+                                          />
+                                          <span>Text alerts</span>
+                                        </label>
+                                        <label className="checkbox">
+                                          <input
+                                            type="checkbox"
+                                            checked={Boolean(person.notify_email)}
+                                            onChange={(event) =>
+                                              setSalespeople((current) =>
+                                                current.map((item) =>
+                                                  item.id === person.id ? { ...item, notify_email: event.target.checked } : item
+                                                )
+                                              )
+                                            }
+                                          />
+                                          <span>Email alerts</span>
+                                        </label>
+                                      </div>
                                       <label className="checkbox">
                                         <input
                                           type="checkbox"
