@@ -32,8 +32,10 @@ import {
   getServiceDrive,
   getServiceDriveTraffic,
   getTrafficPdfs,
+  importMastermindServiceDriveTraffic,
   importReynoldsServiceDriveTraffic,
   replaceAdminDaysOffMonth,
+  undoMastermindServiceDriveTrafficImport,
   undoReynoldsServiceDriveTrafficImport,
   updateBdcAgent,
   updateBdcDistribution,
@@ -783,6 +785,10 @@ export default function App() {
   const [reynoldsImportFileKey, setReynoldsImportFileKey] = useState(0);
   const [reynoldsImportResult, setReynoldsImportResult] = useState(null);
   const [reynoldsUndoResult, setReynoldsUndoResult] = useState(null);
+  const [mastermindImportFile, setMastermindImportFile] = useState(null);
+  const [mastermindImportFileKey, setMastermindImportFileKey] = useState(0);
+  const [mastermindImportResult, setMastermindImportResult] = useState(null);
+  const [mastermindUndoResult, setMastermindUndoResult] = useState(null);
   const [trafficDayClearResult, setTrafficDayClearResult] = useState(null);
   const [resourceLoadState, setResourceLoadState] = useState({
     trafficPdfs: false,
@@ -1768,6 +1774,11 @@ export default function App() {
     setReynoldsImportFileKey((current) => current + 1);
   }
 
+  function resetMastermindImportForm() {
+    setMastermindImportFile(null);
+    setMastermindImportFileKey((current) => current + 1);
+  }
+
   function setTrafficRowFiles(entryId, files) {
     setTrafficRowUploadFiles((current) => ({
       ...current,
@@ -1800,6 +1811,7 @@ export default function App() {
     setBusy("add-traffic-entry");
     setError("");
     setReynoldsImportResult(null);
+    setMastermindImportResult(null);
     try {
       let saved = await createServiceDriveTraffic(adminToken, {
         traffic_date: selectedTrafficDate,
@@ -1833,6 +1845,8 @@ export default function App() {
     setError("");
     setReynoldsImportResult(null);
     setReynoldsUndoResult(null);
+    setMastermindImportResult(null);
+    setMastermindUndoResult(null);
     try {
       const formData = new FormData();
       formData.append("file", reynoldsImportFile);
@@ -1841,6 +1855,37 @@ export default function App() {
       const focusMonth = focusDate ? focusDate.slice(0, 7) : trafficMonth;
       setReynoldsImportResult(result);
       resetReynoldsImportForm();
+      setExpandedTrafficEntryId(null);
+      if (focusMonth) setTrafficMonth(focusMonth);
+      if (focusDate) setSelectedTrafficDate(focusDate);
+      await refreshServiceTraffic(focusMonth, focusDate);
+    } catch (errorValue) {
+      setError(errText(errorValue));
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function importMastermindTrafficCsv(event) {
+    event.preventDefault();
+    if (!mastermindImportFile) {
+      setError("Choose a Mastermind service appointments CSV file first.");
+      return;
+    }
+    setBusy("import-mastermind-traffic-csv");
+    setError("");
+    setReynoldsImportResult(null);
+    setReynoldsUndoResult(null);
+    setMastermindImportResult(null);
+    setMastermindUndoResult(null);
+    try {
+      const formData = new FormData();
+      formData.append("file", mastermindImportFile);
+      const result = await importMastermindServiceDriveTraffic(adminToken, formData);
+      const focusDate = result.dates?.[0] || selectedTrafficDate;
+      const focusMonth = focusDate ? focusDate.slice(0, 7) : trafficMonth;
+      setMastermindImportResult(result);
+      resetMastermindImportForm();
       setExpandedTrafficEntryId(null);
       if (focusMonth) setTrafficMonth(focusMonth);
       if (focusDate) setSelectedTrafficDate(focusDate);
@@ -1865,12 +1910,42 @@ export default function App() {
     setError("");
     setReynoldsImportResult(null);
     setReynoldsUndoResult(null);
+    setMastermindImportResult(null);
+    setMastermindUndoResult(null);
     try {
       const result = await undoReynoldsServiceDriveTrafficImport(adminToken);
       await refreshServiceTraffic(trafficMonth, selectedTrafficDate);
       setExpandedTrafficEntryId(null);
       setReynoldsUndoResult(result);
       setError(result.deleted || result.preserved_with_notes ? "" : "No Reynolds-imported rows were found to remove.");
+    } catch (errorValue) {
+      setError(errText(errorValue));
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function undoMastermindTrafficCsvImport() {
+    if (
+      typeof window !== "undefined" &&
+      !window.confirm(
+        "Undo the Mastermind CSV import? This removes Mastermind-imported traffic rows, keeps manual rows alone, and leaves any imported rows with saved salesperson notes in place."
+      )
+    ) {
+      return;
+    }
+    setBusy("undo-mastermind-traffic-csv");
+    setError("");
+    setReynoldsImportResult(null);
+    setReynoldsUndoResult(null);
+    setMastermindImportResult(null);
+    setMastermindUndoResult(null);
+    try {
+      const result = await undoMastermindServiceDriveTrafficImport(adminToken);
+      await refreshServiceTraffic(trafficMonth, selectedTrafficDate);
+      setExpandedTrafficEntryId(null);
+      setMastermindUndoResult(result);
+      setError(result.deleted || result.preserved_with_notes ? "" : "No Mastermind-imported rows were found to remove.");
     } catch (errorValue) {
       setError(errText(errorValue));
     } finally {
@@ -1899,6 +1974,8 @@ export default function App() {
     setError("");
     setReynoldsImportResult(null);
     setReynoldsUndoResult(null);
+    setMastermindImportResult(null);
+    setMastermindUndoResult(null);
     try {
       const result = await deleteServiceDriveTrafficDay(adminToken, resolvedDate);
       setTrafficDayClearResult(result);
@@ -4667,6 +4744,68 @@ export default function App() {
                               disabled={busy === "undo-traffic-csv"}
                             >
                               {busy === "undo-traffic-csv" ? "Undoing..." : "Undo Reynolds Import"}
+                            </button>
+                          </form>
+                        </div>
+
+                        <div className="panel">
+                          <div className="row">
+                            <div>
+                              <span className="eyebrow">Mastermind import</span>
+                              <h3>Raw service appointments export</h3>
+                            </div>
+                            <button type="button" className="secondary" onClick={resetMastermindImportForm}>
+                              Clear File
+                            </button>
+                          </div>
+                          <p className="admin-note">
+                            Upload the raw Mastermind service appointments CSV exactly as exported. The importer keeps
+                            the useful traffic fields only: appointment date and time, store, customer, best phone,
+                            vehicle, mileage, assignee, status, and showroom link. Unsupported Outlet rows are skipped.
+                          </p>
+                          {mastermindImportResult ? (
+                            <div className="notice success">
+                              Imported {mastermindImportResult.total_rows} rows: {mastermindImportResult.created} created,{" "}
+                              {mastermindImportResult.updated} updated, {mastermindImportResult.skipped} skipped across{" "}
+                              {mastermindImportResult.dates.length} date
+                              {mastermindImportResult.dates.length === 1 ? "" : "s"}.
+                            </div>
+                          ) : null}
+                          {mastermindUndoResult ? (
+                            <div className="notice success">
+                              Removed {mastermindUndoResult.deleted} Mastermind-imported row
+                              {mastermindUndoResult.deleted === 1 ? "" : "s"}
+                              {mastermindUndoResult.preserved_with_notes
+                                ? ` and kept ${mastermindUndoResult.preserved_with_notes} row${
+                                    mastermindUndoResult.preserved_with_notes === 1 ? "" : "s"
+                                  } with saved salesperson notes.`
+                                : "."}
+                            </div>
+                          ) : null}
+                          <form className="form compact" onSubmit={importMastermindTrafficCsv}>
+                            <label>
+                              <span>CSV file</span>
+                              <input
+                                key={mastermindImportFileKey}
+                                type="file"
+                                accept=".csv,text/csv"
+                                onChange={(event) => setMastermindImportFile(event.target.files?.[0] || null)}
+                              />
+                              <small>
+                                Best with the Automotive Mastermind service appointments export. Re-importing the same
+                                appointments updates matching rows instead of duplicating them.
+                              </small>
+                            </label>
+                            <button type="submit" disabled={busy === "import-mastermind-traffic-csv"}>
+                              {busy === "import-mastermind-traffic-csv" ? "Importing..." : "Import Mastermind CSV"}
+                            </button>
+                            <button
+                              type="button"
+                              className="secondary"
+                              onClick={undoMastermindTrafficCsvImport}
+                              disabled={busy === "undo-mastermind-traffic-csv"}
+                            >
+                              {busy === "undo-mastermind-traffic-csv" ? "Undoing..." : "Undo Mastermind Import"}
                             </button>
                           </form>
                         </div>

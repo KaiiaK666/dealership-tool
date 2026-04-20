@@ -182,6 +182,18 @@ export const undoReynoldsServiceDriveTrafficImport = (token) =>
     method: "DELETE",
     headers: adminHeaders(token),
   });
+export const importMastermindServiceDriveTraffic = (token, formData) =>
+  request("/api/admin/service-drive/traffic/import/mastermind", {
+    method: "POST",
+    body: formData,
+    headers: adminHeaders(token),
+    timeout: 60000,
+  });
+export const undoMastermindServiceDriveTrafficImport = (token) =>
+  request("/api/admin/service-drive/traffic/import/mastermind", {
+    method: "DELETE",
+    headers: adminHeaders(token),
+  });
 export const uploadServiceDriveTrafficImages = (token, id, formData) =>
   request(`/api/admin/service-drive/traffic/${id}/images`, {
     method: "POST",

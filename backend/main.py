@@ -2737,6 +2737,27 @@ def first_nonempty(*values: str) -> str:
     return ""
 
 
+def decode_csv_upload(file: UploadFile) -> List[Dict[str, Any]]:
+    raw = file.file.read()
+    if not raw:
+        raise HTTPException(status_code=400, detail="csv file is empty")
+
+    decoded: Optional[str] = None
+    for encoding in ("utf-8-sig", "utf-8", "latin-1"):
+        try:
+            decoded = raw.decode(encoding)
+            break
+        except UnicodeDecodeError:
+            continue
+    if decoded is None:
+        raise HTTPException(status_code=400, detail="could not decode csv file")
+
+    rows = list(csv.DictReader(io.StringIO(decoded)))
+    if not rows:
+        raise HTTPException(status_code=400, detail="csv file did not contain any rows")
+    return rows
+
+
 def parse_reynolds_datetime_text(value: str) -> Optional[datetime]:
     text = str(value or "").strip()
     if not text:
@@ -2822,24 +2843,145 @@ def reynolds_offer_idea(row: Dict[str, Any]) -> str:
     return normalize_notes("\n".join(lines), "offer_idea", max_len=4000)
 
 
-def import_reynolds_service_traffic(file: UploadFile) -> ServiceDriveTrafficImportOut:
-    raw = file.file.read()
-    if not raw:
-        raise HTTPException(status_code=400, detail="csv file is empty")
+def mastermind_text(row: Dict[str, Any], key: str) -> str:
+    return reynolds_text(row, key)
 
-    decoded: Optional[str] = None
-    for encoding in ("utf-8-sig", "utf-8", "latin-1"):
+
+def parse_mastermind_appointment_datetime(date_value: str, time_value: str) -> Optional[datetime]:
+    date_text = str(date_value or "").strip()
+    time_text = str(time_value or "").strip()
+    if not date_text:
+        return None
+
+    parsed_date: Optional[datetime] = None
+    for fmt in ("%m/%d/%Y %H:%M:%S", "%m/%d/%Y", "%m/%d/%Y %I:%M:%S %p", "%m/%d/%Y %I:%M %p"):
         try:
-            decoded = raw.decode(encoding)
+            parsed_date = datetime.strptime(date_text, fmt)
             break
-        except UnicodeDecodeError:
+        except ValueError:
             continue
-    if decoded is None:
-        raise HTTPException(status_code=400, detail="could not decode csv file")
+    if parsed_date is None:
+        return None
 
-    rows = list(csv.DictReader(io.StringIO(decoded)))
-    if not rows:
-        raise HTTPException(status_code=400, detail="csv file did not contain any rows")
+    if not time_text:
+        return parsed_date
+
+    parsed_time: Optional[datetime] = None
+    for fmt in ("%H:%M:%S", "%H:%M", "%I:%M:%S %p", "%I:%M %p"):
+        try:
+            parsed_time = datetime.strptime(time_text, fmt)
+            break
+        except ValueError:
+            continue
+    if parsed_time is None:
+        return parsed_date
+    return datetime.combine(parsed_date.date(), parsed_time.time())
+
+
+def mastermind_brand(row: Dict[str, Any]) -> Optional[str]:
+    dealer_id = mastermind_text(row, "Dealer Id").upper()
+    if dealer_id.startswith("KI"):
+        return "Kia"
+    if dealer_id.startswith("MZ"):
+        return "Mazda"
+    if dealer_id.startswith("OB") or dealer_id.startswith("OUT"):
+        return None
+
+    make_value = first_nonempty(
+        mastermind_text(row, "Current Vehicle Make"),
+        mastermind_text(row, "Replacement Vehicle Make"),
+    ).lower()
+    mapping = {
+        "kia": "Kia",
+        "mazda": "Mazda",
+    }
+    return mapping.get(make_value)
+
+
+def mastermind_customer_name(row: Dict[str, Any]) -> str:
+    return " ".join(
+        part
+        for part in (
+            mastermind_text(row, "First Name"),
+            mastermind_text(row, "Last Name"),
+        )
+        if part
+    ).strip()
+
+
+def mastermind_vehicle_summary(row: Dict[str, Any], *, replacement: bool = False) -> str:
+    prefix = "Replacement Vehicle" if replacement else "Current Vehicle"
+    year = mastermind_text(row, f"{prefix} Year")
+    make = mastermind_text(row, f"{prefix} Make")
+    model = mastermind_text(row, f"{prefix} Model")
+    trim = mastermind_text(row, f"{prefix} Trim")
+
+    detail = trim or model
+    if trim and model and model.lower() not in trim.lower():
+        detail = f"{model} {trim}".strip()
+
+    if detail:
+        value = detail if make and make.lower() in detail.lower() else " ".join(part for part in (make, detail) if part).strip()
+    else:
+        value = make
+
+    return " ".join(part for part in (year, value) if part).strip()
+
+
+def mastermind_model_make(row: Dict[str, Any], brand: str) -> str:
+    current_summary = mastermind_vehicle_summary(row, replacement=False)
+    if current_summary:
+        return current_summary
+    replacement_summary = mastermind_vehicle_summary(row, replacement=True)
+    if replacement_summary:
+        return replacement_summary
+    return brand
+
+
+def mastermind_source_key(row: Dict[str, Any], traffic_date: str, brand: str) -> str:
+    dealer_id = mastermind_text(row, "Dealer Id")
+    closed_deal_id = mastermind_text(row, "Closed Deal Id")
+    appointment_time = mastermind_text(row, "Appointment Time")
+    customer_name = mastermind_customer_name(row)
+    if closed_deal_id:
+        return f"mastermind:{brand}:{dealer_id}:{closed_deal_id}:{traffic_date}:{appointment_time}"
+    return f"mastermind:{brand}:{dealer_id}:{traffic_date}:{appointment_time}:{customer_name}"
+
+
+def mastermind_offer_idea(row: Dict[str, Any]) -> str:
+    current_vehicle = mastermind_vehicle_summary(row, replacement=False)
+    replacement_vehicle = mastermind_vehicle_summary(row, replacement=True)
+    details = [
+        ("Imported", "Mastermind Service Appointments CSV"),
+        ("Dealer Id", mastermind_text(row, "Dealer Id")),
+        (
+            "Appointment",
+            " ".join(
+                part
+                for part in (
+                    mastermind_text(row, "Appointment Date"),
+                    mastermind_text(row, "Appointment Time"),
+                )
+                if part
+            ).strip(),
+        ),
+        ("Assignee", mastermind_text(row, "Assignee")),
+        ("Deal Status", mastermind_text(row, "Deal Status")),
+        ("Customer Type", mastermind_text(row, "Customer Type")),
+        ("Outreach", mastermind_text(row, "Outreach")),
+        ("Current Vehicle", current_vehicle),
+        ("Current Mileage", mastermind_text(row, "Current Vehicle Mileage")),
+        ("Current VIN", mastermind_text(row, "Current Vehicle Vin")),
+        ("Replacement Vehicle", replacement_vehicle if replacement_vehicle and replacement_vehicle != current_vehicle else ""),
+        ("Email", mastermind_text(row, "Email Address")),
+        ("Showroom Link", mastermind_text(row, "Showroom Link")),
+    ]
+    lines = [f"{label}: {value}" for label, value in details if str(value or "").strip()]
+    return normalize_notes("\n".join(lines), "offer_idea", max_len=4000)
+
+
+def import_reynolds_service_traffic(file: UploadFile) -> ServiceDriveTrafficImportOut:
+    rows = decode_csv_upload(file)
 
     created = 0
     updated = 0
@@ -2976,7 +3118,155 @@ def import_reynolds_service_traffic(file: UploadFile) -> ServiceDriveTrafficImpo
     )
 
 
-def undo_reynolds_service_traffic_import() -> ServiceDriveTrafficImportUndoOut:
+def import_mastermind_service_traffic(file: UploadFile) -> ServiceDriveTrafficImportOut:
+    rows = decode_csv_upload(file)
+
+    created = 0
+    updated = 0
+    skipped = 0
+    imported_dates: List[str] = []
+    seen_keys: set[str] = set()
+    now_ts = time.time()
+
+    with db_lock:
+        conn = get_db()
+        try:
+            for row in rows:
+                appointment_dt = parse_mastermind_appointment_datetime(
+                    mastermind_text(row, "Appointment Date"),
+                    mastermind_text(row, "Appointment Time"),
+                )
+                if not appointment_dt:
+                    skipped += 1
+                    continue
+                traffic_date = appointment_dt.strftime("%Y-%m-%d")
+
+                brand = mastermind_brand(row)
+                if not brand:
+                    skipped += 1
+                    continue
+
+                customer_name_raw = mastermind_customer_name(row)
+                if not customer_name_raw:
+                    skipped += 1
+                    continue
+
+                source_key = mastermind_source_key(row, traffic_date, brand)
+                if source_key in seen_keys:
+                    skipped += 1
+                    continue
+                seen_keys.add(source_key)
+
+                appointment_time_text = mastermind_text(row, "Appointment Time")
+                customer_name = normalize_name(customer_name_raw, "customer_name")
+                customer_phone = normalize_short_text(
+                    first_nonempty(
+                        mastermind_text(row, "Mobile Phone"),
+                        mastermind_text(row, "Home Phone"),
+                        mastermind_text(row, "Work Phone"),
+                    ),
+                    "customer_phone",
+                    max_len=40,
+                )
+                appointment_label = normalize_short_text(
+                    format_clock_label(appointment_dt) if appointment_time_text else "",
+                    "appointment_label",
+                    max_len=24,
+                )
+                appointment_ts = (
+                    appointment_dt.replace(tzinfo=ZoneInfo(RULES_TIMEZONE)).timestamp() if appointment_time_text else 0
+                )
+                vehicle_year = normalize_short_text(
+                    first_nonempty(
+                        mastermind_text(row, "Current Vehicle Year"),
+                        mastermind_text(row, "Replacement Vehicle Year"),
+                    ),
+                    "vehicle_year",
+                    max_len=16,
+                )
+                odometer = normalize_short_text(mastermind_text(row, "Current Vehicle Mileage"), "odometer", max_len=32)
+                model_make = normalize_short_text(mastermind_model_make(row, brand), "model_make", max_len=120)
+                offer_idea = mastermind_offer_idea(row)
+
+                existing = conn.execute(
+                    "SELECT id FROM service_drive_traffic_entries WHERE source_system = ? AND source_key = ?",
+                    ("mastermind_csv", source_key),
+                ).fetchone()
+
+                if existing:
+                    conn.execute(
+                        """
+                        UPDATE service_drive_traffic_entries
+                        SET traffic_date = ?, brand = ?, customer_name = ?, customer_phone = ?, appointment_label = ?,
+                            appointment_ts = ?, vehicle_year = ?, odometer = ?, model_make = ?, offer_idea = ?, updated_ts = ?
+                        WHERE id = ?
+                        """,
+                        (
+                            traffic_date,
+                            brand,
+                            customer_name,
+                            customer_phone,
+                            appointment_label,
+                            appointment_ts,
+                            vehicle_year,
+                            odometer,
+                            model_make,
+                            offer_idea,
+                            now_ts,
+                            int(existing["id"]),
+                        ),
+                    )
+                    updated += 1
+                else:
+                    conn.execute(
+                        """
+                        INSERT INTO service_drive_traffic_entries (
+                            traffic_date, brand, customer_name, customer_phone, appointment_label, appointment_ts,
+                            vehicle_year, odometer, model_make, offer_idea, sales_notes, source_system, source_key,
+                            created_ts, updated_ts
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                        (
+                            traffic_date,
+                            brand,
+                            customer_name,
+                            customer_phone,
+                            appointment_label,
+                            appointment_ts,
+                            vehicle_year,
+                            odometer,
+                            model_make,
+                            offer_idea,
+                            "",
+                            "mastermind_csv",
+                            source_key,
+                            now_ts,
+                            now_ts,
+                        ),
+                    )
+                    created += 1
+
+                if traffic_date not in imported_dates:
+                    imported_dates.append(traffic_date)
+
+            conn.commit()
+        except HTTPException:
+            conn.rollback()
+            raise
+        except Exception as exc:
+            conn.rollback()
+            raise HTTPException(status_code=400, detail=f"failed to import mastermind csv: {exc}") from exc
+
+    return ServiceDriveTrafficImportOut(
+        total_rows=len(rows),
+        created=created,
+        updated=updated,
+        skipped=skipped,
+        dates=sorted(imported_dates),
+    )
+
+
+def undo_service_drive_traffic_import(source_system: str) -> ServiceDriveTrafficImportUndoOut:
     preserved_row = db_query_one(
         """
         SELECT COUNT(*) AS count
@@ -2984,7 +3274,7 @@ def undo_reynolds_service_traffic_import() -> ServiceDriveTrafficImportUndoOut:
         WHERE source_system = ?
           AND (TRIM(sales_notes) <> '' OR TRIM(sales_note_salesperson_name) <> '')
         """,
-        ("reynolds_csv",),
+        (source_system,),
     ) or {}
     deleted_row = db_query_one(
         """
@@ -2994,7 +3284,7 @@ def undo_reynolds_service_traffic_import() -> ServiceDriveTrafficImportUndoOut:
           AND TRIM(sales_notes) = ''
           AND TRIM(sales_note_salesperson_name) = ''
         """,
-        ("reynolds_csv",),
+        (source_system,),
     ) or {}
     deleted = int(deleted_row.get("count") or 0)
     preserved_with_notes = int(preserved_row.get("count") or 0)
@@ -3006,9 +3296,17 @@ def undo_reynolds_service_traffic_import() -> ServiceDriveTrafficImportUndoOut:
               AND TRIM(sales_notes) = ''
               AND TRIM(sales_note_salesperson_name) = ''
             """,
-            ("reynolds_csv",),
+            (source_system,),
         )
     return ServiceDriveTrafficImportUndoOut(deleted=deleted, preserved_with_notes=preserved_with_notes)
+
+
+def undo_reynolds_service_traffic_import() -> ServiceDriveTrafficImportUndoOut:
+    return undo_service_drive_traffic_import("reynolds_csv")
+
+
+def undo_mastermind_service_traffic_import() -> ServiceDriveTrafficImportUndoOut:
+    return undo_service_drive_traffic_import("mastermind_csv")
 
 
 def clear_service_drive_traffic_day(traffic_date: str) -> ServiceDriveTrafficDayClearOut:
@@ -3479,6 +3777,23 @@ def delete_service_drive_traffic_reynolds_import(
 ) -> ServiceDriveTrafficImportUndoOut:
     require_admin(x_admin_token)
     return undo_reynolds_service_traffic_import()
+
+
+@app.post("/api/admin/service-drive/traffic/import/mastermind", response_model=ServiceDriveTrafficImportOut)
+def post_service_drive_traffic_mastermind_import(
+    file: UploadFile = File(...),
+    x_admin_token: Optional[str] = Header(default=None),
+) -> ServiceDriveTrafficImportOut:
+    require_admin(x_admin_token)
+    return import_mastermind_service_traffic(file)
+
+
+@app.delete("/api/admin/service-drive/traffic/import/mastermind", response_model=ServiceDriveTrafficImportUndoOut)
+def delete_service_drive_traffic_mastermind_import(
+    x_admin_token: Optional[str] = Header(default=None),
+) -> ServiceDriveTrafficImportUndoOut:
+    require_admin(x_admin_token)
+    return undo_mastermind_service_traffic_import()
 
 
 @app.post("/api/admin/quote/rates", response_model=QuoteRateListOut)
