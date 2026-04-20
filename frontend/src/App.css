@@ -3820,3 +3820,318 @@ button.special-card:hover:not(:disabled) {
     min-height: 54px;
   }
 }
+
+.traffic-analysis-page {
+  gap: 1.25rem;
+}
+
+.traffic-analysis-hero {
+  display: flex;
+  gap: 1.5rem;
+  justify-content: space-between;
+  align-items: stretch;
+  padding: 1.5rem;
+  background:
+    radial-gradient(circle at top right, rgba(227, 126, 65, 0.18), transparent 32%),
+    linear-gradient(145deg, rgba(28, 35, 49, 0.98), rgba(42, 51, 68, 0.96));
+  color: #f7f5f0;
+}
+
+.traffic-analysis-hero p {
+  margin: 0.75rem 0 0;
+  max-width: 52rem;
+  color: rgba(247, 245, 240, 0.78);
+}
+
+.traffic-analysis-hero__controls,
+.traffic-analysis-chat__form {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.traffic-analysis-hero__controls {
+  min-width: 260px;
+}
+
+.traffic-analysis-hero__controls label {
+  display: grid;
+  gap: 0.4rem;
+}
+
+.traffic-analysis-hero__controls span,
+.traffic-analysis-chat__bubble span {
+  font-size: 0.72rem;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: rgba(247, 245, 240, 0.6);
+}
+
+.traffic-analysis-hero__controls input[type="month"] {
+  background: rgba(255, 255, 255, 0.92);
+}
+
+.traffic-analysis-hero__status {
+  display: grid;
+  gap: 0.2rem;
+  padding: 1rem 1.1rem;
+  border-radius: 1.1rem;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.traffic-analysis-hero__status strong {
+  font-size: 1.35rem;
+  letter-spacing: -0.03em;
+}
+
+.traffic-analysis-hero__status small {
+  color: rgba(247, 245, 240, 0.72);
+}
+
+.traffic-analysis-stats {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.traffic-analysis-stat {
+  display: grid;
+  gap: 0.35rem;
+  padding: 1.15rem 1.2rem;
+  border-radius: 1.25rem;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(246, 240, 232, 0.95));
+  border: 1px solid rgba(15, 23, 42, 0.06);
+  box-shadow: 0 18px 36px rgba(15, 23, 42, 0.08);
+}
+
+.traffic-analysis-stat span {
+  font-size: 0.74rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: #7e8794;
+}
+
+.traffic-analysis-stat strong {
+  font-size: 2rem;
+  line-height: 1;
+  letter-spacing: -0.05em;
+  color: #172033;
+}
+
+.traffic-analysis-stat small {
+  color: #667085;
+}
+
+.traffic-analysis-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(12, minmax(0, 1fr));
+}
+
+.traffic-analysis-panel {
+  grid-column: span 4;
+  display: grid;
+  gap: 1rem;
+}
+
+.traffic-analysis-panel--wide {
+  grid-column: span 8;
+}
+
+.traffic-analysis-panel--chat {
+  grid-column: span 8;
+}
+
+.traffic-analysis-bars {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.traffic-analysis-bars__item {
+  display: grid;
+  gap: 0.65rem;
+  grid-template-columns: 2rem minmax(0, 1fr) 2.5rem;
+  align-items: center;
+}
+
+.traffic-analysis-bars__item span {
+  font-size: 0.82rem;
+  color: #7e8794;
+}
+
+.traffic-analysis-bars__track {
+  height: 0.8rem;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(23, 32, 51, 0.08);
+}
+
+.traffic-analysis-bars__fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #c76536, #f19f58);
+}
+
+.traffic-analysis-bars__item strong {
+  text-align: right;
+  color: #172033;
+}
+
+.traffic-analysis-insights,
+.traffic-analysis-brand-list,
+.traffic-analysis-list,
+.traffic-analysis-chat {
+  display: grid;
+  gap: 0.85rem;
+}
+
+.traffic-analysis-insights__item {
+  padding: 0.85rem 1rem;
+  border-radius: 1rem;
+  background: rgba(23, 32, 51, 0.04);
+  color: #263043;
+}
+
+.traffic-analysis-brand-card {
+  display: grid;
+  gap: 0.55rem;
+  padding: 1rem;
+  border-radius: 1rem;
+  background: rgba(246, 240, 232, 0.78);
+}
+
+.traffic-analysis-brand-card__top,
+.traffic-analysis-list__item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.traffic-analysis-brand-card__bar {
+  height: 0.72rem;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(23, 32, 51, 0.08);
+}
+
+.traffic-analysis-brand-card__bar-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #1f2f46, #c76536);
+}
+
+.traffic-analysis-brand-card small,
+.traffic-analysis-list__item small {
+  color: #667085;
+}
+
+.traffic-analysis-list__item {
+  padding: 0.95rem 1rem;
+  border-radius: 1rem;
+  background: rgba(23, 32, 51, 0.04);
+}
+
+.traffic-analysis-list__item--stacked {
+  align-items: flex-start;
+}
+
+.traffic-analysis-list__item b {
+  font-size: 1.15rem;
+  color: #172033;
+}
+
+.traffic-analysis-tags {
+  display: flex;
+  gap: 0.6rem;
+  flex-wrap: wrap;
+}
+
+.traffic-analysis-tag {
+  padding: 0.45rem 0.75rem;
+  border-radius: 999px;
+  background: rgba(199, 101, 54, 0.12);
+  color: #8f4b28;
+  font-size: 0.86rem;
+  font-weight: 600;
+}
+
+.traffic-analysis-prompts {
+  display: flex;
+  gap: 0.7rem;
+  flex-wrap: wrap;
+}
+
+.traffic-analysis-prompts .secondary {
+  white-space: nowrap;
+}
+
+.traffic-analysis-chat__bubble {
+  display: grid;
+  gap: 0.45rem;
+  padding: 1rem 1.1rem;
+  border-radius: 1rem;
+  background: rgba(23, 32, 51, 0.05);
+}
+
+.traffic-analysis-chat__bubble--assistant {
+  border-left: 4px solid #c76536;
+}
+
+.traffic-analysis-chat__bubble--user {
+  border-left: 4px solid #1f2f46;
+  background: rgba(31, 47, 70, 0.08);
+}
+
+.traffic-analysis-chat__bubble p {
+  margin: 0;
+  color: #263043;
+}
+
+.traffic-analysis-chat__form textarea {
+  min-height: 96px;
+  resize: vertical;
+}
+
+@media (max-width: 980px) {
+  .traffic-analysis-hero,
+  .traffic-analysis-brand-card__top,
+  .traffic-analysis-list__item {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .traffic-analysis-panel,
+  .traffic-analysis-panel--wide,
+  .traffic-analysis-panel--chat {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 640px) {
+  .traffic-analysis-hero {
+    padding: 1.2rem;
+  }
+
+  .traffic-analysis-stats,
+  .traffic-analysis-grid {
+    gap: 0.85rem;
+  }
+
+  .traffic-analysis-stat strong {
+    font-size: 1.65rem;
+  }
+
+  .traffic-analysis-bars__item {
+    grid-template-columns: 1.6rem minmax(0, 1fr) 2.2rem;
+  }
+
+  .traffic-analysis-prompts {
+    display: grid;
+  }
+
+  .traffic-analysis-prompts .secondary {
+    width: 100%;
+    white-space: normal;
+  }
+}

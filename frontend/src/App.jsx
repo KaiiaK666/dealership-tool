@@ -57,6 +57,7 @@ import "./App.css";
 const TABS = [
   { id: "serviceCalendar", label: "Service Drive Calendar" },
   { id: "serviceNotes", label: "Service Drive Notes" },
+  { id: "trafficAnalysis", label: "Service Drive Traffic Analysis" },
   { id: "bdc", label: "BDC Assign" },
   { id: "reports", label: "BDC Reports" },
   { id: "traffic", label: "Service Drive Traffic" },
@@ -122,6 +123,12 @@ const MARKETPLACE_PREVIEW_SAMPLE = {
   vin: "5XYP5DGC8RG123456",
   url: "https://www.bertogdenexample.com/vehicle/2024-kia-telluride-sx",
 };
+const TRAFFIC_ANALYSIS_PROMPTS = [
+  "What day was busiest this month?",
+  "Which traffic rows still need notes?",
+  "Compare Kia vs Mazda traffic.",
+  "Who owns the most appointments?",
+];
 const FRESH_UP_STORAGE_KEY = "dealer_tool_fresh_up_form";
 const FRESH_UP_DEFAULTS = {
   customerName: "",
@@ -594,6 +601,249 @@ function sortTrafficEntries(entries) {
   });
 }
 
+function trafficOfferIdeaLookup(offerIdea) {
+  const details = {};
+  String(offerIdea || "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .forEach((line) => {
+      const separatorIndex = line.indexOf(":");
+      if (separatorIndex <= 0) return;
+      const key = line.slice(0, separatorIndex).trim().toLowerCase();
+      const value = line.slice(separatorIndex + 1).trim();
+      if (!key || !value || details[key]) return;
+      details[key] = value;
+    });
+  return details;
+}
+
+function trafficAnalysisTokens(value) {
+  const stopWords = new Set([
+    "about",
+    "after",
+    "again",
+    "also",
+    "been",
+    "call",
+    "came",
+    "customer",
+    "deal",
+    "from",
+    "have",
+    "into",
+    "just",
+    "like",
+    "need",
+    "next",
+    "note",
+    "notes",
+    "sent",
+    "text",
+    "that",
+    "their",
+    "them",
+    "then",
+    "they",
+    "this",
+    "today",
+    "vehicle",
+    "with",
+    "will",
+    "went",
+    "when",
+  ]);
+  return String(value || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9\s]/g, " ")
+    .split(/\s+/)
+    .map((word) => word.trim())
+    .filter((word) => word.length >= 4 && !stopWords.has(word));
+}
+
+function formatAnalysisList(items, emptyLabel = "None") {
+  if (!items.length) return emptyLabel;
+  if (items.length === 1) return items[0];
+  if (items.length === 2) return `${items[0]} and ${items[1]}`;
+  return `${items.slice(0, -1).join(", ")}, and ${items[items.length - 1]}`;
+}
+
+function buildTrafficAnalysis(entries, countsByDate) {
+  const rows = Array.isArray(entries) ? entries : [];
+  const dateCountsDescending = Object.entries(countsByDate || {})
+    .map(([date, count]) => ({ date, count: Number(count || 0) }))
+    .sort((left, right) => right.count - left.count || left.date.localeCompare(right.date));
+  const dateCountsChronological = [...dateCountsDescending].sort((left, right) => left.date.localeCompare(right.date));
+  const brandCounts = { Kia: 0, Mazda: 0 };
+  const notesByBrand = { Kia: 0, Mazda: 0 };
+  const assigneeCounts = {};
+  const statusCounts = {};
+  const noteAuthorCounts = {};
+  const noteTermCounts = {};
+  const pendingRows = [];
+  let rowsWithNotes = 0;
+
+  for (const entry of rows) {
+    const brand = entry.brand === "Mazda" ? "Mazda" : "Kia";
+    brandCounts[brand] = (brandCounts[brand] || 0) + 1;
+    const details = trafficOfferIdeaLookup(entry.offer_idea);
+    const assignee = String(details.assignee || details.advisor || details["appointment taker"] || "").trim();
+    const status = String(details["deal status"] || details.status || details["overall status"] || "").trim();
+    const hasNotes = Boolean(String(entry.sales_notes || "").trim());
+
+    if (assignee) assigneeCounts[assignee] = (assigneeCounts[assignee] || 0) + 1;
+    if (status) statusCounts[status] = (statusCounts[status] || 0) + 1;
+
+    if (hasNotes) {
+      rowsWithNotes += 1;
+      notesByBrand[brand] = (notesByBrand[brand] || 0) + 1;
+      const author = String(entry.sales_note_salesperson_name || "").trim();
+      if (author) noteAuthorCounts[author] = (noteAuthorCounts[author] || 0) + 1;
+      for (const token of trafficAnalysisTokens(entry.sales_notes)) {
+        noteTermCounts[token] = (noteTermCounts[token] || 0) + 1;
+      }
+    } else {
+      pendingRows.push(entry);
+    }
+  }
+
+  const sortedAssignees = Object.entries(assigneeCounts)
+    .map(([label, count]) => ({ label, count }))
+    .sort((left, right) => right.count - left.count || left.label.localeCompare(right.label));
+  const sortedStatuses = Object.entries(statusCounts)
+    .map(([label, count]) => ({ label, count }))
+    .sort((left, right) => right.count - left.count || left.label.localeCompare(right.label));
+  const sortedAuthors = Object.entries(noteAuthorCounts)
+    .map(([label, count]) => ({ label, count }))
+    .sort((left, right) => right.count - left.count || left.label.localeCompare(right.label));
+  const sortedTerms = Object.entries(noteTermCounts)
+    .map(([label, count]) => ({ label, count }))
+    .sort((left, right) => right.count - left.count || left.label.localeCompare(right.label));
+  const sortedPendingRows = [...pendingRows].sort((left, right) => {
+    const leftDate = `${left.traffic_date || ""} ${left.appointment_label || ""}`.trim();
+    const rightDate = `${right.traffic_date || ""} ${right.appointment_label || ""}`.trim();
+    return leftDate.localeCompare(rightDate) || String(left.customer_name || "").localeCompare(String(right.customer_name || ""));
+  });
+  const totalRows = rows.length;
+  const activeDays = dateCountsChronological.length;
+  const noteCoverage = totalRows ? Math.round((rowsWithNotes / totalRows) * 100) : 0;
+  const pendingCount = totalRows - rowsWithNotes;
+  const busiestDay = dateCountsDescending[0] || null;
+  const kiaRows = brandCounts.Kia || 0;
+  const mazdaRows = brandCounts.Mazda || 0;
+  const totalBrandRows = kiaRows + mazdaRows || 1;
+
+  return {
+    totalRows,
+    rowsWithNotes,
+    pendingCount,
+    noteCoverage,
+    activeDays,
+    avgPerDay: activeDays ? (totalRows / activeDays).toFixed(1) : "0.0",
+    busiestDay,
+    topDays: dateCountsDescending.slice(0, 5),
+    timeline: dateCountsChronological,
+    brandCards: [
+      {
+        brand: "Kia",
+        rows: kiaRows,
+        noteCoverage: kiaRows ? Math.round(((notesByBrand.Kia || 0) / kiaRows) * 100) : 0,
+        share: Math.round((kiaRows / totalBrandRows) * 100),
+      },
+      {
+        brand: "Mazda",
+        rows: mazdaRows,
+        noteCoverage: mazdaRows ? Math.round(((notesByBrand.Mazda || 0) / mazdaRows) * 100) : 0,
+        share: Math.round((mazdaRows / totalBrandRows) * 100),
+      },
+    ],
+    topAssignees: sortedAssignees.slice(0, 5),
+    statuses: sortedStatuses.slice(0, 5),
+    topAuthors: sortedAuthors.slice(0, 5),
+    topTerms: sortedTerms.slice(0, 8),
+    pendingRows: sortedPendingRows.slice(0, 6),
+  };
+}
+
+function answerTrafficAnalysisQuestion(question, analysis, monthKey) {
+  const rawQuestion = String(question || "").trim();
+  if (!rawQuestion) {
+    return "Ask about busiest days, note coverage, Kia vs Mazda traffic, or which appointments still need follow-up.";
+  }
+  if (!analysis.totalRows) {
+    return "There is no service drive traffic loaded for that month yet, so there is nothing to analyze.";
+  }
+
+  const normalized = rawQuestion.toLowerCase();
+  const monthName = monthLabel(monthKey || currentMonth());
+  const busiestLabel = analysis.busiestDay
+    ? `${longDateLabel(analysis.busiestDay.date)} with ${analysis.busiestDay.count} rows`
+    : "no activity";
+
+  if (normalized.includes("busiest") || normalized.includes("busy") || normalized.includes("peak")) {
+    const topDays = analysis.topDays.map((item) => `${longDateLabel(item.date)} (${item.count})`);
+    return `${monthName} peaked on ${busiestLabel}. The strongest days were ${formatAnalysisList(topDays.slice(0, 3))}.`;
+  }
+
+  if (
+    normalized.includes("kia") ||
+    normalized.includes("mazda") ||
+    normalized.includes("brand") ||
+    normalized.includes("split") ||
+    normalized.includes("compare") ||
+    normalized.includes("versus") ||
+    normalized.includes("vs")
+  ) {
+    const kia = analysis.brandCards.find((item) => item.brand === "Kia");
+    const mazda = analysis.brandCards.find((item) => item.brand === "Mazda");
+    return `${monthName} traffic is split ${kia.rows} Kia rows (${kia.share}% of total, ${kia.noteCoverage}% with notes) and ${mazda.rows} Mazda rows (${mazda.share}% of total, ${mazda.noteCoverage}% with notes).`;
+  }
+
+  if (
+    normalized.includes("note") ||
+    normalized.includes("follow") ||
+    normalized.includes("pending") ||
+    normalized.includes("unfinished") ||
+    normalized.includes("unworked")
+  ) {
+    const pendingNames = analysis.pendingRows.map((entry) => {
+      const when = [entry.traffic_date, entry.appointment_label].filter(Boolean).join(" ");
+      return `${entry.customer_name || "Unnamed"}${when ? ` (${when})` : ""}`;
+    });
+    return `${analysis.rowsWithNotes} of ${analysis.totalRows} rows have notes saved, so note coverage is ${analysis.noteCoverage}%. ${analysis.pendingCount} row${analysis.pendingCount === 1 ? "" : "s"} still need follow-up notes. The next open items are ${formatAnalysisList(pendingNames.slice(0, 4), "none right now")}.`;
+  }
+
+  if (
+    normalized.includes("assignee") ||
+    normalized.includes("owner") ||
+    normalized.includes("assigned") ||
+    normalized.includes("who has") ||
+    normalized.includes("appointment owner")
+  ) {
+    const leaders = analysis.topAssignees.map((item) => `${item.label} (${item.count})`);
+    return leaders.length
+      ? `The heaviest appointment owners in ${monthName} are ${formatAnalysisList(leaders.slice(0, 4))}.`
+      : "The imported traffic does not have enough assignee data yet to rank appointment owners.";
+  }
+
+  if (normalized.includes("status")) {
+    const statuses = analysis.statuses.map((item) => `${item.label} (${item.count})`);
+    return statuses.length
+      ? `The main imported statuses for ${monthName} are ${formatAnalysisList(statuses.slice(0, 4))}.`
+      : "This month does not have enough imported status data to summarize yet.";
+  }
+
+  if (normalized.includes("theme") || normalized.includes("trend") || normalized.includes("talking about")) {
+    const terms = analysis.topTerms.map((item) => `${item.label} (${item.count})`);
+    return terms.length
+      ? `The strongest note themes this month are ${formatAnalysisList(terms.slice(0, 6))}.`
+      : "There are not enough saved notes yet to surface consistent themes.";
+  }
+
+  const strongestOwner = analysis.topAssignees[0]?.label || "the assigned team";
+  return `${monthName} currently shows ${analysis.totalRows} traffic rows across ${analysis.activeDays} active day${analysis.activeDays === 1 ? "" : "s"}, with ${analysis.noteCoverage}% note coverage. The busiest day was ${busiestLabel}, and ${strongestOwner} is carrying the largest appointment load right now.`;
+}
+
 function LogTable({ entries, empty }) {
   if (!entries.length) return <div className="empty">{empty}</div>;
   return (
@@ -746,6 +996,15 @@ export default function App() {
   const [bdcAgents, setBdcAgents] = useState([]);
   const [serviceMonth, setServiceMonth] = useState(null);
   const [serviceTrafficData, setServiceTrafficData] = useState({ month: currentMonth(), selected_date: null, total: 0, counts_by_date: {}, entries: [] });
+  const [trafficAnalysisData, setTrafficAnalysisData] = useState({ month: currentMonth(), selected_date: null, total: 0, counts_by_date: {}, entries: [] });
+  const [trafficAnalysisQuestion, setTrafficAnalysisQuestion] = useState("");
+  const [trafficAnalysisMessages, setTrafficAnalysisMessages] = useState([
+    {
+      role: "assistant",
+      text: "Ask about busiest days, follow-up gaps, Kia vs Mazda mix, or who owns the most appointments.",
+    },
+  ]);
+  const [trafficAnalysisLoading, setTrafficAnalysisLoading] = useState(false);
   const [trafficPdfs, setTrafficPdfs] = useState([]);
   const [specials, setSpecials] = useState([]);
   const [selectedSpecialId, setSelectedSpecialId] = useState(null);
@@ -892,6 +1151,17 @@ export default function App() {
       ? serviceTrafficData.entries
       : serviceTrafficData.entries.filter((entry) => entry.brand === selectedTrafficBrandFilter)
   );
+  const trafficAnalysis = buildTrafficAnalysis(trafficAnalysisData.entries, trafficAnalysisData.counts_by_date);
+  const trafficAnalysisMaxDayCount = Math.max(...trafficAnalysis.timeline.map((item) => item.count), 1);
+  const trafficAnalysisInsights = trafficAnalysis.totalRows
+    ? [
+        `The board holds ${trafficAnalysis.totalRows} traffic rows for ${monthLabel(trafficAnalysisData.month || trafficMonth)}.`,
+        trafficAnalysis.busiestDay
+          ? `${longDateLabel(trafficAnalysis.busiestDay.date)} is the busiest day right now with ${trafficAnalysis.busiestDay.count} rows.`
+          : "No busiest day yet because there is no traffic in the selected month.",
+        `${trafficAnalysis.noteCoverage}% of the month already has saved salesperson notes, leaving ${trafficAnalysis.pendingCount} rows still open for follow-up.`,
+      ]
+    : [];
   const visibleTrafficCount = visibleTrafficEntries.length;
   const selectedTrafficFilterLabel =
     selectedTrafficBrandFilter === "All" ? "All Franchises" : `${selectedTrafficBrandFilter} Only`;
@@ -1269,6 +1539,37 @@ export default function App() {
       active = false;
     };
   }, [trafficMonth, selectedTrafficDate]);
+
+  useEffect(() => {
+    if (tab !== "trafficAnalysis") return;
+    let active = true;
+    const run = async () => {
+      setTrafficAnalysisLoading(true);
+      try {
+        const data = await getServiceDriveTraffic({ month: trafficMonth });
+        if (!active) return;
+        setTrafficAnalysisData(data);
+      } catch (errorValue) {
+        if (active) setError(errText(errorValue));
+      } finally {
+        if (active) setTrafficAnalysisLoading(false);
+      }
+    };
+    run();
+    return () => {
+      active = false;
+    };
+  }, [tab, trafficMonth]);
+
+  useEffect(() => {
+    setTrafficAnalysisMessages([
+      {
+        role: "assistant",
+        text: `Loaded ${monthLabel(trafficAnalysisData.month || trafficMonth)}. Ask about busiest days, follow-up gaps, Kia vs Mazda split, or appointment ownership.`,
+      },
+    ]);
+    setTrafficAnalysisQuestion("");
+  }, [trafficAnalysisData.month, trafficMonth]);
 
   useEffect(() => {
     if (resourceLoadState.quoteRates) return;
@@ -1991,6 +2292,25 @@ export default function App() {
     } finally {
       setBusy("");
     }
+  }
+
+  function askTrafficAnalysisPrompt(promptValue) {
+    const prompt = String(promptValue || "").trim();
+    if (!prompt) return;
+    const answer = answerTrafficAnalysisQuestion(prompt, trafficAnalysis, trafficAnalysisData.month || trafficMonth);
+    setTrafficAnalysisMessages((current) => [
+      ...current,
+      { role: "user", text: prompt },
+      { role: "assistant", text: answer },
+    ]);
+  }
+
+  function submitTrafficAnalysisQuestion(event) {
+    event.preventDefault();
+    const prompt = String(trafficAnalysisQuestion || "").trim();
+    if (!prompt) return;
+    askTrafficAnalysisPrompt(prompt);
+    setTrafficAnalysisQuestion("");
   }
 
   async function saveTrafficEntry(entry) {
@@ -3267,6 +3587,228 @@ export default function App() {
                 </div>
               </div>
               <LogTable entries={bdcLog.entries} empty="No assignments match these filters." />
+            </div>
+          </section>
+        ) : null}
+
+        {tab === "trafficAnalysis" ? (
+          <section className="stack traffic-analysis-page">
+            <div className="panel traffic-analysis-hero">
+              <div>
+                <span className="eyebrow">Service drive intelligence</span>
+                <h2>Traffic analysis command center</h2>
+                <p>
+                  This proof of concept turns the service drive board into a live dashboard. It tracks volume, note
+                  coverage, open follow-up gaps, and lets you ask direct questions about the traffic and notes already in
+                  the system.
+                </p>
+              </div>
+              <div className="traffic-analysis-hero__controls">
+                <label>
+                  <span>Month</span>
+                  <input type="month" value={trafficMonth} onChange={(event) => setTrafficMonth(event.target.value)} />
+                </label>
+                <div className="traffic-analysis-hero__status">
+                  <span>{trafficAnalysisLoading ? "Refreshing dataset" : "Dataset loaded"}</span>
+                  <strong>{monthLabel(trafficAnalysisData.month || trafficMonth)}</strong>
+                  <small>{trafficAnalysis.totalRows} traffic rows in scope</small>
+                </div>
+              </div>
+            </div>
+
+            <div className="traffic-analysis-stats">
+              <article className="traffic-analysis-stat">
+                <span>Total Traffic</span>
+                <strong>{trafficAnalysis.totalRows}</strong>
+                <small>{trafficAnalysis.activeDays} active day{trafficAnalysis.activeDays === 1 ? "" : "s"} in month</small>
+              </article>
+              <article className="traffic-analysis-stat">
+                <span>Note Coverage</span>
+                <strong>{trafficAnalysis.noteCoverage}%</strong>
+                <small>{trafficAnalysis.rowsWithNotes} rows with notes saved</small>
+              </article>
+              <article className="traffic-analysis-stat">
+                <span>Open Follow-Ups</span>
+                <strong>{trafficAnalysis.pendingCount}</strong>
+                <small>Rows still missing salesperson notes</small>
+              </article>
+              <article className="traffic-analysis-stat">
+                <span>Busiest Day</span>
+                <strong>{trafficAnalysis.busiestDay ? trafficAnalysis.busiestDay.count : 0}</strong>
+                <small>
+                  {trafficAnalysis.busiestDay ? longDateLabel(trafficAnalysis.busiestDay.date) : "No traffic yet"}
+                </small>
+              </article>
+            </div>
+
+            <div className="traffic-analysis-grid">
+              <div className="panel traffic-analysis-panel traffic-analysis-panel--wide">
+                <div className="row">
+                  <div>
+                    <span className="eyebrow">Pulse</span>
+                    <h3>Daily traffic load</h3>
+                  </div>
+                  <small>{trafficAnalysis.avgPerDay} average rows per active day</small>
+                </div>
+                {trafficAnalysis.timeline.length ? (
+                  <div className="traffic-analysis-bars">
+                    {trafficAnalysis.timeline.map((item) => (
+                      <div key={item.date} className="traffic-analysis-bars__item">
+                        <span>{dateParts(item.date).dayNumber}</span>
+                        <div className="traffic-analysis-bars__track">
+                          <div
+                            className="traffic-analysis-bars__fill"
+                            style={{ width: `${Math.max(10, Math.round((item.count / trafficAnalysisMaxDayCount) * 100))}%` }}
+                          />
+                        </div>
+                        <strong>{item.count}</strong>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="empty">No traffic rows exist for this month yet.</div>
+                )}
+                {trafficAnalysisInsights.length ? (
+                  <div className="traffic-analysis-insights">
+                    {trafficAnalysisInsights.map((item) => (
+                      <div key={item} className="traffic-analysis-insights__item">
+                        {item}
+                      </div>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="panel traffic-analysis-panel">
+                <span className="eyebrow">Brand split</span>
+                <h3>Kia vs Mazda</h3>
+                <div className="traffic-analysis-brand-list">
+                  {trafficAnalysis.brandCards.map((item) => (
+                    <div key={item.brand} className="traffic-analysis-brand-card">
+                      <div className="traffic-analysis-brand-card__top">
+                        <strong>{item.brand}</strong>
+                        <span>{item.rows} rows</span>
+                      </div>
+                      <div className="traffic-analysis-brand-card__bar">
+                        <div className="traffic-analysis-brand-card__bar-fill" style={{ width: `${item.share}%` }} />
+                      </div>
+                      <small>
+                        {item.share}% of month volume · {item.noteCoverage}% notes saved
+                      </small>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="panel traffic-analysis-panel">
+                <span className="eyebrow">Ownership</span>
+                <h3>Top appointment owners</h3>
+                {trafficAnalysis.topAssignees.length ? (
+                  <div className="traffic-analysis-list">
+                    {trafficAnalysis.topAssignees.map((item) => (
+                      <div key={item.label} className="traffic-analysis-list__item">
+                        <div>
+                          <strong>{item.label}</strong>
+                          <small>Imported appointment owner</small>
+                        </div>
+                        <b>{item.count}</b>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="empty">No assignee data found in the imported traffic yet.</div>
+                )}
+              </div>
+
+              <div className="panel traffic-analysis-panel">
+                <span className="eyebrow">Execution</span>
+                <h3>Note activity</h3>
+                <div className="traffic-analysis-list">
+                  {trafficAnalysis.topAuthors.length ? (
+                    trafficAnalysis.topAuthors.map((item) => (
+                      <div key={item.label} className="traffic-analysis-list__item">
+                        <div>
+                          <strong>{item.label}</strong>
+                          <small>Saved note author</small>
+                        </div>
+                        <b>{item.count}</b>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="empty">No saved note authors yet for this month.</div>
+                  )}
+                </div>
+                {trafficAnalysis.topTerms.length ? (
+                  <div className="traffic-analysis-tags">
+                    {trafficAnalysis.topTerms.map((item) => (
+                      <span key={item.label} className="traffic-analysis-tag">
+                        {item.label} · {item.count}
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
+              </div>
+
+              <div className="panel traffic-analysis-panel">
+                <span className="eyebrow">Follow-up queue</span>
+                <h3>Rows still needing notes</h3>
+                {trafficAnalysis.pendingRows.length ? (
+                  <div className="traffic-analysis-list">
+                    {trafficAnalysis.pendingRows.map((entry) => (
+                      <div key={`pending-${entry.id}`} className="traffic-analysis-list__item traffic-analysis-list__item--stacked">
+                        <div>
+                          <strong>{entry.customer_name || "Unnamed customer"}</strong>
+                          <small>
+                            {[entry.traffic_date, entry.appointment_label].filter(Boolean).join(" · ") || "No appointment time"}
+                          </small>
+                        </div>
+                        <b>{entry.brand}</b>
+                      </div>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="empty">Everything in this month already has notes saved.</div>
+                )}
+              </div>
+
+              <div className="panel traffic-analysis-panel traffic-analysis-panel--chat">
+                <div className="row">
+                  <div>
+                    <span className="eyebrow">Ask the data</span>
+                    <h3>Traffic analysis chat</h3>
+                  </div>
+                  <small>Proof of concept Q&A on the live month dataset</small>
+                </div>
+                <div className="traffic-analysis-prompts">
+                  {TRAFFIC_ANALYSIS_PROMPTS.map((prompt) => (
+                    <button key={prompt} type="button" className="secondary" onClick={() => askTrafficAnalysisPrompt(prompt)}>
+                      {prompt}
+                    </button>
+                  ))}
+                </div>
+                <div className="traffic-analysis-chat">
+                  {trafficAnalysisMessages.map((message, index) => (
+                    <div
+                      key={`${message.role}-${index}`}
+                      className={`traffic-analysis-chat__bubble traffic-analysis-chat__bubble--${message.role}`}
+                    >
+                      <span>{message.role === "assistant" ? "Insight" : "Question"}</span>
+                      <p>{message.text}</p>
+                    </div>
+                  ))}
+                </div>
+                <form className="traffic-analysis-chat__form" onSubmit={submitTrafficAnalysisQuestion}>
+                  <textarea
+                    rows={3}
+                    value={trafficAnalysisQuestion}
+                    onChange={(event) => setTrafficAnalysisQuestion(event.target.value)}
+                    placeholder="Ask: Which days were busiest, who still needs follow-up, or how Kia compares to Mazda."
+                  />
+                  <button type="submit" disabled={!trafficAnalysisQuestion.trim()}>
+                    Ask About This Month
+                  </button>
+                </form>
+              </div>
             </div>
           </section>
         ) : null}

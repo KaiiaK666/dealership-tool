@@ -47,6 +47,7 @@ FRESHUP_LINKS_META_KEY = "freshup:links"
 TAB_VISIBILITY_IDS = (
     "serviceCalendar",
     "serviceNotes",
+    "trafficAnalysis",
     "bdc",
     "reports",
     "traffic",
