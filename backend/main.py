@@ -506,6 +506,7 @@ class BdcSalesTrackerEntryIn(BaseModel):
     month: str
     agent_id: int
     dms_number: str = ""
+    dms_numbers_text: str = ""
     profile_name: str = ""
     notes: str = ""
     sold: bool = False
@@ -896,6 +897,26 @@ def normalize_notes(value: str, field_name: str, max_len: int = 4000) -> str:
     if len(text) > max_len:
         raise HTTPException(status_code=400, detail=f"{field_name} is too long")
     return text
+
+
+def parse_bdc_sales_tracker_dms_numbers(value: str) -> List[str]:
+    raw = normalize_notes(value, "dms_numbers_text", max_len=4000)
+    if not raw:
+        return []
+    seen: set[str] = set()
+    numbers: List[str] = []
+    for chunk in re.split(r"[\s,;|]+", raw):
+        token = normalize_short_text(chunk, "dms_number", max_len=80)
+        if not token:
+            continue
+        lowered = token.lower()
+        if lowered in seen:
+            continue
+        seen.add(lowered)
+        numbers.append(token)
+    if len(numbers) > 250:
+        raise HTTPException(status_code=400, detail="too many DMS numbers in one paste")
+    return numbers
 
 
 def normalize_dealership(value: str) -> str:
@@ -2611,10 +2632,13 @@ def create_bdc_sales_tracker_entry(payload: BdcSalesTrackerEntryIn) -> BdcSalesT
     agent_row = get_bdc_agent_row(payload.agent_id)
     if not agent_row:
         raise HTTPException(status_code=404, detail="BDC agent not found")
-    dms_number = normalize_short_text(payload.dms_number, "dms_number", max_len=80)
+    dms_numbers = parse_bdc_sales_tracker_dms_numbers(payload.dms_numbers_text)
+    single_dms_number = normalize_short_text(payload.dms_number, "dms_number", max_len=80)
+    if single_dms_number and single_dms_number.lower() not in {item.lower() for item in dms_numbers}:
+        dms_numbers.append(single_dms_number)
     profile_name = normalize_short_text(payload.profile_name, "profile_name", max_len=180)
     notes = normalize_notes(payload.notes, "notes", max_len=1000)
-    if not dms_number and not profile_name:
+    if not dms_numbers and not profile_name:
         raise HTTPException(status_code=400, detail="enter a DMS number or profile name")
     now_ts = time.time()
     now_at = now_iso()
@@ -2624,31 +2648,33 @@ def create_bdc_sales_tracker_entry(payload: BdcSalesTrackerEntryIn) -> BdcSalesT
         (month_key, int(agent_row.get("id") or 0)),
     ) or {}
     display_order = int(order_row.get("max_order") or -1) + 1
-    db_insert(
-        """
-        INSERT INTO bdc_sales_tracker_entries (
-            month_key, agent_id, agent_name, dms_number, profile_name, notes, sold,
-            sold_ts, sold_at, display_order, created_ts, created_at, updated_ts, updated_at
+    rows_to_insert = dms_numbers or [""]
+    for index, dms_number in enumerate(rows_to_insert):
+        db_insert(
+            """
+            INSERT INTO bdc_sales_tracker_entries (
+                month_key, agent_id, agent_name, dms_number, profile_name, notes, sold,
+                sold_ts, sold_at, display_order, created_ts, created_at, updated_ts, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                month_key,
+                int(agent_row.get("id") or 0),
+                str(agent_row.get("name") or ""),
+                dms_number,
+                profile_name,
+                notes,
+                1 if sold else 0,
+                now_ts if sold else None,
+                now_at if sold else "",
+                display_order + index,
+                now_ts,
+                now_at,
+                now_ts,
+                now_at,
+            ),
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        (
-            month_key,
-            int(agent_row.get("id") or 0),
-            str(agent_row.get("name") or ""),
-            dms_number,
-            profile_name,
-            notes,
-            1 if sold else 0,
-            now_ts if sold else None,
-            now_at if sold else "",
-            display_order,
-            now_ts,
-            now_at,
-            now_ts,
-            now_at,
-        ),
-    )
     return fetch_bdc_sales_tracker(month_key)
 
 

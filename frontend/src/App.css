@@ -1524,7 +1524,7 @@ th {
 
 .bdc-sales-tracker-hero__controls,
 .bdc-sales-metrics-grid,
-.bdc-sales-entry__fields {
+.bdc-sales-entry-sheet {
   display: grid;
   gap: 12px;
 }
@@ -1739,10 +1739,6 @@ th {
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
-.bdc-sales-entry__fields {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
 .bdc-sales-metrics-card {
   padding: 14px 16px;
   border-radius: 18px;
@@ -1751,7 +1747,8 @@ th {
 }
 
 .bdc-sales-metrics-card span,
-.bdc-sales-entry__top small {
+.bdc-sales-entry-sheet__intro small,
+.bdc-sales-entry__state small {
   color: var(--muted);
 }
 
@@ -1765,28 +1762,67 @@ th {
   justify-content: flex-end;
 }
 
-.bdc-sales-entry-create {
+.bdc-sales-entry-sheet {
   display: grid;
   gap: 12px;
-  grid-template-columns: minmax(0, 0.7fr) minmax(0, 1fr) minmax(0, 1.2fr) auto;
-  align-items: end;
-  padding-top: 4px;
 }
 
-.bdc-sales-entry-create__notes textarea {
-  min-height: 90px;
+.bdc-sales-entry-sheet__intro {
+  display: grid;
+  gap: 4px;
+}
+
+.bdc-sales-entry-sheet__intro strong,
+.bdc-sales-entry-grid--header span {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.73rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.bdc-sales-entry-grid {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.9fr) minmax(0, 1.2fr) minmax(170px, 0.7fr) auto;
+  align-items: end;
+}
+
+.bdc-sales-entry-grid--create {
+  grid-template-columns: minmax(0, 1.45fr) minmax(0, 0.9fr) minmax(0, 1.2fr) auto;
+}
+
+.bdc-sales-entry-grid--header {
+  align-items: center;
+  padding: 0 4px;
+  color: #7e8794;
+}
+
+.bdc-sales-entry-cell {
+  display: grid;
+}
+
+.bdc-sales-entry-cell textarea,
+.bdc-sales-entry-cell input {
+  width: 100%;
+}
+
+.bdc-sales-entry-cell textarea {
+  min-height: 44px;
+  max-height: 120px;
+  resize: vertical;
 }
 
 .bdc-sales-entry-list {
   display: grid;
-  gap: 12px;
+  gap: 10px;
 }
 
 .bdc-sales-entry {
-  padding: 16px;
-  border-radius: 20px;
+  padding: 12px;
+  border-radius: 18px;
   border: 1px solid rgba(123, 110, 91, 0.16);
-  background: rgba(249, 245, 238, 0.9);
+  background: rgba(249, 245, 238, 0.86);
 }
 
 .bdc-sales-entry.is-sold {
@@ -1796,17 +1832,11 @@ th {
     rgba(244, 255, 247, 0.98);
 }
 
-.bdc-sales-entry__top,
+.bdc-sales-entry__state,
 .bdc-sales-entry__actions {
-  display: flex;
-  gap: 12px;
+  display: grid;
+  gap: 8px;
   align-items: center;
-  justify-content: space-between;
-}
-
-.bdc-sales-entry__top strong {
-  display: block;
-  line-height: 1.15;
 }
 
 .bdc-sales-entry__badge {
@@ -1822,8 +1852,12 @@ th {
 }
 
 .bdc-sales-entry__actions {
-  justify-content: flex-end;
-  flex-wrap: wrap;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.bdc-sales-entry__actions button,
+.bdc-sales-entry-create button {
+  min-height: 44px;
 }
 
 .bdc-dms-log-layout {
@@ -4947,8 +4981,7 @@ button.special-card:hover:not(:disabled) {
   .traffic-analysis-section__summary,
   .traffic-analysis-section__meta,
   .bdc-sales-summary-panel__header,
-  .bdc-sales-agent-card__header,
-  .bdc-sales-entry__top {
+  .bdc-sales-agent-card__header {
     flex-direction: column;
     align-items: flex-start;
   }
@@ -4968,8 +5001,13 @@ button.special-card:hover:not(:disabled) {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .bdc-sales-entry-create {
+  .bdc-sales-entry-grid,
+  .bdc-sales-entry-grid--create {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .bdc-sales-entry-grid--header {
+    display: none;
   }
 
   .bdc-dms-log-layout {
@@ -5088,8 +5126,8 @@ button.special-card:hover:not(:disabled) {
   .bdc-sales-kpi-grid,
   .bdc-sales-tracker-hero__controls,
   .bdc-sales-metrics-grid,
-  .bdc-sales-entry-create,
-  .bdc-sales-entry__fields,
+  .bdc-sales-entry-grid,
+  .bdc-sales-entry-grid--create,
   .bdc-dms-log-create,
   .note-copy,
   .note-admin-grid,
@@ -5122,6 +5160,10 @@ button.special-card:hover:not(:disabled) {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     width: 100%;
+  }
+
+  .bdc-sales-entry__actions {
+    grid-template-columns: 1fr;
   }
 
   .bdc-sales-meta-chip,
