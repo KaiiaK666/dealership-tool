@@ -534,6 +534,37 @@ class BdcSalesTrackerEntryOut(BaseModel):
     updated_ts: float
 
 
+class BdcSalesTrackerDmsLogEntryIn(BaseModel):
+    month: str
+    customer_name: str
+    apt_set_under: str = ""
+
+
+class BdcSalesTrackerDmsLogEntryUpdateIn(BaseModel):
+    customer_name: str
+    apt_set_under: str = ""
+    logged: bool = False
+    logged_at: str = ""
+
+
+class BdcSalesTrackerDmsLogEntryOut(BaseModel):
+    id: int
+    month: str
+    customer_name: str
+    apt_set_under: str = ""
+    logged: bool = False
+    logged_at: str = ""
+    created_at: str
+    updated_at: str
+    created_ts: float
+    updated_ts: float
+
+
+class BdcSalesTrackerDmsLogOut(BaseModel):
+    current_entries: List[BdcSalesTrackerDmsLogEntryOut] = []
+    log_entries: List[BdcSalesTrackerDmsLogEntryOut] = []
+
+
 class BdcSalesTrackerAgentOut(BaseModel):
     agent_id: int
     agent_name: str
@@ -572,6 +603,7 @@ class BdcSalesTrackerOut(BaseModel):
     goal: float = BDC_SALES_TRACKER_DEFAULT_GOAL
     summary: BdcSalesTrackerSummaryOut
     agents: List[BdcSalesTrackerAgentOut]
+    dms_log: BdcSalesTrackerDmsLogOut = BdcSalesTrackerDmsLogOut()
 
 
 class TabVisibilityItem(BaseModel):
@@ -819,6 +851,10 @@ def now_local() -> datetime:
 
 def now_iso() -> str:
     return now_local().replace(microsecond=0).isoformat()
+
+
+def now_local_input_value() -> str:
+    return now_local().replace(second=0, microsecond=0).strftime("%Y-%m-%dT%H:%M")
 
 
 def date_to_ts(day: date, *, end_exclusive: bool = False) -> float:
@@ -1739,6 +1775,25 @@ def init_db() -> None:
     db_execute("CREATE INDEX IF NOT EXISTS idx_bdc_sales_tracker_entries_month ON bdc_sales_tracker_entries(month_key, agent_id, display_order, id)")
     db_execute(
         """
+        CREATE TABLE IF NOT EXISTS bdc_sales_tracker_dms_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            month_key TEXT NOT NULL,
+            customer_name TEXT NOT NULL DEFAULT '',
+            apt_set_under TEXT NOT NULL DEFAULT '',
+            logged INTEGER NOT NULL DEFAULT 0,
+            logged_ts REAL,
+            logged_at TEXT NOT NULL DEFAULT '',
+            display_order INTEGER NOT NULL DEFAULT 0,
+            created_ts REAL NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_ts REAL NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
+    db_execute("CREATE INDEX IF NOT EXISTS idx_bdc_sales_tracker_dms_log_month ON bdc_sales_tracker_dms_log(month_key, logged, display_order, id)")
+    db_execute(
+        """
         CREATE TABLE IF NOT EXISTS freshup_log (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             created_ts REAL NOT NULL,
@@ -2007,6 +2062,21 @@ def bdc_sales_tracker_entry_out(row: Dict[str, Any]) -> BdcSalesTrackerEntryOut:
         notes=str(row.get("notes") or ""),
         sold=bool(int(row.get("sold") or 0)),
         sold_at=str(row.get("sold_at") or ""),
+        created_at=str(row.get("created_at") or ""),
+        updated_at=str(row.get("updated_at") or ""),
+        created_ts=float(row.get("created_ts") or 0.0),
+        updated_ts=float(row.get("updated_ts") or 0.0),
+    )
+
+
+def bdc_sales_tracker_dms_log_entry_out(row: Dict[str, Any]) -> BdcSalesTrackerDmsLogEntryOut:
+    return BdcSalesTrackerDmsLogEntryOut(
+        id=int(row.get("id") or 0),
+        month=str(row.get("month_key") or ""),
+        customer_name=str(row.get("customer_name") or ""),
+        apt_set_under=str(row.get("apt_set_under") or ""),
+        logged=bool(int(row.get("logged") or 0)),
+        logged_at=str(row.get("logged_at") or ""),
         created_at=str(row.get("created_at") or ""),
         updated_at=str(row.get("updated_at") or ""),
         created_ts=float(row.get("created_ts") or 0.0),
@@ -2346,6 +2416,10 @@ def get_bdc_sales_tracker_entry_row(entry_id: int) -> Optional[Dict[str, Any]]:
     return db_query_one("SELECT * FROM bdc_sales_tracker_entries WHERE id = ?", (int(entry_id),))
 
 
+def get_bdc_sales_tracker_dms_log_row(entry_id: int) -> Optional[Dict[str, Any]]:
+    return db_query_one("SELECT * FROM bdc_sales_tracker_dms_log WHERE id = ?", (int(entry_id),))
+
+
 def fetch_bdc_sales_tracker(month_key: str) -> BdcSalesTrackerOut:
     month_key = parse_month_key(month_key)
     goal = fetch_bdc_sales_tracker_goal(month_key)
@@ -2375,6 +2449,15 @@ def fetch_bdc_sales_tracker(month_key: str) -> BdcSalesTrackerOut:
         FROM bdc_sales_tracker_entries
         WHERE month_key = ?
         ORDER BY agent_id ASC, display_order ASC, id ASC
+        """,
+        (month_key,),
+    )
+    dms_log_rows = db_query_all(
+        """
+        SELECT *
+        FROM bdc_sales_tracker_dms_log
+        WHERE month_key = ?
+        ORDER BY logged ASC, display_order ASC, logged_ts DESC, id DESC
         """,
         (month_key,),
     )
@@ -2467,6 +2550,10 @@ def fetch_bdc_sales_tracker(month_key: str) -> BdcSalesTrackerOut:
             behind_by=should_be_at_sold - mtd_tracked,
         ),
         agents=agents,
+        dms_log=BdcSalesTrackerDmsLogOut(
+            current_entries=[bdc_sales_tracker_dms_log_entry_out(row) for row in dms_log_rows if not bool(int(row.get("logged") or 0))],
+            log_entries=[bdc_sales_tracker_dms_log_entry_out(row) for row in dms_log_rows if bool(int(row.get("logged") or 0))],
+        ),
     )
 
 
@@ -2620,6 +2707,82 @@ def delete_bdc_sales_tracker_entry(entry_id: int) -> BdcSalesTrackerOut:
         raise HTTPException(status_code=404, detail="tracker row not found")
     month_key = str(row.get("month_key") or "")
     db_execute("DELETE FROM bdc_sales_tracker_entries WHERE id = ?", (int(entry_id),))
+    return fetch_bdc_sales_tracker(month_key)
+
+
+def create_bdc_sales_tracker_dms_log_entry(payload: BdcSalesTrackerDmsLogEntryIn) -> BdcSalesTrackerOut:
+    month_key = parse_month_key(payload.month)
+    customer_name = normalize_short_text(payload.customer_name, "customer_name", max_len=220)
+    apt_set_under = normalize_short_text(payload.apt_set_under, "apt_set_under", max_len=120)
+    if not customer_name:
+        raise HTTPException(status_code=400, detail="customer_name is required")
+    now_ts = time.time()
+    now_at = now_local_input_value()
+    order_row = db_query_one(
+        "SELECT COALESCE(MAX(display_order), -1) AS max_order FROM bdc_sales_tracker_dms_log WHERE month_key = ? AND logged = 0",
+        (month_key,),
+    ) or {}
+    display_order = int(order_row.get("max_order") or -1) + 1
+    db_insert(
+        """
+        INSERT INTO bdc_sales_tracker_dms_log (
+            month_key, customer_name, apt_set_under, logged, logged_ts, logged_at,
+            display_order, created_ts, created_at, updated_ts, updated_at
+        )
+        VALUES (?, ?, ?, 0, NULL, '', ?, ?, ?, ?, ?)
+        """,
+        (month_key, customer_name, apt_set_under, display_order, now_ts, now_at, now_ts, now_at),
+    )
+    return fetch_bdc_sales_tracker(month_key)
+
+
+def update_bdc_sales_tracker_dms_log_entry(entry_id: int, payload: BdcSalesTrackerDmsLogEntryUpdateIn) -> BdcSalesTrackerOut:
+    row = get_bdc_sales_tracker_dms_log_row(entry_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="DMS log row not found")
+    customer_name = normalize_short_text(payload.customer_name, "customer_name", max_len=220)
+    apt_set_under = normalize_short_text(payload.apt_set_under, "apt_set_under", max_len=120)
+    if not customer_name:
+        raise HTTPException(status_code=400, detail="customer_name is required")
+    logged = bool(payload.logged)
+    now_ts = time.time()
+    now_at = now_local_input_value()
+    logged_ts = float(row.get("logged_ts") or 0.0) if row.get("logged_ts") is not None else None
+    logged_at = str(row.get("logged_at") or "")
+    if logged:
+        if payload.logged_at:
+            parsed_logged_at, _, parsed_logged_ts = parse_local_datetime(payload.logged_at, "logged_at")
+            logged_at = parsed_logged_at
+            logged_ts = parsed_logged_ts
+        elif not bool(int(row.get("logged") or 0)):
+            logged_at = now_at
+            logged_ts = now_ts
+    else:
+        logged_at = ""
+        logged_ts = None
+    db_execute(
+        """
+        UPDATE bdc_sales_tracker_dms_log
+        SET customer_name = ?,
+            apt_set_under = ?,
+            logged = ?,
+            logged_ts = ?,
+            logged_at = ?,
+            updated_ts = ?,
+            updated_at = ?
+        WHERE id = ?
+        """,
+        (customer_name, apt_set_under, 1 if logged else 0, logged_ts, logged_at, now_ts, now_at, int(entry_id)),
+    )
+    return fetch_bdc_sales_tracker(str(row.get("month_key") or ""))
+
+
+def delete_bdc_sales_tracker_dms_log_entry(entry_id: int) -> BdcSalesTrackerOut:
+    row = get_bdc_sales_tracker_dms_log_row(entry_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="DMS log row not found")
+    month_key = str(row.get("month_key") or "")
+    db_execute("DELETE FROM bdc_sales_tracker_dms_log WHERE id = ?", (int(entry_id),))
     return fetch_bdc_sales_tracker(month_key)
 
 
@@ -6144,6 +6307,24 @@ def put_bdc_sales_tracker_entry(
 @app.delete("/api/bdc-sales-tracker/entries/{entry_id}", response_model=BdcSalesTrackerOut)
 def delete_bdc_sales_tracker_entry_route(entry_id: int) -> BdcSalesTrackerOut:
     return delete_bdc_sales_tracker_entry(entry_id)
+
+
+@app.post("/api/bdc-sales-tracker/dms-log", response_model=BdcSalesTrackerOut)
+def post_bdc_sales_tracker_dms_log_entry(payload: BdcSalesTrackerDmsLogEntryIn) -> BdcSalesTrackerOut:
+    return create_bdc_sales_tracker_dms_log_entry(payload)
+
+
+@app.put("/api/bdc-sales-tracker/dms-log/{entry_id}", response_model=BdcSalesTrackerOut)
+def put_bdc_sales_tracker_dms_log_entry(
+    entry_id: int,
+    payload: BdcSalesTrackerDmsLogEntryUpdateIn,
+) -> BdcSalesTrackerOut:
+    return update_bdc_sales_tracker_dms_log_entry(entry_id, payload)
+
+
+@app.delete("/api/bdc-sales-tracker/dms-log/{entry_id}", response_model=BdcSalesTrackerOut)
+def delete_bdc_sales_tracker_dms_log_entry_route(entry_id: int) -> BdcSalesTrackerOut:
+    return delete_bdc_sales_tracker_dms_log_entry(entry_id)
 
 
 @app.delete("/api/admin/bdc/history", response_model=BdcHistoryClearOut)

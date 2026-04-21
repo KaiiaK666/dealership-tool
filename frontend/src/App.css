@@ -1548,6 +1548,18 @@ th {
   gap: 18px;
 }
 
+.bdc-sales-view-toggle {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.bdc-sales-view-toggle .secondary.is-active {
+  color: #fff;
+  background: linear-gradient(135deg, #c76536, #1f7cf6);
+  border-color: transparent;
+}
+
 .bdc-sales-agent-card {
   padding: 18px;
   border-radius: 24px;
@@ -1689,6 +1701,50 @@ th {
 .bdc-sales-entry__actions {
   justify-content: flex-end;
   flex-wrap: wrap;
+}
+
+.bdc-dms-log-layout {
+  display: grid;
+  gap: 18px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.bdc-dms-log-panel,
+.bdc-dms-log-create,
+.bdc-dms-log-list,
+.bdc-dms-log-entry {
+  display: grid;
+  gap: 12px;
+}
+
+.bdc-dms-log-create {
+  grid-template-columns: minmax(0, 1.3fr) minmax(0, 0.9fr) auto;
+  align-items: end;
+}
+
+.bdc-dms-log-list {
+  align-content: start;
+}
+
+.bdc-dms-log-entry {
+  padding: 16px;
+  border-radius: 20px;
+  border: 1px solid rgba(123, 110, 91, 0.16);
+  background: rgba(249, 245, 238, 0.92);
+}
+
+.bdc-dms-log-entry.is-logged {
+  background:
+    radial-gradient(circle at top right, rgba(31, 124, 246, 0.1), transparent 36%),
+    rgba(245, 249, 255, 0.96);
+  border-color: rgba(31, 124, 246, 0.18);
+}
+
+.bdc-dms-log-entry__actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
 }
 
 .store-roster-grid {
@@ -4790,6 +4846,10 @@ button.special-card:hover:not(:disabled) {
   .bdc-sales-entry-create {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
+  .bdc-dms-log-layout {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 640px) {
@@ -4904,6 +4964,7 @@ button.special-card:hover:not(:disabled) {
   .bdc-sales-metrics-grid,
   .bdc-sales-entry-create,
   .bdc-sales-entry__fields,
+  .bdc-dms-log-create,
   .note-copy,
   .note-admin-grid,
   .traffic-upload-row,
@@ -4924,6 +4985,7 @@ button.special-card:hover:not(:disabled) {
   .controls > *,
   .bdc-sales-agent-card__actions > *,
   .bdc-sales-entry__actions > *,
+  .bdc-dms-log-entry__actions > *,
   .traffic-notes-hero__actions > *,
   .traffic-toolbar__actions > *,
   .traffic-toolbar__controls > * {
@@ -5169,7 +5231,8 @@ button.special-card:hover:not(:disabled) {
   }
 
   .bdc-sales-entry__actions,
-  .bdc-sales-agent-card__actions {
+  .bdc-sales-agent-card__actions,
+  .bdc-dms-log-entry__actions {
     justify-content: stretch;
   }
 }

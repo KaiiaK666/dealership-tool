@@ -276,5 +276,11 @@ export const updateBdcSalesTrackerEntry = (entryId, payload) =>
   request(`/api/bdc-sales-tracker/entries/${encodeURIComponent(entryId)}`, { method: "PUT", body: payload });
 export const deleteBdcSalesTrackerEntry = (entryId) =>
   request(`/api/bdc-sales-tracker/entries/${encodeURIComponent(entryId)}`, { method: "DELETE" });
+export const createBdcSalesTrackerDmsLogEntry = (payload) =>
+  request("/api/bdc-sales-tracker/dms-log", { method: "POST", body: payload });
+export const updateBdcSalesTrackerDmsLogEntry = (entryId, payload) =>
+  request(`/api/bdc-sales-tracker/dms-log/${encodeURIComponent(entryId)}`, { method: "PUT", body: payload });
+export const deleteBdcSalesTrackerDmsLogEntry = (entryId) =>
+  request(`/api/bdc-sales-tracker/dms-log/${encodeURIComponent(entryId)}`, { method: "DELETE" });
 export const clearBdcHistory = (token) =>
   request("/api/admin/bdc/history", { method: "DELETE", headers: adminHeaders(token) });

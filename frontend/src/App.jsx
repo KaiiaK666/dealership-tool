@@ -65,7 +65,10 @@ import {
   uploadServiceDriveTrafficImages,
   updateServiceDriveTrafficSales,
   createBdcSalesTrackerEntry,
+  createBdcSalesTrackerDmsLogEntry,
   deleteBdcSalesTrackerEntry,
+  deleteBdcSalesTrackerDmsLogEntry,
+  updateBdcSalesTrackerDmsLogEntry,
 } from "./api.js";
 import "./App.css";
 
@@ -449,6 +452,10 @@ function bdcSalesTrackerAgentKey(agent) {
 
 function emptyBdcSalesTrackerEntryDraft() {
   return { dms_number: "", profile_name: "", notes: "" };
+}
+
+function emptyBdcSalesTrackerDmsLogDraft() {
+  return { customer_name: "", apt_set_under: "" };
 }
 
 function fillMarketplaceTemplate(template, data) {
@@ -1122,8 +1129,10 @@ export default function App() {
   const [bdcReport, setBdcReport] = useState(null);
   const [bdcSalesTrackerMonth, setBdcSalesTrackerMonth] = useState(currentMonth());
   const [bdcSalesTracker, setBdcSalesTracker] = useState(null);
+  const [bdcSalesTrackerView, setBdcSalesTrackerView] = useState("tracker");
   const [bdcSalesTrackerGoalDraft, setBdcSalesTrackerGoalDraft] = useState("252");
   const [bdcSalesTrackerEntryDrafts, setBdcSalesTrackerEntryDrafts] = useState({});
+  const [bdcSalesTrackerDmsLogDraft, setBdcSalesTrackerDmsLogDraft] = useState(() => emptyBdcSalesTrackerDmsLogDraft());
   const [daysOffData, setDaysOffData] = useState({ month: currentMonth(), entries: [] });
   const [selectedDaysOffSalesId, setSelectedDaysOffSalesId] = useState("");
   const [filters, setFilters] = useState({ salespersonId: "", leadStore: "", startDate: "", endDate: "" });
@@ -1384,6 +1393,7 @@ export default function App() {
     agentLoopPresets.find((item) => item.key === agentLoopForm.presetKey) || agentLoopPresets[0] || null;
   const selectedAgentLoopIsActive = ["queued", "running"].includes(String(selectedAgentRun?.status || "").toLowerCase());
   const trackerAgents = bdcSalesTracker?.agents || [];
+  const trackerDmsLog = bdcSalesTracker?.dms_log || { current_entries: [], log_entries: [] };
   const bdcSalesTrackerTeamTotals = trackerAgents.reduce(
     (totals, agent) => ({
       totalLeads: totals.totalLeads + Number(agent.total_leads || 0),
@@ -1700,6 +1710,69 @@ export default function App() {
     setError("");
     try {
       const data = await deleteBdcSalesTrackerEntry(entryId);
+      applyBdcSalesTrackerData(data);
+    } catch (errorValue) {
+      setError(errText(errorValue));
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function addBdcSalesTrackerDmsLogEntry() {
+    setBusy("bdc-dms-create");
+    setError("");
+    try {
+      const data = await createBdcSalesTrackerDmsLogEntry({
+        month: bdcSalesTrackerMonth,
+        customer_name: bdcSalesTrackerDmsLogDraft.customer_name,
+        apt_set_under: bdcSalesTrackerDmsLogDraft.apt_set_under,
+      });
+      applyBdcSalesTrackerData(data);
+      setBdcSalesTrackerDmsLogDraft(emptyBdcSalesTrackerDmsLogDraft());
+    } catch (errorValue) {
+      setError(errText(errorValue));
+    } finally {
+      setBusy("");
+    }
+  }
+
+  function patchBdcSalesTrackerDmsLogEntry(entryId, field, value) {
+    setBdcSalesTracker((current) => {
+      if (!current) return current;
+      const patchCollection = (items) => items.map((entry) => (entry.id === entryId ? { ...entry, [field]: value } : entry));
+      return {
+        ...current,
+        dms_log: {
+          current_entries: patchCollection(current.dms_log?.current_entries || []),
+          log_entries: patchCollection(current.dms_log?.log_entries || []),
+        },
+      };
+    });
+  }
+
+  async function saveBdcSalesTrackerDmsLogEntry(entry, logged = entry.logged, loggedAt = entry.logged_at || "") {
+    setBusy(`bdc-dms-save-${entry.id}`);
+    setError("");
+    try {
+      const data = await updateBdcSalesTrackerDmsLogEntry(entry.id, {
+        customer_name: entry.customer_name,
+        apt_set_under: entry.apt_set_under,
+        logged,
+        logged_at: loggedAt,
+      });
+      applyBdcSalesTrackerData(data);
+    } catch (errorValue) {
+      setError(errText(errorValue));
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function removeBdcSalesTrackerDmsLogEntry(entryId) {
+    setBusy(`bdc-dms-delete-${entryId}`);
+    setError("");
+    try {
+      const data = await deleteBdcSalesTrackerDmsLogEntry(entryId);
       applyBdcSalesTrackerData(data);
     } catch (errorValue) {
       setError(errText(errorValue));
@@ -4123,6 +4196,25 @@ export default function App() {
               </div>
             </div>
 
+            <div className="bdc-sales-view-toggle">
+              <button
+                type="button"
+                className={`secondary ${bdcSalesTrackerView === "tracker" ? "is-active" : ""}`}
+                onClick={() => setBdcSalesTrackerView("tracker")}
+              >
+                Tracker
+              </button>
+              <button
+                type="button"
+                className={`secondary ${bdcSalesTrackerView === "dmsLog" ? "is-active" : ""}`}
+                onClick={() => setBdcSalesTrackerView("dmsLog")}
+              >
+                DMS Log
+              </button>
+            </div>
+
+            {bdcSalesTrackerView === "tracker" ? (
+              <>
             <div className="stats bdc-sales-tracker-stats">
               <div className="stat">
                 <span>Goal</span>
@@ -4459,6 +4551,180 @@ export default function App() {
                 </div>
               )}
             </div>
+              </>
+            ) : null}
+
+            {bdcSalesTrackerView === "dmsLog" ? (
+              <>
+                <div className="panel">
+                  <div className="row">
+                    <div>
+                      <span className="eyebrow">Worksheet recreation</span>
+                      <h3>DMS log current queue and dated history</h3>
+                    </div>
+                    <small>
+                      Current {trackerDmsLog.current_entries.length} · Logged {trackerDmsLog.log_entries.length}
+                    </small>
+                  </div>
+                  <p className="admin-note">
+                    This mirrors the `DMS LOG` sheet structure: left side current queue, right side historical dated log.
+                    Add a customer here, then move it into the log when it should be recorded as part of the dated history.
+                  </p>
+                </div>
+
+                <div className="bdc-dms-log-layout">
+                  <article className="panel bdc-dms-log-panel">
+                    <div className="row">
+                      <div>
+                        <span className="eyebrow">Current queue</span>
+                        <h3>Customer Name / Apt Set Under</h3>
+                      </div>
+                    </div>
+                    <div className="bdc-dms-log-create">
+                      <label>
+                        <span>Customer Name</span>
+                        <input
+                          value={bdcSalesTrackerDmsLogDraft.customer_name}
+                          onChange={(event) =>
+                            setBdcSalesTrackerDmsLogDraft((current) => ({ ...current, customer_name: event.target.value }))
+                          }
+                          placeholder="Customer / Opp ID / DMS No."
+                        />
+                      </label>
+                      <label>
+                        <span>Apt Set Under</span>
+                        <input
+                          value={bdcSalesTrackerDmsLogDraft.apt_set_under}
+                          onChange={(event) =>
+                            setBdcSalesTrackerDmsLogDraft((current) => ({ ...current, apt_set_under: event.target.value }))
+                          }
+                          placeholder="Joanna, Cindy, no go, etc."
+                        />
+                      </label>
+                      <button type="button" onClick={addBdcSalesTrackerDmsLogEntry} disabled={busy === "bdc-dms-create"}>
+                        {busy === "bdc-dms-create" ? "Adding..." : "Add Current Row"}
+                      </button>
+                    </div>
+
+                    <div className="bdc-dms-log-list">
+                      {trackerDmsLog.current_entries.length ? (
+                        trackerDmsLog.current_entries.map((entry) => (
+                          <div key={`dms-current-${entry.id}`} className="bdc-dms-log-entry">
+                            <label>
+                              <span>Customer Name</span>
+                              <input
+                                value={entry.customer_name}
+                                onChange={(event) => patchBdcSalesTrackerDmsLogEntry(entry.id, "customer_name", event.target.value)}
+                              />
+                            </label>
+                            <label>
+                              <span>Apt Set Under</span>
+                              <input
+                                value={entry.apt_set_under}
+                                onChange={(event) => patchBdcSalesTrackerDmsLogEntry(entry.id, "apt_set_under", event.target.value)}
+                              />
+                            </label>
+                            <div className="bdc-dms-log-entry__actions">
+                              <button
+                                type="button"
+                                className="secondary"
+                                onClick={() => saveBdcSalesTrackerDmsLogEntry(entry, false, "")}
+                                disabled={busy === `bdc-dms-save-${entry.id}`}
+                              >
+                                {busy === `bdc-dms-save-${entry.id}` ? "Saving..." : "Save"}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => saveBdcSalesTrackerDmsLogEntry(entry, true, "")}
+                                disabled={busy === `bdc-dms-save-${entry.id}`}
+                              >
+                                {busy === `bdc-dms-save-${entry.id}` ? "Moving..." : "Move To Log"}
+                              </button>
+                              <button
+                                type="button"
+                                className="button-danger"
+                                onClick={() => removeBdcSalesTrackerDmsLogEntry(entry.id)}
+                                disabled={busy === `bdc-dms-delete-${entry.id}`}
+                              >
+                                {busy === `bdc-dms-delete-${entry.id}` ? "Deleting..." : "Delete"}
+                              </button>
+                            </div>
+                          </div>
+                        ))
+                      ) : (
+                        <div className="empty">No current DMS queue rows yet.</div>
+                      )}
+                    </div>
+                  </article>
+
+                  <article className="panel bdc-dms-log-panel">
+                    <div className="row">
+                      <div>
+                        <span className="eyebrow">Dated history</span>
+                        <h3>Logged DMS history for {monthLabel(bdcSalesTrackerMonth)}</h3>
+                      </div>
+                    </div>
+                    <div className="bdc-dms-log-list">
+                      {trackerDmsLog.log_entries.length ? (
+                        trackerDmsLog.log_entries.map((entry) => (
+                          <div key={`dms-log-${entry.id}`} className="bdc-dms-log-entry is-logged">
+                            <label>
+                              <span>Date</span>
+                              <input
+                                type="datetime-local"
+                                value={entry.logged_at || ""}
+                                onChange={(event) => patchBdcSalesTrackerDmsLogEntry(entry.id, "logged_at", event.target.value)}
+                              />
+                            </label>
+                            <label>
+                              <span>Customer Name</span>
+                              <input
+                                value={entry.customer_name}
+                                onChange={(event) => patchBdcSalesTrackerDmsLogEntry(entry.id, "customer_name", event.target.value)}
+                              />
+                            </label>
+                            <label>
+                              <span>Apt Set Under</span>
+                              <input
+                                value={entry.apt_set_under}
+                                onChange={(event) => patchBdcSalesTrackerDmsLogEntry(entry.id, "apt_set_under", event.target.value)}
+                              />
+                            </label>
+                            <div className="bdc-dms-log-entry__actions">
+                              <button
+                                type="button"
+                                className="secondary"
+                                onClick={() => saveBdcSalesTrackerDmsLogEntry(entry, true, entry.logged_at)}
+                                disabled={busy === `bdc-dms-save-${entry.id}`}
+                              >
+                                {busy === `bdc-dms-save-${entry.id}` ? "Saving..." : "Save Log Row"}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => saveBdcSalesTrackerDmsLogEntry(entry, false, "")}
+                                disabled={busy === `bdc-dms-save-${entry.id}`}
+                              >
+                                {busy === `bdc-dms-save-${entry.id}` ? "Moving..." : "Move Back To Current"}
+                              </button>
+                              <button
+                                type="button"
+                                className="button-danger"
+                                onClick={() => removeBdcSalesTrackerDmsLogEntry(entry.id)}
+                                disabled={busy === `bdc-dms-delete-${entry.id}`}
+                              >
+                                {busy === `bdc-dms-delete-${entry.id}` ? "Deleting..." : "Delete"}
+                              </button>
+                            </div>
+                          </div>
+                        ))
+                      ) : (
+                        <div className="empty">No logged DMS rows for this month yet.</div>
+                      )}
+                    </div>
+                  </article>
+                </div>
+              </>
+            ) : null}
           </section>
         ) : null}
 
