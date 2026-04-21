@@ -31,6 +31,10 @@ body,
   min-height: 100%;
 }
 
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
 body {
   margin: 0;
   font-family: "Sora", system-ui, sans-serif;
@@ -4368,6 +4372,259 @@ button.special-card:hover:not(:disabled) {
 }
 
 @media (max-width: 640px) {
+  body {
+    overflow-x: hidden;
+  }
+
+  .app {
+    width: min(100% - 12px, 1360px);
+    gap: 14px;
+    padding: 12px 0 28px;
+  }
+
+  .hero,
+  .panel,
+  .tabs,
+  .frame {
+    border-radius: 20px;
+  }
+
+  .hero,
+  .panel {
+    padding: 16px;
+  }
+
+  .hero-card,
+  .notification-status-card,
+  .notification-test-form,
+  .note-card {
+    border-radius: 18px;
+  }
+
+  .hero h1 {
+    font-size: 1.9rem;
+  }
+
+  .hero-subtitle {
+    font-size: 0.95rem;
+  }
+
+  .hero-title__acronym,
+  .hero-title__expanded {
+    gap: 8px;
+  }
+
+  .hero-title__acronym span {
+    min-width: 2ch;
+    padding: 6px 10px;
+    font-size: 0.88rem;
+    letter-spacing: 0.14em;
+  }
+
+  .eyebrow {
+    letter-spacing: 0.14em;
+  }
+
+  .tabs,
+  .subtabs {
+    scrollbar-width: thin;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .tabs {
+    display: flex;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overflow-y: hidden;
+    gap: 8px;
+    padding: 8px;
+    scroll-snap-type: x proximity;
+  }
+
+  .tab {
+    flex: 0 0 auto;
+    width: auto;
+    min-width: 148px;
+    padding: 12px 14px;
+    font-size: 0.89rem;
+    scroll-snap-align: start;
+  }
+
+  .subtabs {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    padding-bottom: 4px;
+  }
+
+  .subtab {
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
+
+  .filters,
+  .filters--notes,
+  .freshup-hero,
+  .freshup-layout,
+  .fresh-up-form-grid,
+  .note-copy,
+  .note-admin-grid,
+  .traffic-upload-row,
+  .traffic-notes-hero__controls,
+  .traffic-notes-hero__actions,
+  .traffic-toolbar__controls,
+  .traffic-toolbar__actions,
+  .traffic-toolbar__chips,
+  .traffic-summary-grid,
+  .traffic-team-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .controls {
+    width: 100%;
+  }
+
+  .controls > *,
+  .traffic-notes-hero__actions > *,
+  .traffic-toolbar__actions > *,
+  .traffic-toolbar__controls > * {
+    width: 100%;
+  }
+
+  .calendar-board,
+  .days-off-board,
+  .traffic-picker-scroll,
+  .table-wrap {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .calendar-board {
+    padding: 10px;
+  }
+
+  .calendar-board__weekdays,
+  .calendar-grid,
+  .days-off-grid,
+  .traffic-day-grid,
+  .weekday-board {
+    min-width: 620px;
+    gap: 8px;
+  }
+
+  .calendar-board__weekdays {
+    margin-bottom: 8px;
+  }
+
+  .calendar-board__weekdays span {
+    padding-left: 2px;
+    font-size: 0.64rem;
+    letter-spacing: 0.12em;
+  }
+
+  .calendar-day {
+    min-height: 168px;
+    padding: 8px;
+    gap: 8px;
+    border-radius: 18px;
+  }
+
+  .calendar-day.is-today {
+    transform: none;
+    box-shadow:
+      0 0 0 2px rgba(31, 94, 255, 0.18),
+      0 14px 24px rgba(31, 94, 255, 0.16);
+  }
+
+  .calendar-day__weekday,
+  .calendar-day__traffic span,
+  .calendar-day__plus small,
+  .assignment__brand,
+  .traffic-day-tile__top span,
+  .traffic-day-tile__top small,
+  .traffic-day-tile__team span,
+  .days-off-day span,
+  .weekday-card span {
+    font-size: 0.64rem;
+    letter-spacing: 0.12em;
+  }
+
+  .calendar-day__stamp {
+    min-width: 56px;
+    padding: 8px 9px;
+    border-radius: 14px;
+  }
+
+  .calendar-day__stamp strong {
+    font-size: 1.45rem;
+  }
+
+  .calendar-day__traffic,
+  .assignment {
+    padding: 8px;
+    border-radius: 14px;
+  }
+
+  .calendar-day__plus {
+    min-width: 60px;
+    padding: 7px 8px;
+    border-radius: 14px;
+  }
+
+  .calendar-day__plus b {
+    font-size: 1.05rem;
+  }
+
+  .traffic-picker-scroll .calendar-board__weekdays,
+  .traffic-picker-scroll .traffic-day-grid {
+    min-width: 620px;
+  }
+
+  .traffic-day-grid {
+    grid-template-columns: repeat(7, minmax(84px, 1fr));
+  }
+
+  .traffic-day-tile,
+  .days-off-day {
+    min-height: 104px;
+    padding: 8px;
+    border-radius: 16px;
+  }
+
+  .traffic-day-tile strong,
+  .days-off-day strong {
+    font-size: 1.35rem;
+  }
+
+  .weekday-card {
+    padding: 12px;
+    border-radius: 16px;
+  }
+
+  .note-card__summary {
+    padding: 14px;
+    gap: 12px;
+  }
+
+  .note-card__summary-status {
+    justify-self: start;
+  }
+
+  .freshup-brand-stack,
+  .freshup-capture__header,
+  .fresh-up-card__header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .freshup-brand-avatar {
+    width: 68px;
+    height: 68px;
+  }
+
+  .table-wrap table {
+    min-width: 680px;
+  }
+
   .traffic-analysis-hero {
     padding: 1.2rem;
   }
@@ -4412,5 +4669,31 @@ button.special-card:hover:not(:disabled) {
   .notification-test-actions {
     flex-direction: column;
     align-items: stretch;
+  }
+}
+
+@media (max-width: 520px) {
+  .app {
+    width: min(100% - 10px, 1360px);
+  }
+
+  .hero,
+  .panel {
+    padding: 14px;
+  }
+
+  .tab {
+    min-width: 136px;
+    font-size: 0.86rem;
+  }
+
+  .calendar-board__weekdays,
+  .calendar-grid,
+  .days-off-grid,
+  .traffic-day-grid,
+  .weekday-board,
+  .traffic-picker-scroll .calendar-board__weekdays,
+  .traffic-picker-scroll .traffic-day-grid {
+    min-width: 580px;
   }
 }
