@@ -104,8 +104,8 @@ const MARKETPLACE_TEMPLATE_DEFAULTS = {
   title_template: "{year} {make} {model}",
   description_template:
     "{year} {make} {model}\n{price_label}: {price}\nMileage: {mileage}\nVIN: {vin}\n{cta_text}\n{url}",
-  price_label: "Bert Ogden Price",
-  cta_text: "Message us for availability and financing options.",
+  price_label: "Price",
+  cta_text: "Message us today for availability, trade value, and financing options.",
 };
 const MARKETPLACE_TITLE_TOKEN = "{year} {make} {model}";
 const MARKETPLACE_BUILDER_DEFAULTS = {

@@ -3118,8 +3118,8 @@ def default_marketplace_template() -> MarketplaceTemplateOut:
             "{cta_text}\n"
             "{url}"
         ),
-        price_label="Bert Ogden Price",
-        cta_text="Message us for availability and financing options.",
+        price_label="Price",
+        cta_text="Message us today for availability, trade value, and financing options.",
     )
 
 
@@ -3136,6 +3136,27 @@ def normalize_marketplace_title_template(value: str) -> str:
     if MARKETPLACE_TITLE_TOKEN not in title_template:
         return MARKETPLACE_TITLE_TOKEN
     return title_template
+
+
+def normalize_marketplace_price_label(value: str) -> str:
+    text = normalize_short_text(value or default_marketplace_template().price_label, "price_label", max_len=60)
+    if not text:
+        return default_marketplace_template().price_label
+    lowered = text.lower()
+    if any(char.isdigit() for char in text) or "$" in text or "{" in text or "}" in text or "http" in lowered:
+        return default_marketplace_template().price_label
+    return text
+
+
+def normalize_marketplace_cta_text(value: str) -> str:
+    text = " ".join(normalize_notes(value or "", "cta_text", max_len=500).split())
+    if not text:
+        return ""
+    lowered = text.lower()
+    digit_count = len(re.sub(r"\D", "", text))
+    if digit_count >= 7 or "http" in lowered or "www." in lowered or "{" in text or "}" in text:
+        return default_marketplace_template().cta_text
+    return text
 
 
 def normalize_marketplace_description_template(value: str, cta_text: str) -> str:
@@ -3165,8 +3186,8 @@ def fetch_marketplace_template() -> MarketplaceTemplateOut:
     if not row:
         return default_marketplace_template()
     defaults = default_marketplace_template()
-    price_label = str(row.get("price_label") or defaults.price_label).strip()[:60] or defaults.price_label
-    cta_text = str(row.get("cta_text") or "").replace("\r\n", "\n").strip()[:500]
+    price_label = normalize_marketplace_price_label(str(row.get("price_label") or defaults.price_label))
+    cta_text = normalize_marketplace_cta_text(str(row.get("cta_text") or ""))
     return MarketplaceTemplateOut(
         title_template=normalize_marketplace_title_template(str(row.get("title_template") or defaults.title_template)),
         description_template=normalize_marketplace_description_template(
@@ -3180,8 +3201,8 @@ def fetch_marketplace_template() -> MarketplaceTemplateOut:
 
 def update_marketplace_template(payload: MarketplaceTemplateIn) -> MarketplaceTemplateOut:
     title_template = normalize_marketplace_title_template(payload.title_template)
-    price_label = normalize_short_text(payload.price_label or "Bert Ogden Price", "price_label", max_len=60)
-    cta_text = normalize_notes(payload.cta_text or "", "cta_text", max_len=500)
+    price_label = normalize_marketplace_price_label(payload.price_label or default_marketplace_template().price_label)
+    cta_text = normalize_marketplace_cta_text(payload.cta_text or "")
     description_template = normalize_marketplace_description_template(
         normalize_notes(payload.description_template, "description_template", max_len=4000),
         cta_text,

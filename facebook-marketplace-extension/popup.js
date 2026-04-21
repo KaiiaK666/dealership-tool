@@ -17,8 +17,8 @@ const marketplaceTemplateDefaults = {
     marketplaceCtaLine,
     marketplaceUrlLine,
   ].join("\n"),
-  price_label: "Bert Ogden Price",
-  cta_text: "Message us for availability and financing options.",
+  price_label: "Price",
+  cta_text: "Message us today for availability, trade value, and financing options.",
 };
 
 const els = {
