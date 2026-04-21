@@ -1,6 +1,25 @@
 const defaultApiBase = "https://api.bertogden123.com";
 const fallbackApiBases = [defaultApiBase, "https://dealership-tool-api.onrender.com"];
 const marketplaceCreateUrl = "https://www.facebook.com/marketplace/create/vehicle";
+const marketplaceTitleToken = "{year} {make} {model}";
+const marketplacePriceLine = "{price_label}: {price}";
+const marketplaceMileageLine = "Mileage: {mileage}";
+const marketplaceVinLine = "VIN: {vin}";
+const marketplaceCtaLine = "{cta_text}";
+const marketplaceUrlLine = "{url}";
+const marketplaceTemplateDefaults = {
+  title_template: marketplaceTitleToken,
+  description_template: [
+    marketplaceTitleToken,
+    marketplacePriceLine,
+    marketplaceMileageLine,
+    marketplaceVinLine,
+    marketplaceCtaLine,
+    marketplaceUrlLine,
+  ].join("\n"),
+  price_label: "Bert Ogden Price",
+  cta_text: "Message us for availability and financing options.",
+};
 
 const els = {
   apiBase: document.getElementById("apiBase"),
@@ -57,6 +76,33 @@ function looksUsableCaption(value) {
   return /[a-z]/i.test(text) && text.length >= 40;
 }
 
+function normalizeMarketplaceTemplate(template) {
+  const source = {
+    ...marketplaceTemplateDefaults,
+    ...(template || {}),
+  };
+  const titleTemplate = String(source.title_template || marketplaceTitleToken).includes(marketplaceTitleToken)
+    ? String(source.title_template || marketplaceTitleToken).trim()
+    : marketplaceTitleToken;
+  const rawLines = String(source.description_template || "")
+    .split("\n")
+    .map((line) => normalizeSentence(line))
+    .filter(Boolean);
+  const descriptionLines = [];
+  if (rawLines.includes(marketplaceTitleToken)) descriptionLines.push(marketplaceTitleToken);
+  descriptionLines.push(marketplacePriceLine);
+  if (rawLines.some((line) => line.includes("{mileage}"))) descriptionLines.push(marketplaceMileageLine);
+  if (rawLines.some((line) => line.includes("{vin}"))) descriptionLines.push(marketplaceVinLine);
+  if (normalizeSentence(source.cta_text)) descriptionLines.push(marketplaceCtaLine);
+  if (rawLines.some((line) => line.includes("{url}"))) descriptionLines.push(marketplaceUrlLine);
+  return {
+    title_template: titleTemplate,
+    description_template: descriptionLines.join("\n"),
+    price_label: normalizeSentence(source.price_label || marketplaceTemplateDefaults.price_label) || marketplaceTemplateDefaults.price_label,
+    cta_text: normalizeSentence(source.cta_text || ""),
+  };
+}
+
 function buildSmartCaption(vehicle, template, draftData) {
   const nameLine = [vehicle.year, vehicle.make, vehicle.model].filter(Boolean).join(" ");
   const lines = [];
@@ -108,6 +154,7 @@ async function fetchTemplate(apiBase) {
 }
 
 function buildDraft(vehicle, template) {
+  const normalizedTemplate = normalizeMarketplaceTemplate(template);
   const draftData = {
     year: vehicle.year || "",
     make: vehicle.make || "",
@@ -119,16 +166,14 @@ function buildDraft(vehicle, template) {
     body_style: vehicle.body_style || "Sedan",
     stock: vehicle.stock || "",
     url: vehicle.url || "",
-    price_label: template.price_label || "Bert Ogden Price",
-    cta_text: template.cta_text || "",
+    price_label: normalizedTemplate.price_label || marketplaceTemplateDefaults.price_label,
+    cta_text: normalizedTemplate.cta_text || "",
   };
-  const templatedDescription = fillTemplate(template.description_template, draftData);
+  const templatedDescription = fillTemplate(normalizedTemplate.description_template, draftData);
   return {
-    title: fillTemplate(template.title_template, draftData),
+    title: fillTemplate(normalizedTemplate.title_template, draftData),
     price: String(vehicle.price || "").replace(/[^0-9]/g, ""),
-    description: looksUsableCaption(templatedDescription)
-      ? templatedDescription
-      : buildSmartCaption(vehicle, template, draftData),
+    description: looksUsableCaption(templatedDescription) ? templatedDescription : buildSmartCaption(vehicle, normalizedTemplate, draftData),
     images: Array.isArray(vehicle.images) ? vehicle.images : [],
     raw: draftData,
     vehicle,

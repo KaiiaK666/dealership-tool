@@ -67,6 +67,10 @@
 
   function getComboboxValue(node) {
     if (!node) return "";
+    const directValue = normalizeText(node.value || "");
+    if (directValue) return directValue;
+    const ownText = normalizeText(node.textContent || "");
+    if (ownText && ownText.length <= 80) return ownText;
     const candidates = Array.from(
       node.querySelectorAll('[tabindex="-1"] span, [tabindex="-1"] div, input, textarea, [role="textbox"]')
     )
@@ -128,6 +132,12 @@
   function findEditable(hints, { tagName = "", exact = false } = {}) {
     const labeled = findLabeledInput(hints, { tagName, exact });
     if (labeled) return labeled;
+    const nearbyMarker = findFieldMarkers(hints, { exact })[0];
+    const nearbyEditable = findControlNearMarker(
+      nearbyMarker,
+      tagName ? tagName.toLowerCase() : 'input, textarea, [contenteditable="true"], [role="textbox"]'
+    );
+    if (nearbyEditable) return nearbyEditable;
     const candidates = Array.from(
       document.querySelectorAll('input, textarea, [contenteditable="true"], [role="textbox"]')
     ).filter((node) => {
@@ -154,6 +164,66 @@
 
   function findTextField(hints) {
     return findEditable(hints, { exact: true }) || findEditable(hints);
+  }
+
+  function measureNodeDistance(source, target) {
+    if (!source || !target) return Number.POSITIVE_INFINITY;
+    const sourceBox = source.getBoundingClientRect();
+    const targetBox = target.getBoundingClientRect();
+    const verticalGap =
+      targetBox.top > sourceBox.bottom
+        ? targetBox.top - sourceBox.bottom
+        : sourceBox.top > targetBox.bottom
+          ? sourceBox.top - targetBox.bottom
+          : 0;
+    const horizontalGap =
+      targetBox.left > sourceBox.right
+        ? targetBox.left - sourceBox.right
+        : sourceBox.left > targetBox.right
+          ? sourceBox.left - targetBox.right
+          : 0;
+    return verticalGap * 4 + horizontalGap;
+  }
+
+  function findFieldMarkers(hints, { exact = false } = {}) {
+    return Array.from(document.querySelectorAll("label, span, div, p, legend, h1, h2, h3, h4"))
+      .filter((node) => {
+        if (!isVisible(node)) return false;
+        const text = normalizeText(node.textContent || node.getAttribute("aria-label") || "");
+        if (!text || text.length > 80) return false;
+        return matchesHint(text, hints, exact);
+      })
+      .sort((left, right) => {
+        const leftLength = normalizeText(left.textContent || "").length;
+        const rightLength = normalizeText(right.textContent || "").length;
+        return leftLength - rightLength;
+      });
+  }
+
+  function findControlNearMarker(marker, selector) {
+    if (!marker) return null;
+    const scopes = [
+      marker.closest("label"),
+      marker.closest('[role="group"]'),
+      marker.closest("fieldset"),
+      marker.parentElement,
+      marker.parentElement?.parentElement,
+      marker.closest('[role="dialog"]'),
+    ].filter(Boolean);
+
+    for (const scope of scopes) {
+      const localMatch = Array.from(scope.querySelectorAll(selector))
+        .filter((node) => isVisible(node) && node !== marker && !node.contains(marker))
+        .map((node) => ({ node, distance: measureNodeDistance(marker, node) }))
+        .sort((left, right) => left.distance - right.distance)[0]?.node;
+      if (localMatch) return localMatch;
+    }
+
+    return Array.from(document.querySelectorAll(selector))
+      .filter((node) => isVisible(node) && node !== marker && !node.contains(marker))
+      .map((node) => ({ node, distance: measureNodeDistance(marker, node) }))
+      .filter(({ distance }) => distance < 900)
+      .sort((left, right) => left.distance - right.distance)[0]?.node || null;
   }
 
   function findCleanTitleCheckbox() {
@@ -226,22 +296,33 @@
     if (node.tagName === "TEXTAREA" || node.tagName === "INPUT") {
       const ok = setNativeInputValue(node, value);
       node.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, key: "Tab" }));
+      node.dispatchEvent(new KeyboardEvent("keyup", { bubbles: true, key: "Tab" }));
+      node.dispatchEvent(new Event("blur", { bubbles: true }));
+      node.blur?.();
       return ok;
     }
     if (node.getAttribute("contenteditable") === "true" || node.getAttribute("role") === "textbox") {
       node.textContent = value;
       node.dispatchEvent(new InputEvent("input", { bubbles: true, data: value, inputType: "insertText" }));
+      node.dispatchEvent(new Event("change", { bubbles: true }));
+      node.dispatchEvent(new Event("blur", { bubbles: true }));
+      node.blur?.();
       return true;
     }
     return false;
   }
 
   function findSelectTrigger(hints) {
+    const triggerSelector =
+      'label[role="combobox"], [role="combobox"], [aria-haspopup="listbox"], button[aria-haspopup], [role="button"][aria-haspopup], input[role="combobox"], input[aria-autocomplete="list"], input[aria-expanded="true"], input[aria-expanded="false"]';
     const exactCandidates = Array.from(
-      document.querySelectorAll('label[role="combobox"], [role="combobox"], [aria-haspopup="listbox"]')
+      document.querySelectorAll(triggerSelector)
     ).filter(isVisible);
     const exactMatch = exactCandidates.find((node) => matchesHint(getAriaLabelText(node), hints, true));
     if (exactMatch) return exactMatch;
+    const nearbyMarker = findFieldMarkers(hints, { exact: true })[0] || findFieldMarkers(hints)[0];
+    const nearbyTrigger = findControlNearMarker(nearbyMarker, triggerSelector);
+    if (nearbyTrigger) return nearbyTrigger;
     return exactCandidates.find((node) => matchesHint(collectFieldText(node), hints, false));
   }
 
@@ -279,6 +360,20 @@
   function getVisibleOptionScopes() {
     const scopes = Array.from(document.querySelectorAll('[role="listbox"], [role="menu"], [role="dialog"]')).filter(isVisible);
     return scopes.length ? scopes : [document];
+  }
+
+  function findVisibleOptionSearchInput(scopes, trigger) {
+    for (const scope of scopes) {
+      const match = Array.from(scope.querySelectorAll('input, textarea, [contenteditable="true"], [role="textbox"]'))
+        .filter((node) => {
+          if (!isVisible(node) || node === trigger) return false;
+          const type = (node.getAttribute("type") || "").toLowerCase();
+          if (["hidden", "file", "checkbox", "radio"].includes(type)) return false;
+          return true;
+        })[0];
+      if (match) return match;
+    }
+    return null;
   }
 
   function bodyStyleCandidates(value) {
@@ -349,11 +444,17 @@
     }
 
     for (const candidate of candidateValues) {
+      trigger.scrollIntoView?.({ block: "center", inline: "nearest", behavior: "instant" });
       dispatchMouseSequence(trigger);
       await wait(500);
       let option = null;
       for (let attempt = 0; attempt < 4 && !option; attempt += 1) {
         const scopes = getVisibleOptionScopes();
+        const searchInput = findVisibleOptionSearchInput(scopes, trigger);
+        if (searchInput && !option && attempt > 0) {
+          setNodeValue(searchInput, candidate);
+          await wait(350);
+        }
         option =
           scopes.map((scope) => findOptionByText(candidate, scope)).find(Boolean) ||
           findOptionByText(candidate);
@@ -362,6 +463,7 @@
         }
       }
       if (!option) continue;
+      option.scrollIntoView?.({ block: "center", inline: "nearest", behavior: "instant" });
       dispatchMouseSequence(option);
       for (let settle = 0; settle < 6; settle += 1) {
         await wait(280);
@@ -413,7 +515,7 @@
   }
 
   function findNextButton() {
-    return findActionButton(["next"]);
+    return findActionButton(["next", "continue", "review"]);
   }
 
   function findPublishButton() {
@@ -424,6 +526,28 @@
     return Array.from(document.querySelectorAll('[aria-label]'))
       .map((node) => normalizeText(node.getAttribute("aria-label")))
       .find((text) => /currently on step/i.test(text));
+  }
+
+  function getEditableValue(node) {
+    if (!node) return "";
+    if (node.tagName === "INPUT" || node.tagName === "TEXTAREA") {
+      return normalizeText(node.value || "");
+    }
+    return normalizeText(node.textContent || "");
+  }
+
+  function getTextValue(hints) {
+    return getEditableValue(findTextField(hints));
+  }
+
+  function collectVisibleValidationIssues() {
+    const candidates = Array.from(document.querySelectorAll('[aria-invalid="true"], input:invalid, textarea:invalid'))
+      .filter(isVisible)
+      .map((node) => normalizeText(collectFieldText(node)))
+      .filter(Boolean)
+      .map((text) => text.split(" ").slice(0, 6).join(" "))
+      .slice(0, 6);
+    return Array.from(new Set(candidates));
   }
 
   async function fillTextField(hints, value, results, successLabel, failureLabel) {
@@ -480,6 +604,10 @@
   }
 
   async function clickNextStep(results) {
+    if (findPublishButton()) {
+      results.push("Already on final review step");
+      return true;
+    }
     let nextButton = null;
     for (let attempt = 0; attempt < 12; attempt += 1) {
       nextButton = findNextButton();
@@ -491,9 +619,14 @@
       return false;
     }
     if (isDisabledButton(nextButton)) {
+      const validationIssues = collectVisibleValidationIssues();
+      if (validationIssues.length) {
+        results.push(`Facebook still marked invalid: ${validationIssues.join(", ")}`);
+      }
       results.push("Next button stayed disabled");
       return false;
     }
+    nextButton.scrollIntoView?.({ block: "center", inline: "nearest", behavior: "instant" });
     dispatchMouseSequence(nextButton);
     results.push("Opened final review step");
     await wait(1600);
@@ -578,6 +711,62 @@
 
   function findPhotoDropTarget(input) {
     return findPhotoUploadLabel() || input?.closest("label") || input?.parentElement || findAddPhotosButton() || null;
+  }
+
+  function runtimeSendMessage(message) {
+    if (typeof chrome === "undefined" || !chrome.runtime?.sendMessage) {
+      return Promise.resolve({ ok: false, error: "Chrome extension runtime unavailable." });
+    }
+    return new Promise((resolve) => {
+      try {
+        chrome.runtime.sendMessage(message, (response) => {
+          const runtimeError = chrome.runtime?.lastError;
+          if (runtimeError) {
+            resolve({ ok: false, error: runtimeError.message || "Extension background worker is unavailable." });
+            return;
+          }
+          resolve(response || { ok: false, error: "Extension background worker did not respond." });
+        });
+      } catch (error) {
+        resolve({ ok: false, error: error?.message || "Extension background worker is unavailable." });
+      }
+    });
+  }
+
+  async function fetchImagePayloads(imageUrls) {
+    const urls = (Array.isArray(imageUrls) ? imageUrls : []).map((url) => String(url || "").trim()).filter(Boolean).slice(0, 10);
+    if (!urls.length) return { ok: false, files: [], error: "" };
+    const response = await runtimeSendMessage({
+      type: "FETCH_MARKETPLACE_IMAGE_FILES",
+      urls,
+    });
+    return {
+      ok: Boolean(response?.ok),
+      files: Array.isArray(response?.files) ? response.files : [],
+      error: String(response?.error || ""),
+    };
+  }
+
+  async function buildFilesFromPayloads(payloads) {
+    const files = [];
+    for (let index = 0; index < payloads.length; index += 1) {
+      const item = payloads[index] || {};
+      try {
+        const response = await fetch(String(item.dataUrl || ""));
+        if (!response.ok) continue;
+        const blob = await response.blob();
+        const fallbackExtensionMatch = String(item.url || item.name || "").match(/\.([a-zA-Z0-9]{3,4})(?:[?#]|$)/);
+        const fallbackExtension = fallbackExtensionMatch?.[1] || "jpg";
+        files.push(
+          new File([blob], item.name || `vehicle-${index + 1}.${fallbackExtension}`, {
+            type: item.type || blob.type || `image/${fallbackExtension}`,
+          })
+        );
+      } catch {
+        // Keep going so one bad payload does not cancel the rest.
+      }
+    }
+    return files;
   }
 
   async function assignFilesInPageContext(input, files) {
@@ -666,23 +855,45 @@
     const startingCount = getPhotoCount();
     const dataTransfer = new DataTransfer();
     let uploaded = 0;
-    for (let index = 0; index < Math.min(imageUrls.length, 10); index += 1) {
-      const url = imageUrls[index];
-      try {
-        const response = await fetch(url);
-        if (!response.ok) continue;
-        const blob = await response.blob();
-        const extensionMatch = String(url).match(/\.([a-zA-Z0-9]{3,4})(?:[?#]|$)/);
-        const extension = extensionMatch?.[1] || "jpg";
-        dataTransfer.items.add(new File([blob], `vehicle-${index + 1}.${extension}`, { type: blob.type || `image/${extension}` }));
-        uploaded += 1;
-      } catch {
-        // Ignore individual image failures.
+    let fetchError = "";
+
+    const extensionFetch = await fetchImagePayloads(imageUrls);
+    let files = extensionFetch.ok ? await buildFilesFromPayloads(extensionFetch.files) : [];
+    if (!files.length && extensionFetch.error) {
+      fetchError = extensionFetch.error;
+    }
+
+    if (!files.length) {
+      for (let index = 0; index < Math.min(imageUrls.length, 10); index += 1) {
+        const url = imageUrls[index];
+        try {
+          const response = await fetch(url);
+          if (!response.ok) continue;
+          const blob = await response.blob();
+          const extensionMatch = String(url).match(/\.([a-zA-Z0-9]{3,4})(?:[?#]|$)/);
+          const extension = extensionMatch?.[1] || "jpg";
+          files.push(new File([blob], `vehicle-${index + 1}.${extension}`, { type: blob.type || `image/${extension}` }));
+        } catch {
+          // Ignore individual image failures.
+        }
       }
     }
-    if (!uploaded) return { ok: false, uploaded: 0 };
+
+    for (const file of files) {
+      dataTransfer.items.add(file);
+      uploaded += 1;
+    }
+    if (!uploaded) return { ok: false, uploaded: 0, fetchError };
     let endingCount = startingCount;
     let assignedCount = 0;
+    input = findImageInput() || input;
+    scrollFieldIntoView(["add photos"]);
+    const pageWorldAssigned = await assignFilesInPageContext(input, Array.from(dataTransfer.files));
+    assignedCount = Math.max(assignedCount, pageWorldAssigned ? uploaded : 0, Number(input.files?.length || 0));
+    endingCount = await waitForPhotoUpload(startingCount, Math.min(uploaded, 1));
+    if (pageWorldAssigned && endingCount > startingCount) {
+      return { ok: true, uploaded, photoCount: endingCount, assignedCount, fetchError };
+    }
     for (let attempt = 0; attempt < 2; attempt += 1) {
       input = findImageInput() || input;
       scrollFieldIntoView(["add photos"]);
@@ -709,21 +920,21 @@
       }
       endingCount = await waitForPhotoUpload(startingCount, Math.min(uploaded, 1));
       if (endingCount > startingCount) {
-        return { ok: true, uploaded, photoCount: endingCount, assignedCount };
+        return { ok: true, uploaded, photoCount: endingCount, assignedCount, fetchError };
       }
       dispatchMouseSequence(dropTarget || input);
       await wait(450);
     }
-    const pageWorldAssigned = await assignFilesInPageContext(
+    const pageWorldRetryAssigned = await assignFilesInPageContext(
       input,
       Array.from(dataTransfer.files)
     );
     assignedCount = Math.max(assignedCount, Number(input.files?.length || 0));
     endingCount = await waitForPhotoUpload(startingCount, Math.min(uploaded, 1));
-    if (pageWorldAssigned && endingCount > startingCount) {
-      return { ok: true, uploaded, photoCount: endingCount, assignedCount };
+    if (pageWorldRetryAssigned && endingCount > startingCount) {
+      return { ok: true, uploaded, photoCount: endingCount, assignedCount, fetchError };
     }
-    return { ok: false, uploaded, photoCount: endingCount, assignedCount };
+    return { ok: false, uploaded, photoCount: endingCount, assignedCount, fetchError };
   }
 
   function getSelectValue(hints) {
@@ -734,6 +945,14 @@
   function getFormSnapshot() {
     const cleanTitleCheckbox = findCheckboxByHints(["clean title"]);
     return {
+      vehicleType: getSelectValue(["vehicle type"]),
+      price: getTextValue(["price", "asking price"]),
+      year: getTextValue(["year"]) || getSelectValue(["year"]),
+      make: getTextValue(["make"]) || getSelectValue(["make"]),
+      model: getTextValue(["model"]) || getSelectValue(["model"]),
+      mileage: getTextValue(["mileage", "odometer"]),
+      description: getTextValue(["description"]),
+      bodyStyle: getSelectValue(["body style"]),
       cleanTitle: Boolean(cleanTitleCheckbox?.checked || cleanTitleCheckbox?.getAttribute?.("aria-checked") === "true"),
       condition: getSelectValue(["condition"]),
       fuelType: getSelectValue(["fuel type"]),
@@ -744,6 +963,14 @@
 
   function missingSnapshotFields(snapshot) {
     const missing = [];
+    if (!snapshot.vehicleType) missing.push("vehicle type");
+    if (!snapshot.price) missing.push("price");
+    if (!snapshot.year) missing.push("year");
+    if (!snapshot.make) missing.push("make");
+    if (!snapshot.model) missing.push("model");
+    if (!snapshot.mileage) missing.push("mileage");
+    if (!snapshot.description) missing.push("description");
+    if (!snapshot.bodyStyle) missing.push("body style");
     if (!snapshot.cleanTitle) missing.push("clean title");
     if (!snapshot.condition) missing.push("condition");
     if (!snapshot.fuelType) missing.push("fuel type");
@@ -874,12 +1101,56 @@
         const finalPhotoCount = Math.max(uploadResult.photoCount || 0, uploadResult.uploaded);
         results.push(`Uploaded ${finalPhotoCount} photo${finalPhotoCount === 1 ? "" : "s"}`);
       } else {
+        if (uploadResult.fetchError) {
+          warningLines.push(`Photo download issue: ${uploadResult.fetchError}`);
+        }
         warningLines.push(`Images found on vehicle page: ${dealerDraft.images.length}`);
         warningLines.push(`Photo input accepted ${uploadResult.assignedCount || 0} file${uploadResult.assignedCount === 1 ? "" : "s"}, but Facebook still shows ${uploadResult.photoCount || 0} photo${uploadResult.photoCount === 1 ? "" : "s"}.`);
       }
     }
 
     let snapshot = getFormSnapshot();
+    if (!snapshot.vehicleType) {
+      const vehicleTypeRetry = await pickVehicleType(vehicle.body_style || "Sedan");
+      results.push(vehicleTypeRetry ? "Retried vehicle type" : "Vehicle type stayed blank");
+      snapshot = getFormSnapshot();
+    }
+    if (!snapshot.price && dealerDraft.price) {
+      await fillTextField(["price", "asking price"], dealerDraft.price, results, "Retried price", "Price stayed blank");
+      snapshot = getFormSnapshot();
+    }
+    if (!snapshot.year && vehicle.year) {
+      await fillSelectOrTextField(["year"], vehicle.year, results, "Retried year", "Year stayed blank");
+      snapshot = getFormSnapshot();
+    }
+    if (!snapshot.make && vehicle.make) {
+      await fillSelectOrTextField(["make"], vehicle.make, results, "Retried make", "Make stayed blank");
+      snapshot = getFormSnapshot();
+    }
+    if (!snapshot.model && modelValue) {
+      await fillSelectOrTextField(["model"], modelValue, results, "Retried model", "Model stayed blank");
+      snapshot = getFormSnapshot();
+    }
+    if (!snapshot.mileage && mileageValue) {
+      await fillSelectOrTextField(["mileage", "odometer"], mileageValue, results, "Retried mileage", "Mileage stayed blank");
+      snapshot = getFormSnapshot();
+    }
+    if (!snapshot.description && dealerDraft.description) {
+      await fillTextField(["description"], dealerDraft.description, results, "Retried description", "Description stayed blank");
+      snapshot = getFormSnapshot();
+    }
+    if (!snapshot.bodyStyle) {
+      const bodyStyleOptions = bodyStyleCandidates(vehicle.body_style || "Sedan");
+      await fillSelectField(
+        ["body style"],
+        bodyStyleOptions[0] || "Sedan",
+        results,
+        "Retried body style",
+        "Body style stayed blank",
+        bodyStyleOptions.slice(1)
+      );
+      snapshot = getFormSnapshot();
+    }
     if (!snapshot.cleanTitle) {
       await ensureCheckboxChecked(
         ["clean title"],
@@ -899,6 +1170,17 @@
         "Retried fuel type",
         "Fuel type stayed blank",
         fuelCandidates.slice(1)
+      );
+      snapshot = getFormSnapshot();
+    }
+    if (!snapshot.condition) {
+      await fillSelectOrTextField(
+        ["condition"],
+        conditionOptions[0] || "Very Good",
+        results,
+        "Retried condition",
+        "Condition stayed blank",
+        conditionOptions.slice(1)
       );
       snapshot = getFormSnapshot();
     }

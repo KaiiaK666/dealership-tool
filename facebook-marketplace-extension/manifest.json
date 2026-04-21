@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Dealership Marketplace Helper",
-  "version": "0.3.11",
+  "version": "0.4.0",
   "description": "Scrape dealership inventory pages and prepare Facebook Marketplace drafts.",
   "icons": {
     "16": "icons/icon16.png",
@@ -16,6 +16,9 @@
       "32": "icons/icon32.png",
       "48": "icons/icon48.png"
     }
+  },
+  "background": {
+    "service_worker": "background.js"
   },
   "permissions": [
     "storage",
@@ -33,7 +36,9 @@
     "https://www.bertogdenmissionkia.com/*",
     "https://www.bertogdenmissionmazda.com/*",
     "https://www.bertogdenmission.com/*",
-    "https://www.bertogdenmissionautooutlet.com/*"
+    "https://www.bertogdenmissionautooutlet.com/*",
+    "https://*/*",
+    "http://*/*"
   ],
   "content_scripts": [
     {

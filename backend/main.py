@@ -3123,23 +3123,69 @@ def default_marketplace_template() -> MarketplaceTemplateOut:
     )
 
 
+MARKETPLACE_TITLE_TOKEN = "{year} {make} {model}"
+MARKETPLACE_PRICE_LINE = "{price_label}: {price}"
+MARKETPLACE_MILEAGE_LINE = "Mileage: {mileage}"
+MARKETPLACE_VIN_LINE = "VIN: {vin}"
+MARKETPLACE_CTA_LINE = "{cta_text}"
+MARKETPLACE_URL_LINE = "{url}"
+
+
+def normalize_marketplace_title_template(value: str) -> str:
+    title_template = normalize_short_text(value or MARKETPLACE_TITLE_TOKEN, "title_template", max_len=200)
+    if MARKETPLACE_TITLE_TOKEN not in title_template:
+        return MARKETPLACE_TITLE_TOKEN
+    return title_template
+
+
+def normalize_marketplace_description_template(value: str, cta_text: str) -> str:
+    lines = [line.strip() for line in str(value or "").replace("\r\n", "\n").split("\n") if line.strip()]
+    include_vehicle_line = any(line == MARKETPLACE_TITLE_TOKEN for line in lines)
+    include_mileage = any("{mileage}" in line for line in lines)
+    include_vin = any("{vin}" in line for line in lines)
+    include_url = any("{url}" in line for line in lines)
+
+    normalized_lines = []
+    if include_vehicle_line:
+        normalized_lines.append(MARKETPLACE_TITLE_TOKEN)
+    normalized_lines.append(MARKETPLACE_PRICE_LINE)
+    if include_mileage:
+        normalized_lines.append(MARKETPLACE_MILEAGE_LINE)
+    if include_vin:
+        normalized_lines.append(MARKETPLACE_VIN_LINE)
+    if cta_text:
+        normalized_lines.append(MARKETPLACE_CTA_LINE)
+    if include_url:
+        normalized_lines.append(MARKETPLACE_URL_LINE)
+    return "\n".join(normalized_lines)
+
+
 def fetch_marketplace_template() -> MarketplaceTemplateOut:
     row = db_query_one("SELECT * FROM marketplace_template WHERE id = 1")
     if not row:
         return default_marketplace_template()
+    defaults = default_marketplace_template()
+    price_label = str(row.get("price_label") or defaults.price_label).strip()[:60] or defaults.price_label
+    cta_text = str(row.get("cta_text") or "").replace("\r\n", "\n").strip()[:500]
     return MarketplaceTemplateOut(
-        title_template=str(row.get("title_template") or default_marketplace_template().title_template),
-        description_template=str(row.get("description_template") or default_marketplace_template().description_template),
-        price_label=str(row.get("price_label") or default_marketplace_template().price_label),
-        cta_text=str(row.get("cta_text") or default_marketplace_template().cta_text),
+        title_template=normalize_marketplace_title_template(str(row.get("title_template") or defaults.title_template)),
+        description_template=normalize_marketplace_description_template(
+            str(row.get("description_template") or defaults.description_template),
+            cta_text,
+        ),
+        price_label=price_label,
+        cta_text=cta_text,
     )
 
 
 def update_marketplace_template(payload: MarketplaceTemplateIn) -> MarketplaceTemplateOut:
-    title_template = normalize_short_text(payload.title_template, "title_template", max_len=200)
-    description_template = normalize_notes(payload.description_template, "description_template", max_len=4000)
+    title_template = normalize_marketplace_title_template(payload.title_template)
     price_label = normalize_short_text(payload.price_label or "Bert Ogden Price", "price_label", max_len=60)
     cta_text = normalize_notes(payload.cta_text or "", "cta_text", max_len=500)
+    description_template = normalize_marketplace_description_template(
+        normalize_notes(payload.description_template, "description_template", max_len=4000),
+        cta_text,
+    )
     db_execute(
         """
         INSERT INTO marketplace_template (id, title_template, description_template, price_label, cta_text)
