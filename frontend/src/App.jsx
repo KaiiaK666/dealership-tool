@@ -458,6 +458,28 @@ function emptyBdcSalesTrackerDmsLogDraft() {
   return { customer_name: "", apt_set_under: "" };
 }
 
+function parseBdcSalesTrackerDraftNumbers(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return [];
+  const seen = new Set();
+  const numbers = [];
+  raw.split(/[\s,;|]+/).forEach((chunk) => {
+    const token = String(chunk || "").trim();
+    if (!token) return;
+    const lowered = token.toLowerCase();
+    if (seen.has(lowered)) return;
+    seen.add(lowered);
+    numbers.push(token);
+  });
+  return numbers;
+}
+
+function percentOfTotal(value, total) {
+  const safeTotal = Number(total || 0);
+  if (!safeTotal) return 0;
+  return Math.max(0, Math.min(100, (Number(value || 0) / safeTotal) * 100));
+}
+
 function fillMarketplaceTemplate(template, data) {
   return String(template || "").replace(/\{(\w+)\}/g, (_, key) => data[key] ?? "");
 }
@@ -1397,6 +1419,12 @@ export default function App() {
   const trackerCurrentDmsCount = trackerDmsLog.current_entries.length;
   const trackerLoggedDmsCount = trackerDmsLog.log_entries.length;
   const trackerBehindByValue = Number(bdcSalesTracker?.summary?.behind_by || 0);
+  const trackerGoalValue = Number(bdcSalesTracker?.summary?.goal || bdcSalesTracker?.goal || 0);
+  const trackerWorkingDays = Number(bdcSalesTracker?.summary?.working_days || 0);
+  const trackerDaysWorked = Number(bdcSalesTracker?.summary?.days_worked || 0);
+  const trackerDaysLeft = Number(bdcSalesTracker?.summary?.days_left || 0);
+  const trackerShouldBeAtSold = Number(bdcSalesTracker?.summary?.should_be_at_sold || 0);
+  const trackerProjection = Number(bdcSalesTracker?.summary?.tracking_projection || 0);
   const bdcSalesTrackerTeamTotals = trackerAgents.reduce(
     (totals, agent) => ({
       totalLeads: totals.totalLeads + Number(agent.total_leads || 0),
@@ -1411,6 +1439,48 @@ export default function App() {
   );
   const trackerConfirmedCount = Number(bdcSalesTracker?.summary?.mtd_tracked || 0);
   const trackerPendingCount = Math.max(0, bdcSalesTrackerTeamTotals.trackerRows - trackerConfirmedCount);
+  const trackerRowsTotal = Math.max(0, trackerConfirmedCount + trackerPendingCount);
+  const trackerGoalProgressPercent = percentOfTotal(trackerConfirmedCount, trackerGoalValue);
+  const trackerShouldBeProgressPercent = percentOfTotal(trackerShouldBeAtSold, trackerGoalValue);
+  const trackerConfirmedSharePercent = percentOfTotal(trackerConfirmedCount, trackerRowsTotal);
+  const trackerPendingSharePercent = percentOfTotal(trackerPendingCount, trackerRowsTotal);
+  const trackerActivityTotal = bdcSalesTrackerTeamTotals.calls + bdcSalesTrackerTeamTotals.emails + bdcSalesTrackerTeamTotals.texts;
+  const trackerActivityMix = [
+    {
+      key: "calls",
+      label: "Calls",
+      value: bdcSalesTrackerTeamTotals.calls,
+      percent: percentOfTotal(bdcSalesTrackerTeamTotals.calls, trackerActivityTotal),
+      tone: "var(--accent)",
+    },
+    {
+      key: "emails",
+      label: "Emails",
+      value: bdcSalesTrackerTeamTotals.emails,
+      percent: percentOfTotal(bdcSalesTrackerTeamTotals.emails, trackerActivityTotal),
+      tone: "#1f7cf6",
+    },
+    {
+      key: "texts",
+      label: "Texts",
+      value: bdcSalesTrackerTeamTotals.texts,
+      percent: percentOfTotal(bdcSalesTrackerTeamTotals.texts, trackerActivityTotal),
+      tone: "#209774",
+    },
+  ];
+  const trackerTopAgents = [...trackerAgents]
+    .sort((left, right) => {
+      const soldDelta = Number(right.sold_count || 0) - Number(left.sold_count || 0);
+      if (soldDelta) return soldDelta;
+      const pendingDelta = Number(right.entries?.length || 0) - Number(left.entries?.length || 0);
+      if (pendingDelta) return pendingDelta;
+      return String(left.agent_name || "").localeCompare(String(right.agent_name || ""));
+    })
+    .slice(0, 3);
+  const trackerTopAgentMax = trackerTopAgents.reduce(
+    (maxValue, agent) => Math.max(maxValue, Number(agent.sold_count || 0) + Number(agent.entries?.length || 0)),
+    0
+  );
 
   function applyBdcSalesTrackerData(data) {
     setBdcSalesTracker(data);
@@ -4172,7 +4242,7 @@ export default function App() {
             <div className="panel bdc-sales-tracker-hero">
               <div className="bdc-sales-tracker-hero__copy">
                 <span className="eyebrow">Current month BDC tracker</span>
-                <h2>BDC payroll tracker for raw DMS sold numbers and Reynolds confirmation</h2>
+                <h2>BDC payroll tracker for raw DMS sold numbers, Reynolds matches, and month pace</h2>
                 <p className="admin-note">
                   This is the working sheet for payroll tracking. Drop in raw DMS numbers as deals start to count, keep a
                   short working note if the agent is still pushing the deal, then turn the row green once Reynolds shows it
@@ -4184,7 +4254,10 @@ export default function App() {
                     {bdcSalesTrackerView === "tracker" ? "Tracker worksheet" : "DMS log worksheet"}
                   </span>
                   <span className="bdc-sales-meta-chip">
-                    Pending {trackerPendingCount} / confirmed {trackerConfirmedCount}
+                    Grey pending {trackerPendingCount} / green sold {trackerConfirmedCount}
+                  </span>
+                  <span className="bdc-sales-meta-chip">
+                    {trackerDaysWorked} worked / {trackerDaysLeft} left
                   </span>
                 </div>
               </div>
@@ -4233,37 +4306,37 @@ export default function App() {
                 <div className="bdc-sales-kpi-grid">
                   <article className="bdc-sales-kpi bdc-sales-kpi--primary">
                     <div className="bdc-sales-kpi__label">
-                      <span>Sold goal</span>
-                      <small>{bdcSalesTracker?.summary?.working_days ?? 0} working days</small>
+                      <span>Payroll sold goal</span>
+                      <small>{trackerWorkingDays} working days in this month</small>
                     </div>
-                    <strong>{Number(bdcSalesTracker?.summary?.goal || 0)}</strong>
+                    <strong>{Number(trackerGoalValue || 0)}</strong>
                     <small>
                       Payroll goal pace is {formatTrackerNumber(bdcSalesTracker?.summary?.daily_goal || 0)} sold per working day.
                     </small>
                   </article>
                   <article className="bdc-sales-kpi bdc-sales-kpi--primary">
                     <div className="bdc-sales-kpi__label">
-                      <span>Reynolds confirmed</span>
-                      <small>Green rows already count for payroll</small>
+                      <span>Green Reynolds rows</span>
+                      <small>These already count for payroll</small>
                     </div>
                     <strong>{trackerConfirmedCount}</strong>
                     <small>
-                      {trackerPendingCount} still being tracked before they are confirmed green.
+                      {formatTrackerNumber(trackerProjection)} projected sold if this pace holds.
                     </small>
                   </article>
                   <article className="bdc-sales-kpi">
                     <div className="bdc-sales-kpi__label">
-                      <span>Active tracker rows</span>
-                      <small>Raw DMS numbers and notes in play</small>
+                      <span>Grey pending rows</span>
+                      <small>Still waiting on Reynolds to flip green</small>
                     </div>
-                    <strong>{bdcSalesTrackerTeamTotals.trackerRows}</strong>
+                    <strong>{trackerPendingCount}</strong>
                     <small>
-                      {bdcSalesTrackerTeamTotals.actualSold} manual sold against {bdcSalesTrackerTeamTotals.appointmentsSet} appointments set.
+                      {trackerRowsTotal} total tracked DMS rows are sitting in the worksheet right now.
                     </small>
                   </article>
                   <article className={`bdc-sales-kpi ${trackerBehindByValue >= 0 ? "is-warning" : "is-positive"}`}>
                     <div className="bdc-sales-kpi__label">
-                      <span>{trackerBehindByValue >= 0 ? "Behind goal line" : "Ahead of goal line"}</span>
+                      <span>{trackerBehindByValue >= 0 ? "Goal delta today" : "Goal cushion today"}</span>
                       <small>Where the month should sit today</small>
                     </div>
                     <strong>{formatTrackerNumber(Math.abs(trackerBehindByValue))}</strong>
@@ -4274,6 +4347,137 @@ export default function App() {
                     </small>
                   </article>
                 </div>
+
+                <details className="panel bdc-sales-insights-panel" open>
+                  <summary className="bdc-sales-insights-panel__summary">
+                    <div className="bdc-sales-insights-panel__summary-copy">
+                      <span className="eyebrow">Collapsible insights</span>
+                      <h3>Goal line, raw DMS pipeline, and agent pace</h3>
+                      <p className="admin-note">
+                        Keep this open when you want context. Collapse it when the team just needs a fast payroll-entry sheet.
+                      </p>
+                    </div>
+                    <div className="bdc-sales-insights-panel__summary-chips">
+                      <span>{trackerDaysWorked} worked</span>
+                      <span>{trackerDaysLeft} left</span>
+                      <span>{formatTrackerNumber(trackerProjection)} projected</span>
+                      <span>{formatTrackerNumber(trackerShouldBeAtSold)} should be at</span>
+                    </div>
+                    <span className="bdc-sales-insights-panel__toggle">Collapse</span>
+                  </summary>
+                  <div className="bdc-sales-insights-grid">
+                    <article className="bdc-sales-insight-card">
+                      <div className="bdc-sales-insight-card__header">
+                        <div>
+                          <span>Goal line</span>
+                          <h4>Confirmed sold vs month target</h4>
+                        </div>
+                        <strong>{formatTrackerNumber(trackerGoalProgressPercent, 0)}%</strong>
+                      </div>
+                      <div className="bdc-sales-progress-rail">
+                        <div className="bdc-sales-progress-rail__track">
+                          <div
+                            className="bdc-sales-progress-rail__fill"
+                            style={{ width: `${trackerGoalProgressPercent}%` }}
+                          />
+                          <div
+                            className="bdc-sales-progress-rail__marker"
+                            style={{ left: `${trackerShouldBeProgressPercent}%` }}
+                          />
+                        </div>
+                        <div className="bdc-sales-progress-rail__meta">
+                          <span>Green sold {trackerConfirmedCount}</span>
+                          <span>Should be {formatTrackerNumber(trackerShouldBeAtSold)}</span>
+                          <span>Goal {Math.round(trackerGoalValue)}</span>
+                        </div>
+                      </div>
+                    </article>
+
+                    <article className="bdc-sales-insight-card">
+                      <div className="bdc-sales-insight-card__header">
+                        <div>
+                          <span>DMS pipeline</span>
+                          <h4>Open worksheet rows by status</h4>
+                        </div>
+                        <strong>{trackerRowsTotal}</strong>
+                      </div>
+                      <div className="bdc-sales-status-bar">
+                        <div
+                          className="bdc-sales-status-bar__segment is-sold"
+                          style={{ width: `${trackerConfirmedSharePercent}%` }}
+                        />
+                        <div
+                          className="bdc-sales-status-bar__segment is-pending"
+                          style={{ width: `${trackerPendingSharePercent}%` }}
+                        />
+                      </div>
+                      <div className="bdc-sales-progress-rail__meta">
+                        <span>Green {trackerConfirmedCount}</span>
+                        <span>Grey {trackerPendingCount}</span>
+                        <span>{bdcSalesTrackerTeamTotals.trackerRows} total rows</span>
+                      </div>
+                    </article>
+
+                    <article className="bdc-sales-insight-card">
+                      <div className="bdc-sales-insight-card__header">
+                        <div>
+                          <span>Activity mix</span>
+                          <h4>Calls, emails, and texts entered this month</h4>
+                        </div>
+                        <strong>{trackerActivityTotal}</strong>
+                      </div>
+                      <div className="bdc-sales-insight-bars">
+                        {trackerActivityMix.map((item) => (
+                          <div key={`tracker-activity-${item.key}`} className="bdc-sales-insight-bars__row">
+                            <span>{item.label}</span>
+                            <div className="bdc-sales-insight-bars__track">
+                              <div
+                                className="bdc-sales-insight-bars__fill"
+                                style={{ width: `${item.percent}%`, background: item.tone }}
+                              />
+                            </div>
+                            <strong>{item.value}</strong>
+                          </div>
+                        ))}
+                      </div>
+                    </article>
+
+                    <article className="bdc-sales-insight-card">
+                      <div className="bdc-sales-insight-card__header">
+                        <div>
+                          <span>Agent pace</span>
+                          <h4>Who has the most tracked DMS rows in play</h4>
+                        </div>
+                        <strong>{trackerTopAgents.length}</strong>
+                      </div>
+                      <div className="bdc-sales-agent-rankings">
+                        {trackerTopAgents.length ? (
+                          trackerTopAgents.map((agent) => {
+                            const totalTracked = Number(agent.sold_count || 0) + Number(agent.entries?.length || 0);
+                            const width = trackerTopAgentMax ? Math.max(10, (totalTracked / trackerTopAgentMax) * 100) : 0;
+                            return (
+                              <div key={`tracker-top-agent-${agent.agent_id}`} className="bdc-sales-agent-rankings__item">
+                                <div className="bdc-sales-agent-rankings__copy">
+                                  <strong>{agent.agent_name}</strong>
+                                  <small>
+                                    {Number(agent.sold_count || 0)} green / {Number(agent.entries?.length || 0)} open /{" "}
+                                    {Number(agent.actual_sold || 0)} manual sold
+                                  </small>
+                                </div>
+                                <div className="bdc-sales-agent-rankings__bar">
+                                  <div style={{ width: `${width}%` }} />
+                                </div>
+                                <span>{totalTracked}</span>
+                              </div>
+                            );
+                          })
+                        ) : (
+                          <div className="empty">No tracker activity is in the worksheet yet.</div>
+                        )}
+                      </div>
+                    </article>
+                  </div>
+                </details>
 
                 <div className="panel bdc-sales-summary-panel">
                   <div className="bdc-sales-summary-panel__header">
@@ -4349,6 +4553,7 @@ export default function App() {
                   {trackerAgents.length ? (
                     trackerAgents.map((agent) => {
                       const draft = bdcSalesTrackerEntryDrafts[agent.agent_id] || emptyBdcSalesTrackerEntryDraft();
+                      const draftDealCount = parseBdcSalesTrackerDraftNumbers(draft.dms_numbers_text).length;
                       return (
                         <article key={bdcSalesTrackerAgentKey(agent)} className="bdc-sales-agent-card">
                           <div className="bdc-sales-agent-card__header">
@@ -4459,9 +4664,19 @@ export default function App() {
                             <div className="bdc-sales-entry-sheet__intro">
                               <strong>DMS sales tracker</strong>
                               <small>
-                                Paste one or many DMS numbers. Commas, spaces, and new lines all work. Optional profile
-                                and note will stamp onto each new row you add.
+                                Paste one or many DMS numbers. Every DMS number becomes its own tracked deal row. Optional
+                                profile and note will stamp onto each row you create.
                               </small>
+                              <div className="bdc-sales-entry-sheet__chips">
+                                <span className={`bdc-sales-entry-sheet__chip ${draftDealCount ? "is-ready" : ""}`}>
+                                  {draftDealCount
+                                    ? `${draftDealCount} separate ${draftDealCount === 1 ? "deal" : "deals"} ready`
+                                    : "Paste DMS numbers to stage separate deal rows"}
+                                </span>
+                                <span className="bdc-sales-entry-sheet__chip is-pending">
+                                  New rows start grey until Reynolds confirms them green
+                                </span>
+                              </div>
                             </div>
                             <div className="bdc-sales-entry-grid bdc-sales-entry-grid--header bdc-sales-entry-grid--create">
                               <span>DMS numbers</span>
@@ -4472,12 +4687,12 @@ export default function App() {
                             <div className="bdc-sales-entry-create bdc-sales-entry-grid bdc-sales-entry-grid--create">
                               <label className="bdc-sales-entry-cell bdc-sales-entry-cell--batch">
                                 <textarea
-                                  rows={1}
+                                  rows={2}
                                   value={draft.dms_numbers_text}
                                   onChange={(event) =>
                                     patchBdcSalesTrackerEntryDraft(agent.agent_id, "dms_numbers_text", event.target.value)
                                   }
-                                  placeholder="124913 124914 124915"
+                                  placeholder={"124913\n124914\n124915"}
                                   aria-label={`DMS numbers for ${agent.agent_name}`}
                                 />
                               </label>
@@ -4502,7 +4717,13 @@ export default function App() {
                                 onClick={() => addBdcSalesTrackerEntry(agent)}
                                 disabled={busy === `bdc-sales-create-${agent.agent_id}`}
                               >
-                                {busy === `bdc-sales-create-${agent.agent_id}` ? "Adding..." : "Add Rows"}
+                                {busy === `bdc-sales-create-${agent.agent_id}`
+                                  ? "Adding..."
+                                  : draftDealCount > 1
+                                    ? `Add ${draftDealCount} Deals`
+                                    : draftDealCount === 1
+                                      ? "Add Deal"
+                                      : "Add Row"}
                               </button>
                             </div>
 
@@ -4727,15 +4948,10 @@ export default function App() {
                           </div>
                           {trackerDmsLog.log_entries.map((entry) => (
                             <div key={`dms-log-${entry.id}`} className="bdc-dms-log-history-row">
-                              <label className="bdc-dms-log-history-row__cell">
-                                <input
-                                  type="datetime-local"
-                                  value={entry.logged_at || ""}
-                                  onChange={(event) => patchBdcSalesTrackerDmsLogEntry(entry.id, "logged_at", event.target.value)}
-                                  aria-label={`Logged at row ${entry.id}`}
-                                />
-                              </label>
-                              <label className="bdc-dms-log-history-row__cell">
+                              <div className="bdc-dms-log-history-row__cell bdc-dms-log-history-row__timestamp" data-label="Timestamp">
+                                <strong>{dateTimeLabel(entry.logged_at)}</strong>
+                              </div>
+                              <label className="bdc-dms-log-history-row__cell" data-label="Customer Name">
                                 <input
                                   value={entry.customer_name}
                                   onChange={(event) => patchBdcSalesTrackerDmsLogEntry(entry.id, "customer_name", event.target.value)}
@@ -4743,7 +4959,7 @@ export default function App() {
                                   aria-label={`Customer name row ${entry.id}`}
                                 />
                               </label>
-                              <label className="bdc-dms-log-history-row__cell">
+                              <label className="bdc-dms-log-history-row__cell" data-label="Apt Set Under">
                                 <input
                                   value={entry.apt_set_under}
                                   onChange={(event) => patchBdcSalesTrackerDmsLogEntry(entry.id, "apt_set_under", event.target.value)}
@@ -4751,7 +4967,7 @@ export default function App() {
                                   aria-label={`Apt set under row ${entry.id}`}
                                 />
                               </label>
-                              <div className="bdc-dms-log-history-row__actions">
+                              <div className="bdc-dms-log-history-row__actions" data-label="Actions">
                                 <button
                                   type="button"
                                   className="secondary"

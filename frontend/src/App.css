@@ -1657,6 +1657,240 @@ th {
   letter-spacing: -0.05em;
 }
 
+.bdc-sales-insights-panel {
+  display: grid;
+  gap: 0;
+  overflow: hidden;
+}
+
+.bdc-sales-insights-panel__summary {
+  display: grid;
+  gap: 14px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.bdc-sales-insights-panel__summary::-webkit-details-marker {
+  display: none;
+}
+
+.bdc-sales-insights-panel__summary-copy {
+  display: grid;
+  gap: 8px;
+}
+
+.bdc-sales-insights-panel__summary-copy h3 {
+  margin: 0;
+  letter-spacing: -0.03em;
+}
+
+.bdc-sales-insights-panel__summary-copy .admin-note {
+  margin: 0;
+}
+
+.bdc-sales-insights-panel__summary-chips {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.bdc-sales-insights-panel__summary-chips span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  padding: 0 12px;
+  border-radius: 999px;
+  background: rgba(245, 249, 255, 0.92);
+  border: 1px solid rgba(31, 124, 246, 0.12);
+  color: #335277;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.bdc-sales-insights-panel__toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  justify-self: start;
+  padding: 0.38rem 0.72rem;
+  border-radius: 999px;
+  background: rgba(23, 32, 51, 0.06);
+  color: #5b6574;
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.bdc-sales-insights-panel__toggle::after {
+  content: ">";
+  font-size: 1rem;
+  line-height: 1;
+  transform: rotate(90deg);
+  transition: transform 140ms ease;
+}
+
+.bdc-sales-insights-panel:not([open]) .bdc-sales-insights-panel__toggle::after {
+  transform: rotate(0deg);
+}
+
+.bdc-sales-insights-grid {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid rgba(23, 32, 51, 0.08);
+}
+
+.bdc-sales-insight-card {
+  display: grid;
+  gap: 14px;
+  padding: 16px;
+  border-radius: 20px;
+  border: 1px solid rgba(31, 37, 43, 0.08);
+  background: rgba(255, 255, 255, 0.78);
+}
+
+.bdc-sales-insight-card__header {
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.bdc-sales-insight-card__header span {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #7e8794;
+}
+
+.bdc-sales-insight-card__header h4 {
+  margin: 6px 0 0;
+  font-size: 1.02rem;
+  letter-spacing: -0.03em;
+}
+
+.bdc-sales-insight-card__header strong {
+  font-size: 1.8rem;
+  line-height: 0.95;
+  letter-spacing: -0.05em;
+}
+
+.bdc-sales-progress-rail,
+.bdc-sales-agent-rankings,
+.bdc-sales-insight-bars {
+  display: grid;
+  gap: 10px;
+}
+
+.bdc-sales-progress-rail__track {
+  position: relative;
+  height: 14px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(23, 32, 51, 0.08);
+}
+
+.bdc-sales-progress-rail__fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #209774, #6fca92);
+}
+
+.bdc-sales-progress-rail__marker {
+  position: absolute;
+  top: -3px;
+  bottom: -3px;
+  width: 3px;
+  border-radius: 999px;
+  background: #c76536;
+  box-shadow: 0 0 0 3px rgba(199, 101, 54, 0.14);
+  transform: translateX(-50%);
+}
+
+.bdc-sales-progress-rail__meta {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.bdc-sales-progress-rail__meta span {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.bdc-sales-status-bar {
+  display: flex;
+  height: 16px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(23, 32, 51, 0.08);
+}
+
+.bdc-sales-status-bar__segment.is-sold {
+  background: linear-gradient(90deg, #209774, #6fca92);
+}
+
+.bdc-sales-status-bar__segment.is-pending {
+  background: linear-gradient(90deg, #94a3b8, #d6dde8);
+}
+
+.bdc-sales-insight-bars__row {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 60px minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.bdc-sales-insight-bars__row span,
+.bdc-sales-insight-bars__row strong {
+  font-size: 0.92rem;
+}
+
+.bdc-sales-insight-bars__track,
+.bdc-sales-agent-rankings__bar {
+  height: 10px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(23, 32, 51, 0.08);
+}
+
+.bdc-sales-insight-bars__fill,
+.bdc-sales-agent-rankings__bar div {
+  height: 100%;
+  border-radius: 999px;
+}
+
+.bdc-sales-agent-rankings__item {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.bdc-sales-agent-rankings__copy {
+  display: grid;
+  gap: 4px;
+}
+
+.bdc-sales-agent-rankings__copy strong {
+  font-size: 0.98rem;
+}
+
+.bdc-sales-agent-rankings__copy small {
+  color: var(--muted);
+}
+
+.bdc-sales-agent-rankings__bar div {
+  background: linear-gradient(90deg, #c76536, #1f7cf6);
+}
+
 .bdc-sales-summary-panel {
   display: grid;
   gap: 16px;
@@ -1772,6 +2006,40 @@ th {
   gap: 4px;
 }
 
+.bdc-sales-entry-sheet__chips {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-top: 6px;
+}
+
+.bdc-sales-entry-sheet__chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  padding: 0 12px;
+  border-radius: 999px;
+  background: rgba(245, 249, 255, 0.84);
+  border: 1px solid rgba(31, 124, 246, 0.12);
+  color: #335277;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.7rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.bdc-sales-entry-sheet__chip.is-ready {
+  background: rgba(32, 151, 116, 0.11);
+  border-color: rgba(32, 151, 116, 0.18);
+  color: #16664d;
+}
+
+.bdc-sales-entry-sheet__chip.is-pending {
+  background: rgba(148, 163, 184, 0.12);
+  border-color: rgba(148, 163, 184, 0.18);
+  color: #4b5563;
+}
+
 .bdc-sales-entry-sheet__intro strong,
 .bdc-sales-entry-grid--header span {
   font-family: "IBM Plex Mono", monospace;
@@ -1800,6 +2068,7 @@ th {
 
 .bdc-sales-entry-cell {
   display: grid;
+  min-width: 0;
 }
 
 .bdc-sales-entry-cell textarea,
@@ -1935,11 +2204,11 @@ th {
 
 .bdc-dms-log-history-row {
   display: grid;
-  gap: 10px;
-  grid-template-columns: minmax(170px, 0.95fr) minmax(0, 1.1fr) minmax(0, 0.9fr) minmax(220px, 1fr);
+  gap: 8px;
+  grid-template-columns: 172px minmax(0, 1.1fr) minmax(0, 0.82fr) auto;
   align-items: center;
-  padding: 10px 12px;
-  border-radius: 16px;
+  padding: 8px 10px;
+  border-radius: 14px;
   border: 1px solid rgba(31, 124, 246, 0.16);
   background:
     linear-gradient(90deg, rgba(31, 124, 246, 0.1), rgba(31, 124, 246, 0.03) 16%, transparent 16%),
@@ -1964,22 +2233,38 @@ th {
 
 .bdc-dms-log-history-row__cell {
   display: grid;
+  min-width: 0;
 }
 
 .bdc-dms-log-history-row__cell input {
   width: 100%;
+  min-width: 0;
+}
+
+.bdc-dms-log-history-row__timestamp {
+  display: flex;
+  align-items: center;
+}
+
+.bdc-dms-log-history-row__timestamp strong {
+  font-size: 0.94rem;
+  line-height: 1.2;
 }
 
 .bdc-dms-log-history-row__actions {
   display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
+  gap: 6px;
+  flex-wrap: nowrap;
   justify-content: flex-end;
+  align-items: center;
+  min-width: 0;
 }
 
 .bdc-dms-log-history-row__actions button {
-  min-height: 40px;
-  min-width: 84px;
+  min-height: 36px;
+  min-width: 0;
+  padding: 0 12px;
+  white-space: nowrap;
 }
 
 .store-roster-grid {
@@ -5058,6 +5343,7 @@ button.special-card:hover:not(:disabled) {
   .traffic-analysis-list__item,
   .traffic-analysis-section__summary,
   .traffic-analysis-section__meta,
+  .bdc-sales-insight-card__header,
   .bdc-sales-summary-panel__header,
   .bdc-sales-agent-card__header {
     flex-direction: column;
@@ -5075,6 +5361,7 @@ button.special-card:hover:not(:disabled) {
   }
 
   .bdc-sales-kpi-grid,
+  .bdc-sales-insights-grid,
   .bdc-sales-metrics-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -5090,6 +5377,7 @@ button.special-card:hover:not(:disabled) {
 
   .bdc-dms-log-history-row {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+    align-items: start;
   }
 
   .bdc-dms-log-history-row--header {
@@ -5210,6 +5498,7 @@ button.special-card:hover:not(:disabled) {
   .freshup-layout,
   .fresh-up-form-grid,
   .bdc-sales-kpi-grid,
+  .bdc-sales-insights-grid,
   .bdc-sales-tracker-hero__controls,
   .bdc-sales-metrics-grid,
   .bdc-sales-entry-grid,
@@ -5253,9 +5542,31 @@ button.special-card:hover:not(:disabled) {
     grid-template-columns: 1fr;
   }
 
+  .bdc-sales-insights-panel__summary-chips {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .bdc-dms-log-history-row,
-  .bdc-dms-log-history-row__actions {
+  .bdc-dms-log-history-row__actions,
+  .bdc-sales-agent-rankings__item {
     grid-template-columns: 1fr;
+  }
+
+  .bdc-dms-log-history-row {
+    gap: 10px;
+  }
+
+  .bdc-dms-log-history-row__cell::before,
+  .bdc-dms-log-history-row__actions::before {
+    content: attr(data-label);
+    margin-bottom: 4px;
+    color: #7e8794;
+    font-family: "IBM Plex Mono", monospace;
+    font-size: 0.7rem;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
   }
 
   .bdc-dms-log-history-row__actions {
@@ -5529,7 +5840,8 @@ button.special-card:hover:not(:disabled) {
   }
 
   .service-notes-kpis,
-  .note-meta {
+  .note-meta,
+  .bdc-sales-insights-panel__summary-chips {
     grid-template-columns: 1fr;
   }
 
