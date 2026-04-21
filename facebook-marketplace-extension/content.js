@@ -423,6 +423,28 @@
     return node;
   }
 
+  function findPrimaryFieldMarker(hints) {
+    return findFieldMarkers(hints, { exact: true })[0] || findFieldMarkers(hints)[0] || null;
+  }
+
+  function readFieldGroupText(hints) {
+    const marker = findPrimaryFieldMarker(hints);
+    if (!marker) return "";
+    const scopes = [
+      marker.closest("label"),
+      marker.closest('[role="combobox"]'),
+      marker.closest('[role="button"]'),
+      marker.parentElement,
+      marker.parentElement?.parentElement,
+      marker.parentElement?.parentElement?.parentElement,
+    ].filter(Boolean);
+    for (const scope of scopes) {
+      const text = normalizeText(scope.textContent || scope.getAttribute?.("aria-label") || "");
+      if (text) return text;
+    }
+    return normalizeText(marker.textContent || "");
+  }
+
   function vehicleTypeCandidates() {
     return ["Car/Truck", "Car / Truck", "Cars & Trucks", "Car", "Truck"];
   }
@@ -430,6 +452,13 @@
   function isVehicleTypeReady(value) {
     const text = normalizeText(value).toLowerCase();
     return text === "car/truck" || text === "car / truck" || text === "cars & trucks" || text === "car" || text === "truck";
+  }
+
+  function vehicleTypeLooksReady() {
+    const triggerValue = normalizeText(getComboboxValue(findSelectTrigger(["vehicle type"])));
+    if (isVehicleTypeReady(triggerValue)) return true;
+    const groupText = readFieldGroupText(["vehicle type"]);
+    return vehicleTypeCandidates().some((candidate) => valueMatches(groupText, candidate));
   }
 
   async function selectOption(hints, value, fallbacks = []) {
@@ -480,19 +509,17 @@
 
   async function pickVehicleType(value) {
     const trigger = findSelectTrigger(["vehicle type"]);
-    if (!trigger) return false;
-    const currentValue = normalizeText(getComboboxValue(trigger));
-    if (isVehicleTypeReady(currentValue)) {
+    if (vehicleTypeLooksReady()) {
       return true;
     }
+    if (!trigger) return false;
     const candidates = vehicleTypeCandidates();
     const changed = await selectOption(["vehicle type"], candidates[0], candidates.slice(1));
     if (!changed) {
-      return false;
+      return vehicleTypeLooksReady();
     }
     await wait(1100);
-    const nextValue = normalizeText(getComboboxValue(findSelectTrigger(["vehicle type"]) || trigger));
-    return isVehicleTypeReady(nextValue);
+    return vehicleTypeLooksReady();
   }
 
   async function pickBodyStyle(value) {
@@ -1028,22 +1055,22 @@
     const modelValue = normalizeText(vehicle.model || dealerDraft.raw?.model || "");
     const mileageValue = clampMarketplaceMileage(vehicle.mileage);
 
-    const vehicleTypeOk = await pickVehicleType(vehicle.body_style || "Sedan");
-    results.push(vehicleTypeOk ? "Filled vehicle type" : "Could not find vehicle type field");
+    let vehicleTypeOk = await pickVehicleType(vehicle.body_style || "Sedan");
+    if (!vehicleTypeOk && vehicleTypeLooksReady()) {
+      vehicleTypeOk = true;
+    }
+    results.push(vehicleTypeOk ? "Filled vehicle type" : "Could not confirm vehicle type field");
     if (!vehicleTypeOk) {
-      const trigger = findSelectTrigger(["vehicle type"]);
-      const currentValue = normalizeText(getComboboxValue(trigger));
-      if (!isVehicleTypeReady(currentValue)) {
-        setStatus(
-          [
-            "Facebook vehicle type was not set to Car/Truck.",
-            "The rest of the fields were skipped so Facebook does not wipe them afterward.",
-            "Open the Vehicle type dropdown first, then click Apply Saved Draft again.",
-          ],
-          "warning"
-        );
-        return { ok: false, appliedCount: 0, failedCount: 1 };
-      }
+      const currentValue = normalizeText(getComboboxValue(findSelectTrigger(["vehicle type"]))) || readFieldGroupText(["vehicle type"]);
+      setStatus(
+        [
+          "Facebook vehicle type could not be confirmed as Car/Truck.",
+          currentValue ? `Detected around that field: ${currentValue}` : "Detected around that field: blank",
+          "The rest of the fields were skipped so Facebook does not wipe them afterward.",
+        ],
+        "warning"
+      );
+      return { ok: false, appliedCount: 0, failedCount: 1 };
     }
     await wait(1200);
 

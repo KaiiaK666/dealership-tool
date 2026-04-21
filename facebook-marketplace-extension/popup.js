@@ -180,41 +180,6 @@ function buildDraft(vehicle, template) {
   };
 }
 
-function safeFilePart(value) {
-  return String(value || "")
-    .trim()
-    .replace(/[<>:"/\\|?*\x00-\x1F]/g, "")
-    .replace(/\s+/g, "-")
-    .slice(0, 48);
-}
-
-async function downloadDraftImages(draft) {
-  const images = Array.isArray(draft?.images) ? draft.images.slice(0, 10) : [];
-  if (!images.length) return 0;
-  let completed = 0;
-  const prefix = [draft.vehicle?.year, draft.vehicle?.make, draft.vehicle?.model]
-    .map(safeFilePart)
-    .filter(Boolean)
-    .join("-");
-  for (let index = 0; index < images.length; index += 1) {
-    const url = images[index];
-    try {
-      const extensionMatch = String(url).match(/\.([a-zA-Z0-9]{3,4})(?:[?#]|$)/);
-      const extension = extensionMatch?.[1] || "jpg";
-      await chrome.downloads.download({
-        url,
-        filename: `MarketplaceHelper/${prefix || "vehicle"}-${index + 1}.${extension}`,
-        conflictAction: "uniquify",
-        saveAs: false,
-      });
-      completed += 1;
-    } catch {
-      // Keep going so one failed image does not cancel the rest.
-    }
-  }
-  return completed;
-}
-
 function renderDraft(draft) {
   els.draftTitle.textContent = draft.title || "No draft yet";
   els.draftPrice.textContent = draft.price ? `Price: $${draft.price}` : "";
@@ -319,13 +284,8 @@ els.quickPost.addEventListener("click", async () => {
     const draft = await buildDraftForTab(apiBase);
     await saveDraftState(apiBase, draft, true);
     renderDraft(draft);
-    const downloadedCount = await downloadDraftImages(draft);
     await openMarketplace(true);
-    setStatus(
-      downloadedCount
-        ? `Marketplace opened. The helper will try to fill the Facebook form automatically and downloaded ${downloadedCount} photo(s).`
-        : "Marketplace opened. The helper will try to fill the Facebook form automatically."
-    );
+    setStatus("Marketplace opened. The helper will try to fill the Facebook form automatically.");
   } catch (error) {
     setStatus(error.message || "Quick Post failed.");
   }

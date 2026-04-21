@@ -29,4 +29,4 @@ It does not auto-submit the listing.
 
 Notes:
 - No extra plugin is required. Just reload the extension after updates in `chrome://extensions`.
-- Version `0.4.0` adds a background worker so inventory photos are downloaded by the extension instead of by the Facebook page.
+- Version `0.4.1` keeps photo handling inside the extension and removes the old Quick Post JPG downloads from the browser.
