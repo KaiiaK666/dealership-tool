@@ -1534,6 +1534,54 @@ th {
   align-items: end;
 }
 
+.bdc-sales-tracker-hero__copy,
+.bdc-sales-tracker-hero__side {
+  display: grid;
+  gap: 14px;
+}
+
+.bdc-sales-tracker-hero__copy h2,
+.bdc-sales-summary-panel h3 {
+  letter-spacing: -0.03em;
+}
+
+.bdc-sales-tracker-hero__copy .admin-note,
+.bdc-sales-summary-panel .admin-note {
+  margin: 0;
+}
+
+.bdc-sales-tracker-hero__meta,
+.bdc-sales-inline-summary {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.bdc-sales-meta-chip,
+.bdc-sales-inline-summary span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 34px;
+  padding: 0 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(31, 37, 43, 0.08);
+  background: rgba(255, 255, 255, 0.72);
+  color: #334155;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.bdc-sales-meta-chip {
+  background: rgba(247, 241, 232, 0.9);
+}
+
+.bdc-sales-inline-summary--soft span {
+  background: rgba(245, 249, 255, 0.94);
+  border-color: rgba(31, 124, 246, 0.12);
+}
+
 .bdc-sales-tracker-hero__controls {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   align-items: end;
@@ -1541,6 +1589,77 @@ th {
 
 .bdc-sales-tracker-hero__controls button {
   min-height: 48px;
+}
+
+.bdc-sales-kpi-grid {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+}
+
+.bdc-sales-kpi {
+  display: grid;
+  gap: 10px;
+  min-height: 152px;
+  padding: 18px;
+  border-radius: 22px;
+  border: 1px solid rgba(31, 37, 43, 0.08);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.95), rgba(247, 241, 232, 0.88));
+  box-shadow: var(--card-shadow);
+}
+
+.bdc-sales-kpi--primary {
+  background:
+    radial-gradient(circle at top right, rgba(199, 101, 54, 0.16), transparent 38%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.97), rgba(249, 244, 236, 0.92));
+}
+
+.bdc-sales-kpi.is-warning {
+  background:
+    radial-gradient(circle at top right, rgba(196, 102, 52, 0.14), transparent 40%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.97), rgba(253, 245, 238, 0.94));
+  border-color: rgba(196, 102, 52, 0.18);
+}
+
+.bdc-sales-kpi.is-positive {
+  background:
+    radial-gradient(circle at top right, rgba(32, 151, 116, 0.14), transparent 40%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.97), rgba(241, 251, 246, 0.94));
+  border-color: rgba(32, 151, 116, 0.16);
+}
+
+.bdc-sales-kpi__label,
+.bdc-sales-summary-panel__header {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.bdc-sales-kpi__label span {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.74rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #7e8794;
+}
+
+.bdc-sales-kpi__label small,
+.bdc-sales-kpi small {
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.bdc-sales-kpi strong {
+  font-size: clamp(1.9rem, 2.3vw, 2.6rem);
+  line-height: 0.95;
+  letter-spacing: -0.05em;
+}
+
+.bdc-sales-summary-panel {
+  display: grid;
+  gap: 16px;
 }
 
 .bdc-sales-agent-grid {
@@ -1552,6 +1671,10 @@ th {
   display: flex;
   gap: 10px;
   flex-wrap: wrap;
+}
+
+.bdc-sales-view-toggle button {
+  min-height: 42px;
 }
 
 .bdc-sales-view-toggle .secondary.is-active {
@@ -4823,6 +4946,7 @@ button.special-card:hover:not(:disabled) {
   .traffic-analysis-list__item,
   .traffic-analysis-section__summary,
   .traffic-analysis-section__meta,
+  .bdc-sales-summary-panel__header,
   .bdc-sales-agent-card__header,
   .bdc-sales-entry__top {
     flex-direction: column;
@@ -4839,8 +4963,9 @@ button.special-card:hover:not(:disabled) {
     grid-template-columns: 1fr;
   }
 
+  .bdc-sales-kpi-grid,
   .bdc-sales-metrics-grid {
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .bdc-sales-entry-create {
@@ -4960,6 +5085,7 @@ button.special-card:hover:not(:disabled) {
   .freshup-hero,
   .freshup-layout,
   .fresh-up-form-grid,
+  .bdc-sales-kpi-grid,
   .bdc-sales-tracker-hero__controls,
   .bdc-sales-metrics-grid,
   .bdc-sales-entry-create,
@@ -4990,6 +5116,18 @@ button.special-card:hover:not(:disabled) {
   .traffic-toolbar__actions > *,
   .traffic-toolbar__controls > * {
     width: 100%;
+  }
+
+  .bdc-sales-view-toggle {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+  }
+
+  .bdc-sales-meta-chip,
+  .bdc-sales-inline-summary span {
+    width: 100%;
+    justify-content: center;
   }
 
   .calendar-board,
