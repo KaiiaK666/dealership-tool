@@ -4551,7 +4551,7 @@ export default function App() {
               <div className="panel marketplace-card">
                 <span className="eyebrow">Step 1</span>
                 <h3>Install the Chrome extension once</h3>
-                    <a className="asset-link" href="/facebook-marketplace-extension.zip?v=0.4.2" download>
+                    <a className="asset-link" href="/facebook-marketplace-extension.zip?v=0.5.0" download>
                   Download Extension Zip
                 </a>
                 <div className="marketplace-helper-strip">

@@ -1,6 +1,10 @@
 (function () {
   const ROOT_ID = "dealer-marketplace-helper";
   const STATUS_ID = "dealer-marketplace-helper-status";
+  const HISTORY_KEY = "dealerPostHistory";
+  const AUTO_PUBLISH_KEY = "dealerAutoPublishEnabled";
+  const HISTORY_LIMIT = 20;
+  const EXTENSION_VERSION = chrome.runtime?.getManifest?.()?.version || "dev";
   let autoApplyRunning = false;
   let lastUrl = location.href;
 
@@ -17,6 +21,18 @@
     const target = simplifyText(candidate);
     if (!current || !target) return false;
     return current === target || current.includes(target) || target.includes(current);
+  }
+
+  function checkboxLikeSelector() {
+    return 'input[type="checkbox"], [role="checkbox"], [role="switch"], [aria-checked], [aria-pressed]';
+  }
+
+  function isCheckboxLikeChecked(node) {
+    if (!node) return false;
+    if (typeof node.checked === "boolean") return node.checked;
+    if (node.getAttribute?.("aria-checked")) return node.getAttribute("aria-checked") === "true";
+    if (node.getAttribute?.("aria-pressed")) return node.getAttribute("aria-pressed") === "true";
+    return node.hasAttribute?.("checked") || false;
   }
 
   function clampMarketplaceMileage(value) {
@@ -170,6 +186,19 @@
     return findEditable(hints, { exact: true }) || findEditable(hints);
   }
 
+  function isLikelyFieldTrigger(node) {
+    if (!node || !isVisible(node)) return false;
+    const tagName = String(node.tagName || "").toUpperCase();
+    const role = String(node.getAttribute?.("role") || "").toLowerCase();
+    const type = String(node.getAttribute?.("type") || "").toLowerCase();
+    if (["hidden", "file", "checkbox", "radio", "submit"].includes(type)) return false;
+    const text = normalizeText(
+      [node.textContent || "", node.value || "", node.getAttribute?.("aria-label") || ""].join(" ")
+    ).toLowerCase();
+    if (/^(next|publish|message|apply saved draft|add photos|save draft|try it)$/i.test(text)) return false;
+    return tagName === "BUTTON" || tagName === "INPUT" || role === "button" || role === "combobox";
+  }
+
   function measureNodeDistance(source, target) {
     if (!source || !target) return Number.POSITIVE_INFINITY;
     const sourceBox = source.getBoundingClientRect();
@@ -230,24 +259,46 @@
       .sort((left, right) => left.distance - right.distance)[0]?.node || null;
   }
 
+  function checkboxDistanceFromMarker(marker, node) {
+    const markerBox = marker.getBoundingClientRect();
+    const box = node.getBoundingClientRect();
+    const sameBandPenalty = Math.abs(box.top - markerBox.top) < 80 ? 0 : 400;
+    return (
+      Math.abs(box.left - markerBox.right) +
+      Math.abs(box.top - markerBox.top) +
+      sameBandPenalty
+    );
+  }
+
   function findCleanTitleCheckbox() {
     const markers = Array.from(document.querySelectorAll("div, span, p, label"))
       .filter((node) => isVisible(node) && /clean title/i.test(normalizeText(node.textContent || "")));
     for (const marker of markers) {
-      const markerBox = marker.getBoundingClientRect();
-      const candidates = Array.from(document.querySelectorAll('input[type="checkbox"], [role="checkbox"], [aria-checked]'))
-        .filter(isVisible)
-        .map((node) => {
-          const box = node.getBoundingClientRect();
-          const distance =
-            Math.abs(box.left - markerBox.right) +
-            Math.abs(box.top - markerBox.top);
-          return { node, distance };
-        })
-        .sort((left, right) => left.distance - right.distance);
-      if (candidates[0]?.node) {
-        return candidates[0].node;
+      const scopes = [
+        marker.closest("label"),
+        marker.parentElement,
+        marker.parentElement?.parentElement,
+        marker.parentElement?.parentElement?.parentElement,
+      ].filter(Boolean);
+      for (const scope of scopes) {
+        const localCandidate = Array.from(scope.querySelectorAll(checkboxLikeSelector()))
+          .filter((node) => isVisible(scope) && (isVisible(node) || node.tagName === "INPUT"))
+          .map((node) => ({ node, distance: checkboxDistanceFromMarker(marker, node) }))
+          .sort((left, right) => left.distance - right.distance)[0]?.node;
+        if (localCandidate) return localCandidate;
       }
+      const globalCandidate = Array.from(document.querySelectorAll(checkboxLikeSelector()))
+        .filter((node) => isVisible(node) || node.tagName === "INPUT")
+        .map((node) => ({ node, distance: checkboxDistanceFromMarker(marker, node) }))
+        .sort((left, right) => left.distance - right.distance)[0]?.node;
+      if (globalCandidate) return globalCandidate;
+      const rowFallback =
+        marker.closest("label") ||
+        marker.parentElement?.querySelector?.('button, [role="button"]') ||
+        marker.parentElement?.parentElement?.querySelector?.('button, [role="button"]') ||
+        marker.parentElement ||
+        marker;
+      if (rowFallback) return rowFallback;
     }
     return null;
   }
@@ -257,8 +308,8 @@
       const cleanTitleCheckbox = findCleanTitleCheckbox();
       if (cleanTitleCheckbox) return cleanTitleCheckbox;
     }
-    return Array.from(document.querySelectorAll('input[type="checkbox"]')).find((node) => {
-      if (!isVisible(node) && node.closest("label") && !isVisible(node.closest("label"))) return false;
+    return Array.from(document.querySelectorAll(checkboxLikeSelector())).find((node) => {
+      if (!isVisible(node) && node.tagName === "INPUT" && node.closest("label") && !isVisible(node.closest("label"))) return false;
       return matchesHint(collectFieldText(node), hints, false);
     });
   }
@@ -282,16 +333,30 @@
 
   function setNativeChecked(node, checked) {
     if (!node) return false;
-    if (node.getAttribute("role") === "checkbox" || node.hasAttribute("aria-checked")) {
+    if (
+      node.getAttribute("role") === "checkbox" ||
+      node.getAttribute("role") === "switch" ||
+      node.hasAttribute("aria-checked") ||
+      node.hasAttribute("aria-pressed")
+    ) {
       dispatchMouseSequence(node);
-      return String(node.getAttribute("aria-checked")) === String(checked);
+      return isCheckboxLikeChecked(node) === checked;
     }
+    if (String(node.tagName || "").toUpperCase() !== "INPUT") return false;
     const descriptor = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "checked");
     if (!descriptor?.set) return false;
     descriptor.set.call(node, checked);
     node.dispatchEvent(new Event("input", { bubbles: true }));
     node.dispatchEvent(new Event("change", { bubbles: true }));
     return node.checked === checked;
+  }
+
+  function getCheckboxTarget(checkbox) {
+    return (
+      checkbox?.closest('label, [role="checkbox"], [role="switch"], [role="button"], button') ||
+      checkbox?.parentElement ||
+      checkbox
+    );
   }
 
   function setNodeValue(node, value) {
@@ -327,7 +392,17 @@
     const nearbyMarker = findFieldMarkers(hints, { exact: true })[0] || findFieldMarkers(hints)[0];
     const nearbyTrigger = findControlNearMarker(nearbyMarker, triggerSelector);
     if (nearbyTrigger) return nearbyTrigger;
-    return exactCandidates.find((node) => matchesHint(collectFieldText(node), hints, false));
+    const fallbackSelector = 'button, [role="button"], input, [tabindex="0"], [tabindex="-1"]';
+    const nearbyFallback = findControlNearMarker(nearbyMarker, fallbackSelector);
+    if (isLikelyFieldTrigger(nearbyFallback)) return nearbyFallback;
+    return (
+      exactCandidates.find((node) => matchesHint(collectFieldText(node), hints, false)) ||
+      Array.from(document.querySelectorAll(fallbackSelector)).find((node) => {
+        if (!isLikelyFieldTrigger(node)) return false;
+        return matchesHint(collectFieldText(node), hints, false);
+      }) ||
+      null
+    );
   }
 
   function findOptionByText(values, root = document) {
@@ -416,6 +491,15 @@
     return [normalizeText(value)];
   }
 
+  function transmissionCandidates(value) {
+    const source = normalizeText(value).toLowerCase();
+    if (!source) return [];
+    if (source.includes("automatic")) return ["Automatic", "Automatic transmission"];
+    if (source.includes("manual")) return ["Manual", "Manual transmission"];
+    if (source.includes("cvt")) return ["Automatic", "CVT"];
+    return [normalizeText(value)];
+  }
+
   function scrollFieldIntoView(hints) {
     const node =
       findSelectTrigger(hints) ||
@@ -447,6 +531,23 @@
       if (text) return text;
     }
     return normalizeText(marker.textContent || "");
+  }
+
+  function escapeRegex(value) {
+    return String(value || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  }
+
+  function extractFieldGroupValue(hints) {
+    const source = readFieldGroupText(hints);
+    if (!source) return "";
+    for (const hint of hints) {
+      const pattern = new RegExp(`^${escapeRegex(normalizeText(hint))}\\s*:?\\s*`, "i");
+      const stripped = normalizeText(source.replace(pattern, ""));
+      if (stripped && !valueMatches(stripped, hint)) {
+        return stripped;
+      }
+    }
+    return "";
   }
 
   function vehicleTypeCandidates() {
@@ -612,19 +713,20 @@
   }
 
   async function ensureCheckboxChecked(hints, checked, results, successLabel, failureLabel) {
-    const checkbox = findCheckboxByHints(hints);
+    let checkbox = findCheckboxByHints(hints);
     if (!checkbox) {
       results.push(failureLabel);
       return false;
     }
-    if (checkbox.checked === checked) {
+    if (isCheckboxLikeChecked(checkbox) === checked) {
       results.push(successLabel);
       return true;
     }
-    const target = checkbox.closest('label, [role="checkbox"], [role="button"]') || checkbox.parentElement || checkbox;
+    const target = getCheckboxTarget(checkbox);
     dispatchMouseSequence(target);
     await wait(250);
-    if (checkbox.checked === checked) {
+    checkbox = findCheckboxByHints(hints) || checkbox;
+    if (isCheckboxLikeChecked(checkbox) === checked) {
       results.push(successLabel);
       return true;
     }
@@ -677,6 +779,7 @@
 
   async function fillAdditionalVehicleDetails(vehicle, results) {
     const fuelCandidates = fuelTypeCandidates(vehicle.fuel_type || "");
+    const transmissionOptions = transmissionCandidates(vehicle.transmission || "");
     await fillSelectField(
       ["body style"],
       vehicle.body_style || "Sedan",
@@ -709,10 +812,11 @@
     );
     await fillSelectField(
       ["transmission"],
-      vehicle.transmission || "",
+      transmissionOptions[0] || vehicle.transmission || "",
       results,
       "Filled transmission",
-      "Could not find transmission field"
+      "Could not find transmission field",
+      transmissionOptions.slice(1)
     );
   }
 
@@ -803,7 +907,12 @@
   async function assignFilesInPageContext(input, files) {
     if (!input || !files.length) return false;
     const targetId = `dealer-upload-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const dropTarget = findPhotoDropTarget(input);
+    const dropTargetId = dropTarget ? `dealer-drop-${Date.now()}-${Math.random().toString(36).slice(2, 8)}` : "";
     input.setAttribute("data-dealer-upload-target", targetId);
+    if (dropTargetId) {
+      dropTarget?.setAttribute("data-dealer-upload-drop-target", dropTargetId);
+    }
     const payload = await Promise.all(
       files.map(async (file) => ({
         name: file.name,
@@ -821,6 +930,7 @@
       script.textContent = `
         (async () => {
           const input = document.querySelector('[data-dealer-upload-target="${targetId}"]');
+          const dropTarget = ${dropTargetId ? `document.querySelector('[data-dealer-upload-drop-target="${dropTargetId}"]')` : "null"};
           if (!input) return;
           const files = [];
           for (const item of ${JSON.stringify(payload)}) {
@@ -836,6 +946,23 @@
           } else {
             input.files = dataTransfer.files;
           }
+          const targets = [dropTarget, input].filter(Boolean);
+          const dispatchWithTransfer = (target, type) => {
+            try {
+              target.dispatchEvent(new DragEvent(type, { bubbles: true, cancelable: true, dataTransfer }));
+            } catch {
+              const event = new Event(type, { bubbles: true, cancelable: true });
+              event.dataTransfer = dataTransfer;
+              target.dispatchEvent(event);
+            }
+          };
+          for (const target of targets) {
+            dispatchWithTransfer(target, "dragenter");
+            dispatchWithTransfer(target, "dragover");
+            dispatchWithTransfer(target, "drop");
+            target.dispatchEvent(new Event("input", { bubbles: true }));
+            target.dispatchEvent(new Event("change", { bubbles: true }));
+          }
           input.dispatchEvent(new Event("input", { bubbles: true }));
           input.dispatchEvent(new Event("change", { bubbles: true }));
         })().finally(() => {
@@ -846,7 +973,29 @@
       setTimeout(resolve, 700);
     });
     input.removeAttribute("data-dealer-upload-target");
+    if (dropTargetId) {
+      dropTarget?.removeAttribute("data-dealer-upload-drop-target");
+    }
     return Number(input.files?.length || 0) > 0;
+  }
+
+  function getPhotoPreviewCount() {
+    const input = findImageInput();
+    const dropTarget = findPhotoDropTarget(input);
+    const scopes = [dropTarget, dropTarget?.parentElement, dropTarget?.parentElement?.parentElement].filter(Boolean);
+    let best = 0;
+    for (const scope of scopes) {
+      const images = Array.from(scope.querySelectorAll("img")).filter((node) => {
+        if (!isVisible(node)) return false;
+        const altText = normalizeText(node.alt || "");
+        if (/map|seller|profile|avatar|location/i.test(altText)) return false;
+        const width = Number(node.naturalWidth || node.width || 0);
+        const height = Number(node.naturalHeight || node.height || 0);
+        return width >= 80 && height >= 60;
+      });
+      best = Math.max(best, images.length);
+    }
+    return best;
   }
 
   function getPhotoCount() {
@@ -864,15 +1013,19 @@
     return best;
   }
 
+  function getRobustPhotoCount() {
+    return Math.max(getPhotoCount(), getPhotoPreviewCount());
+  }
+
   async function waitForPhotoUpload(previousCount, minimumAdded) {
-    for (let attempt = 0; attempt < 18; attempt += 1) {
-      const count = getPhotoCount();
+    for (let attempt = 0; attempt < 24; attempt += 1) {
+      const count = getRobustPhotoCount();
       if (count >= previousCount + minimumAdded || count > previousCount) {
         return count;
       }
       await wait(650);
     }
-    return getPhotoCount();
+    return getRobustPhotoCount();
   }
 
   async function uploadImages(imageUrls) {
@@ -883,7 +1036,7 @@
       input = findImageInput();
     }
     if (!input || !Array.isArray(imageUrls) || !imageUrls.length) return { ok: false, uploaded: 0 };
-    const startingCount = getPhotoCount();
+    const startingCount = getRobustPhotoCount();
     const dataTransfer = new DataTransfer();
     let uploaded = 0;
     let fetchError = "";
@@ -970,7 +1123,9 @@
 
   function getSelectValue(hints) {
     const trigger = findSelectTrigger(hints);
-    return normalizeText(getComboboxValue(trigger));
+    const triggerValue = normalizeText(getComboboxValue(trigger));
+    if (triggerValue) return triggerValue;
+    return extractFieldGroupValue(hints);
   }
 
   function getFormSnapshot() {
@@ -984,11 +1139,11 @@
       mileage: getTextValue(["mileage", "odometer"]),
       description: getTextValue(["description"]),
       bodyStyle: getSelectValue(["body style"]),
-      cleanTitle: Boolean(cleanTitleCheckbox?.checked || cleanTitleCheckbox?.getAttribute?.("aria-checked") === "true"),
+      cleanTitle: isCheckboxLikeChecked(cleanTitleCheckbox),
       condition: getSelectValue(["condition"]),
       fuelType: getSelectValue(["fuel type"]),
       transmission: getSelectValue(["transmission"]),
-      photos: getPhotoCount(),
+      photos: getRobustPhotoCount(),
     };
   }
 
@@ -1033,6 +1188,52 @@
     node.style.color = colors[tone] || colors.neutral;
   }
 
+  function buildHistoryEntry(draft, status, detail, extra = {}) {
+    return {
+      id: `history-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      status,
+      detail: normalizeText(detail),
+      title: normalizeText(draft?.title || [draft?.vehicle?.year, draft?.vehicle?.make, draft?.vehicle?.model].filter(Boolean).join(" ")) || "Vehicle draft",
+      price: draft?.price ? `$${String(draft.price).replace(/[^0-9]/g, "").replace(/\B(?=(\d{3})+(?!\d))/g, ",")}` : "",
+      stock: normalizeText(draft?.vehicle?.stock || ""),
+      vin: normalizeText(draft?.vehicle?.vin || ""),
+      url: draft?.vehicle?.url || "",
+      facebook_url: location.href,
+      created_at: new Date().toISOString(),
+      ...extra,
+    };
+  }
+
+  async function appendHistoryEntry(entry) {
+    const saved = await chrome.storage.local.get([HISTORY_KEY]);
+    const history = Array.isArray(saved[HISTORY_KEY]) ? saved[HISTORY_KEY] : [];
+    await chrome.storage.local.set({
+      [HISTORY_KEY]: [entry, ...history].slice(0, HISTORY_LIMIT),
+    });
+  }
+
+  async function getAutoPublishEnabled() {
+    const saved = await chrome.storage.local.get([AUTO_PUBLISH_KEY]);
+    return saved[AUTO_PUBLISH_KEY] !== false;
+  }
+
+  function wirePublishTracking(dealerDraft) {
+    const publishButton = findPublishButton();
+    if (!publishButton || publishButton.dataset.dealerPublishTracked === "true") return;
+    publishButton.dataset.dealerPublishTracked = "true";
+    publishButton.addEventListener("click", () => {
+      const mode = publishButton.getAttribute("data-dealer-publish-mode") || "manual";
+      publishButton.removeAttribute("data-dealer-publish-mode");
+      appendHistoryEntry(
+        buildHistoryEntry(
+          dealerDraft,
+          mode === "auto" ? "published" : "publish_clicked",
+          mode === "auto" ? "Facebook publish was clicked automatically." : "Facebook publish was clicked manually."
+        )
+      );
+    });
+  }
+
   async function readDraft() {
     const saved = await chrome.storage.local.get(["dealerDraft"]);
     return saved.dealerDraft || null;
@@ -1058,6 +1259,7 @@
     const vehicle = dealerDraft.vehicle || {};
     const modelValue = normalizeText(vehicle.model || dealerDraft.raw?.model || "");
     const mileageValue = clampMarketplaceMileage(vehicle.mileage);
+    const autoPublishEnabled = await getAutoPublishEnabled();
 
     let vehicleTypeOk = await pickVehicleType(vehicle.body_style || "Sedan");
     if (!vehicleTypeOk && vehicleTypeLooksReady()) {
@@ -1216,12 +1418,14 @@
       snapshot = getFormSnapshot();
     }
     if (!snapshot.transmission && vehicle.transmission) {
+      const transmissionOptions = transmissionCandidates(vehicle.transmission);
       await fillSelectField(
         ["transmission"],
-        vehicle.transmission,
+        transmissionOptions[0] || vehicle.transmission,
         results,
         "Retried transmission",
-        "Transmission stayed blank"
+        "Transmission stayed blank",
+        transmissionOptions.slice(1)
       );
       snapshot = getFormSnapshot();
     }
@@ -1238,6 +1442,22 @@
         await fillTextField(["description"], dealerDraft.description || "", results, "Filled final description", "Could not find final description field");
         if (findPublishButton()) {
           results.push("Reached final publish screen");
+          wirePublishTracking(dealerDraft);
+          if (autoPublishEnabled) {
+            const publishButton = findPublishButton();
+            if (publishButton && !isDisabledButton(publishButton)) {
+              publishButton.setAttribute("data-dealer-publish-mode", "auto");
+              publishButton.scrollIntoView?.({ block: "center", inline: "nearest", behavior: "instant" });
+              dispatchMouseSequence(publishButton);
+              results.push("Clicked publish automatically");
+            } else {
+              warningLines.push("Auto publish was enabled, but Facebook's publish button was not ready.");
+            }
+          } else {
+            await appendHistoryEntry(
+              buildHistoryEntry(dealerDraft, "ready", "Facebook listing reached the final review step and is waiting for publish.")
+            );
+          }
         } else {
           warningLines.push("Moved past step one, but the final publish button was not found yet.");
         }
@@ -1253,6 +1473,16 @@
     const statusLines = auto
       ? ["Auto-fill attempted on Facebook Marketplace.", ...results, ...warningLines]
       : [...results, ...warningLines];
+
+    if (warningLines.length && !results.includes("Clicked publish automatically") && !findPublishButton()) {
+      await appendHistoryEntry(
+        buildHistoryEntry(
+          dealerDraft,
+          "needs_review",
+          warningLines[warningLines.length - 1] || "Facebook still needs manual review before publish."
+        )
+      );
+    }
 
     setStatus(statusLines, failedCount ? "warning" : "success");
     return { ok: appliedCount > 0, appliedCount, failedCount };
@@ -1312,7 +1542,7 @@
     root.style.width = "280px";
 
     const label = document.createElement("div");
-    label.textContent = "Dealer Marketplace Helper";
+    label.textContent = `Dealer Marketplace Helper v${EXTENSION_VERSION}`;
     label.style.fontSize = "11px";
     label.style.letterSpacing = "0.12em";
     label.style.textTransform = "uppercase";
@@ -1348,6 +1578,11 @@
   function handlePageChange() {
     if (!/facebook\.com\/marketplace\//i.test(location.href)) return;
     mountPanel();
+    if (findPublishButton()) {
+      readDraft().then((dealerDraft) => {
+        if (dealerDraft) wirePublishTracking(dealerDraft);
+      });
+    }
     maybeAutoApply();
   }
 

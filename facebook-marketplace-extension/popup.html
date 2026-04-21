@@ -10,15 +10,19 @@
     <main class="app">
       <div class="brand">
         <img src="icons/icon128.png" alt="Marketplace helper icon" class="brand-icon" />
-        <div>
-          <span class="eyebrow">Marketplace Helper</span>
+        <div class="brand-copy">
+          <div class="brand-topline">
+            <span class="eyebrow">Marketplace Helper</span>
+            <span id="versionBadge" class="version-badge">v0.0.0</span>
+          </div>
           <h1>Quick post vehicle</h1>
+          <p class="subtle">Builds the draft, fills Facebook Marketplace, and keeps a local posting history.</p>
         </div>
       </div>
 
       <p class="lead">
-        While you're on a Bert Ogden vehicle page, click once. The helper builds the draft, opens Facebook Marketplace,
-        downloads the vehicle photos, and tries to fill the form automatically.
+        While you're on a Bert Ogden vehicle page, click once. The helper builds a stronger sales description, opens
+        Facebook Marketplace, fills the form, and can auto-publish when the final review step is ready.
       </p>
 
       <section class="steps">
@@ -31,9 +35,19 @@
           <span>The helper saves the draft and opens Facebook Marketplace for you.</span>
         </div>
         <div class="step">
-          <strong>3. Review and publish</strong>
-          <span>Double-check Facebook's form, add images if needed, and finish the post.</span>
+          <strong>3. Let it finish</strong>
+          <span>It will try to complete step one, move forward, and optionally click Publish automatically.</span>
         </div>
+      </section>
+
+      <section class="toggle-card">
+        <label class="toggle">
+          <input id="autoPublish" type="checkbox" />
+          <span>
+            <strong>Auto publish on final review</strong>
+            <small>Leave this on if you want the helper to click Facebook's Publish button when the review step is ready.</small>
+          </span>
+        </label>
       </section>
 
       <div class="actions actions--stack">
@@ -41,6 +55,10 @@
         <div class="actions">
           <button id="captureCurrentTab" type="button" class="secondary">Capture Only</button>
           <button id="openMarketplace" type="button" class="secondary">Open Marketplace</button>
+        </div>
+        <div class="actions">
+          <button id="reloadExtension" type="button" class="secondary">Reload Extension</button>
+          <button id="clearHistory" type="button" class="ghost">Clear History</button>
         </div>
       </div>
 
@@ -61,8 +79,17 @@
         <pre id="draftDescription"></pre>
       </section>
 
+      <section class="history">
+        <div class="history-head">
+          <span class="eyebrow">Posting History</span>
+          <small>Stored only in this Chrome profile.</small>
+        </div>
+        <div id="historyEmpty" class="empty-state">No Facebook posting history yet.</div>
+        <div id="historyList" class="history-list"></div>
+      </section>
+
       <p id="status" class="status"></p>
     </main>
     <script src="popup.js"></script>
   </body>
-  </html>
+</html>
