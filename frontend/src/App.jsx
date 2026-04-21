@@ -1672,6 +1672,32 @@ export default function App() {
     (maxValue, agent) => Math.max(maxValue, Number(agent.sold_count || 0) + Number(agent.entries?.length || 0)),
     0
   );
+  const trackerLeaderboardAgents = [...trackerAgents].sort((left, right) => {
+    const actualSoldDelta = Number(right.actual_sold || 0) - Number(left.actual_sold || 0);
+    if (actualSoldDelta) return actualSoldDelta;
+    const confirmedDelta = Number(right.sold_count || 0) - Number(left.sold_count || 0);
+    if (confirmedDelta) return confirmedDelta;
+    const shownDelta = Number(right.appointments_shown || 0) - Number(left.appointments_shown || 0);
+    if (shownDelta) return shownDelta;
+    const pendingDelta = Number(right.entries?.length || 0) - Number(left.entries?.length || 0);
+    if (pendingDelta) return pendingDelta;
+    return String(left.agent_name || "").localeCompare(String(right.agent_name || ""), undefined, { sensitivity: "base" });
+  });
+  const trackerLeaderboardMaxActualSold = trackerLeaderboardAgents.reduce(
+    (maxValue, agent) => Math.max(maxValue, Number(agent.actual_sold || 0)),
+    0
+  );
+  const trackerLeaderboardMaxPipeline = trackerLeaderboardAgents.reduce(
+    (maxValue, agent) => Math.max(maxValue, Number(agent.sold_count || 0) + Number(agent.entries?.length || 0)),
+    0
+  );
+  const trackerAgentsMeetingFloor = trackerLeaderboardAgents.filter((agent) => {
+    const setGood = Number(agent.appointment_set_rate || 0) >= Number(trackerBenchmarks.appointment_set_rate_floor || 0);
+    const showGood = Number(agent.appointment_show_rate || 0) >= Number(trackerBenchmarks.appointment_show_rate_floor || 0);
+    const soldGood = Number(agent.actual_sold_rate || 0) >= Number(trackerBenchmarks.sold_from_appointments_rate_floor || 0);
+    return setGood && showGood && soldGood;
+  }).length;
+  const trackerTopCloser = trackerLeaderboardAgents[0] || null;
   const trackerAppointmentSetRate = bdcSalesTrackerTeamTotals.totalLeads
     ? bdcSalesTrackerTeamTotals.appointmentsSet / bdcSalesTrackerTeamTotals.totalLeads
     : 0;
@@ -4872,7 +4898,114 @@ export default function App() {
                   </article>
                 </div>
 
-                <details className="panel bdc-sales-insights-panel" open>
+                <div className="panel bdc-sales-leaderboard-panel">
+                  <div className="bdc-sales-summary-panel__header">
+                    <div>
+                      <span className="eyebrow">Performance board</span>
+                      <h3>Team leaderboard first, detailed worksheets second</h3>
+                      <p className="admin-note">
+                        This is the fast read for the month. Open the per-agent worksheet only when you need to update metrics,
+                        add DMS rows, or edit notes.
+                      </p>
+                    </div>
+                    <div className="bdc-sales-inline-summary">
+                      <span>{trackerLeaderboardAgents.length} agents ranked</span>
+                      <span>{trackerAgentsMeetingFloor} above all floors</span>
+                      <span>{trackerTopCloser ? `${trackerTopCloser.agent_name} leads the month` : "No leader yet"}</span>
+                    </div>
+                  </div>
+                  <div className="bdc-sales-leaderboard">
+                    {trackerLeaderboardAgents.length ? (
+                      trackerLeaderboardAgents.map((agent, index) => {
+                        const pendingCount = Number(agent.entries?.length || 0);
+                        const pipelineCount = Number(agent.sold_count || 0) + pendingCount;
+                        return (
+                          <article key={`tracker-leaderboard-${agent.agent_id}`} className="bdc-sales-leaderboard__row">
+                            <div className="bdc-sales-leaderboard__identity">
+                              <span className="bdc-sales-leaderboard__rank">#{index + 1}</span>
+                              <div>
+                                <strong>{agent.agent_name}</strong>
+                                <small>
+                                  {agent.active ? "Active agent" : "Historical agent"} · {Number(agent.total_leads || 0)} leads ·{" "}
+                                  {Number(agent.appointments_set || 0)} set · {Number(agent.appointments_shown || 0)} shown
+                                </small>
+                              </div>
+                            </div>
+                            <div className="bdc-sales-leaderboard__totals">
+                              <span>
+                                <b>{Number(agent.actual_sold || 0)}</b>
+                                Apt sold
+                              </span>
+                              <span>
+                                <b>{Number(agent.sold_count || 0)}</b>
+                                Green
+                              </span>
+                              <span>
+                                <b>{pendingCount}</b>
+                                Pending
+                              </span>
+                              <span>
+                                <b>{formatPercent(agent.sold_from_shown_rate || 0)}</b>
+                                Close
+                              </span>
+                            </div>
+                            <div className="bdc-sales-leaderboard__visuals">
+                              <div className="bdc-sales-leaderboard__rail">
+                                <div className="bdc-sales-leaderboard__rail-top">
+                                  <span>Appointment sold vs leader</span>
+                                  <strong>{Number(agent.actual_sold || 0)}</strong>
+                                </div>
+                                <div className="bdc-sales-progress-rail__track">
+                                  <div
+                                    className="bdc-sales-progress-rail__fill"
+                                    style={{
+                                      width: `${percentOfTotal(
+                                        Number(agent.actual_sold || 0),
+                                        trackerLeaderboardMaxActualSold || 1
+                                      )}%`,
+                                    }}
+                                  />
+                                </div>
+                              </div>
+                              <div className="bdc-sales-leaderboard__rail">
+                                <div className="bdc-sales-leaderboard__rail-top">
+                                  <span>DMS pipeline</span>
+                                  <strong>{pipelineCount}</strong>
+                                </div>
+                                <div className="bdc-sales-progress-rail__track">
+                                  <div
+                                    className="bdc-sales-progress-rail__fill"
+                                    style={{
+                                      width: `${percentOfTotal(pipelineCount, trackerLeaderboardMaxPipeline || 1)}%`,
+                                    }}
+                                  />
+                                </div>
+                                <small>
+                                  {Number(agent.sold_count || 0)} green / {pendingCount} pending
+                                </small>
+                              </div>
+                            </div>
+                            <div className="bdc-sales-leaderboard__rates">
+                              <span className={`bdc-sales-rate-pill ${trackerBenchmarkTone(agent.appointment_set_rate, trackerBenchmarks.appointment_set_rate_floor)}`}>
+                                Set {formatPercent(agent.appointment_set_rate || 0)}
+                              </span>
+                              <span className={`bdc-sales-rate-pill ${trackerBenchmarkTone(agent.appointment_show_rate, trackerBenchmarks.appointment_show_rate_floor)}`}>
+                                Show {formatPercent(agent.appointment_show_rate || 0)}
+                              </span>
+                              <span className={`bdc-sales-rate-pill ${trackerBenchmarkTone(agent.actual_sold_rate, trackerBenchmarks.sold_from_appointments_rate_floor)}`}>
+                                Sold {formatPercent(agent.actual_sold_rate || 0)}
+                              </span>
+                            </div>
+                          </article>
+                        );
+                      })
+                    ) : (
+                      <div className="empty">No BDC agents are configured yet.</div>
+                    )}
+                  </div>
+                </div>
+
+                <details className="panel bdc-sales-insights-panel">
                   <summary className="bdc-sales-insights-panel__summary">
                     <div className="bdc-sales-insights-panel__summary-copy">
                       <span className="eyebrow">Collapsible insights</span>
@@ -4887,7 +5020,7 @@ export default function App() {
                       <span>{formatTrackerNumber(trackerProjection)} projected</span>
                       <span>{formatTrackerNumber(trackerShouldBeAtSold)} should be at</span>
                     </div>
-                    <span className="bdc-sales-insights-panel__toggle">Collapse</span>
+                    <span className="bdc-sales-insights-panel__toggle">More context</span>
                   </summary>
                   <div className="bdc-sales-insights-grid">
                     <article className="bdc-sales-insight-card">
@@ -5047,429 +5180,482 @@ export default function App() {
                   </div>
                 </div>
 
-                <div className="panel bdc-sales-summary-panel">
-                  <div className="bdc-sales-summary-panel__header">
-                    <div>
-                      <span className="eyebrow">Team snapshot</span>
+                <details className="panel bdc-sales-summary-panel bdc-sales-collapsible">
+                  <summary className="bdc-sales-collapsible__summary">
+                    <div className="bdc-sales-collapsible__copy">
+                      <span className="eyebrow">Worksheet table</span>
                       <h3>Manual month inputs by BDC agent</h3>
+                      <p className="admin-note">
+                        Open this only when you need the spreadsheet-style table. The leaderboard above is the default reading
+                        surface now.
+                      </p>
                     </div>
-                    <div className="bdc-sales-inline-summary">
+                    <div className="bdc-sales-insights-panel__summary-chips">
                       <span>Leads {bdcSalesTrackerTeamTotals.totalLeads}</span>
                       <span>Set {bdcSalesTrackerTeamTotals.appointmentsSet}</span>
                       <span>Shown {bdcSalesTrackerTeamTotals.appointmentsShown}</span>
                       <span>Sold {bdcSalesTrackerTeamTotals.actualSold}</span>
                     </div>
-                  </div>
-                  <div className="table-wrap bdc-sales-summary-table">
-                    <table>
-                      <thead>
-                        <tr>
-                          <th>Agent</th>
-                          <th>Tracked Sold</th>
-                          <th>Tracking</th>
-                          <th>Leads</th>
-                          <th>Appts Created</th>
-                          <th>Appt Set %</th>
-                          <th>Appts Shown</th>
-                          <th>Show %</th>
-                          <th>Apt Sold</th>
-                          <th>Sold from Appts %</th>
-                          <th>Close from Show %</th>
-                          <th>Avg Appts / Day</th>
-                          <th>Avg Shown / Day</th>
-                          <th>Avg Sold / Day</th>
-                          <th>Calls</th>
-                          <th>Email</th>
-                          <th>Text</th>
-                          <th>Avg C / E / T</th>
-                          <th>Days Off</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {trackerAgents.length ? (
-                          trackerAgents.map((agent) => (
-                            <tr key={`tracker-summary-${agent.agent_id}`}>
-                              <td>
-                                <strong>{agent.agent_name}</strong>
-                                <div className="table-subline">{agent.active ? "Active" : "Inactive / historical"}</div>
-                              </td>
-                              <td>{agent.sold_count}</td>
-                              <td>{formatTrackerNumber(agent.tracking_projection)}</td>
-                              <td>{Number(agent.total_leads || 0)}</td>
-                              <td>{Number(agent.appointments_set || 0)}</td>
-                              <td className={`bdc-sales-rate ${trackerBenchmarkTone(agent.appointment_set_rate, trackerBenchmarks.appointment_set_rate_floor)}`}>
-                                {formatPercent(agent.appointment_set_rate || 0)}
-                              </td>
-                              <td>{Number(agent.appointments_shown || 0)}</td>
-                              <td className={`bdc-sales-rate ${trackerBenchmarkTone(agent.appointment_show_rate, trackerBenchmarks.appointment_show_rate_floor)}`}>
-                                {formatPercent(agent.appointment_show_rate || 0)}
-                              </td>
-                              <td>{Number(agent.actual_sold || 0)}</td>
-                              <td className={`bdc-sales-rate ${trackerBenchmarkTone(agent.actual_sold_rate, trackerBenchmarks.sold_from_appointments_rate_floor)}`}>
-                                {formatPercent(agent.actual_sold_rate || 0)}
-                              </td>
-                              <td>{formatPercent(agent.sold_from_shown_rate || 0)}</td>
-                              <td>{formatTrackerNumber(agent.avg_appointments_per_day)}</td>
-                              <td>{formatTrackerNumber(agent.avg_shown_per_day)}</td>
-                              <td>{formatTrackerNumber(agent.avg_sold_per_day)}</td>
-                              <td>{Number(agent.calls_mtd || 0)}</td>
-                              <td>{Number(agent.emails_mtd || 0)}</td>
-                              <td>{Number(agent.texts_mtd || 0)}</td>
-                              <td>{agent.average_activity_label || "0 / 0 / 0"}</td>
-                              <td>{Number(agent.days_off || 0)}</td>
-                            </tr>
-                          ))
-                        ) : (
+                    <span className="bdc-sales-collapsible__toggle">Open table</span>
+                  </summary>
+                  <div className="bdc-sales-collapsible__body">
+                    <div className="table-wrap bdc-sales-summary-table">
+                      <table>
+                        <thead>
                           <tr>
-                            <td colSpan={19}>No BDC agents are configured yet.</td>
+                            <th>Agent</th>
+                            <th>Tracked Sold</th>
+                            <th>Tracking</th>
+                            <th>Leads</th>
+                            <th>Appts Created</th>
+                            <th>Appt Set %</th>
+                            <th>Appts Shown</th>
+                            <th>Show %</th>
+                            <th>Apt Sold</th>
+                            <th>Sold from Appts %</th>
+                            <th>Close from Show %</th>
+                            <th>Avg Appts / Day</th>
+                            <th>Avg Shown / Day</th>
+                            <th>Avg Sold / Day</th>
+                            <th>Calls</th>
+                            <th>Email</th>
+                            <th>Text</th>
+                            <th>Avg C / E / T</th>
+                            <th>Days Off</th>
                           </tr>
-                        )}
-                      </tbody>
-                    </table>
+                        </thead>
+                        <tbody>
+                          {trackerAgents.length ? (
+                            trackerLeaderboardAgents.map((agent) => (
+                              <tr key={`tracker-summary-${agent.agent_id}`}>
+                                <td>
+                                  <strong>{agent.agent_name}</strong>
+                                  <div className="table-subline">{agent.active ? "Active" : "Inactive / historical"}</div>
+                                </td>
+                                <td>{agent.sold_count}</td>
+                                <td>{formatTrackerNumber(agent.tracking_projection)}</td>
+                                <td>{Number(agent.total_leads || 0)}</td>
+                                <td>{Number(agent.appointments_set || 0)}</td>
+                                <td className={`bdc-sales-rate ${trackerBenchmarkTone(agent.appointment_set_rate, trackerBenchmarks.appointment_set_rate_floor)}`}>
+                                  {formatPercent(agent.appointment_set_rate || 0)}
+                                </td>
+                                <td>{Number(agent.appointments_shown || 0)}</td>
+                                <td className={`bdc-sales-rate ${trackerBenchmarkTone(agent.appointment_show_rate, trackerBenchmarks.appointment_show_rate_floor)}`}>
+                                  {formatPercent(agent.appointment_show_rate || 0)}
+                                </td>
+                                <td>{Number(agent.actual_sold || 0)}</td>
+                                <td className={`bdc-sales-rate ${trackerBenchmarkTone(agent.actual_sold_rate, trackerBenchmarks.sold_from_appointments_rate_floor)}`}>
+                                  {formatPercent(agent.actual_sold_rate || 0)}
+                                </td>
+                                <td>{formatPercent(agent.sold_from_shown_rate || 0)}</td>
+                                <td>{formatTrackerNumber(agent.avg_appointments_per_day)}</td>
+                                <td>{formatTrackerNumber(agent.avg_shown_per_day)}</td>
+                                <td>{formatTrackerNumber(agent.avg_sold_per_day)}</td>
+                                <td>{Number(agent.calls_mtd || 0)}</td>
+                                <td>{Number(agent.emails_mtd || 0)}</td>
+                                <td>{Number(agent.texts_mtd || 0)}</td>
+                                <td>{agent.average_activity_label || "0 / 0 / 0"}</td>
+                                <td>{Number(agent.days_off || 0)}</td>
+                              </tr>
+                            ))
+                          ) : (
+                            <tr>
+                              <td colSpan={19}>No BDC agents are configured yet.</td>
+                            </tr>
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
+                    <small className="admin-note">
+                      Green rows are finalized in Reynolds. Neutral rows are still pending or just being tracked.
+                    </small>
                   </div>
-                  <small className="admin-note">
-                    Green rows are finalized in Reynolds. Neutral rows are still pending or just being tracked.
-                  </small>
-                </div>
+                </details>
 
                 <div className="bdc-sales-agent-grid">
                   {trackerAgents.length ? (
-                    trackerAgents.map((agent) => {
+                    trackerLeaderboardAgents.map((agent) => {
                       const draft = bdcSalesTrackerEntryDrafts[agent.agent_id] || emptyBdcSalesTrackerEntryDraft();
                       const draftDealCount = parseBdcSalesTrackerDraftNumbers(draft.dms_numbers_text).length;
+                      const pendingCount = Number(agent.entries?.length || 0);
                       return (
-                        <article key={bdcSalesTrackerAgentKey(agent)} className="bdc-sales-agent-card">
-                          <div className="bdc-sales-agent-card__header">
-                            <div>
-                              <span className="eyebrow">BDC agent</span>
-                              <h3>{agent.agent_name}</h3>
-                              <p>
-                                {agent.sold_count} tracked green sold / {Number(agent.appointments_shown || 0)} shown /{" "}
-                                {Number(agent.actual_sold || 0)} appointment sold
-                              </p>
-                            </div>
-                            <div className={`bdc-sales-agent-card__status ${agent.active ? "is-active" : "is-inactive"}`}>
-                              {agent.active ? "Active" : "Historical"}
-                            </div>
-                          </div>
-
-                      {canEditTrackerAdmin ? (
-                        <>
-                          <div className="bdc-sales-metrics-grid">
-                            <label>
-                              <span>Total Leads</span>
-                              <input
-                                type="number"
-                                inputMode="numeric"
-                                min="0"
-                                value={agent.total_leads ?? ""}
-                                onChange={(event) => patchBdcSalesTrackerAgent(agent.agent_id, "total_leads", event.target.value)}
-                              />
-                            </label>
-                            <label>
-                              <span>Appts Created</span>
-                              <input
-                                type="number"
-                                inputMode="numeric"
-                                min="0"
-                                value={agent.appointments_set ?? ""}
-                                onChange={(event) => patchBdcSalesTrackerAgent(agent.agent_id, "appointments_set", event.target.value)}
-                              />
-                            </label>
-                            <label>
-                              <span>Appts Shown</span>
-                              <input
-                                type="number"
-                                inputMode="numeric"
-                                min="0"
-                                value={agent.appointments_shown ?? ""}
-                                onChange={(event) => patchBdcSalesTrackerAgent(agent.agent_id, "appointments_shown", event.target.value)}
-                              />
-                            </label>
-                            <label>
-                              <span>Apt Sold</span>
-                              <input
-                                type="number"
-                                inputMode="numeric"
-                                min="0"
-                                value={agent.actual_sold ?? ""}
-                                onChange={(event) => patchBdcSalesTrackerAgent(agent.agent_id, "actual_sold", event.target.value)}
-                              />
-                            </label>
-                            <label>
-                              <span>MTD Calls</span>
-                              <input
-                                type="number"
-                                inputMode="numeric"
-                                min="0"
-                                value={agent.calls_mtd ?? ""}
-                                onChange={(event) => patchBdcSalesTrackerAgent(agent.agent_id, "calls_mtd", event.target.value)}
-                              />
-                            </label>
-                            <label>
-                              <span>MTD Email</span>
-                              <input
-                                type="number"
-                                inputMode="numeric"
-                                min="0"
-                                value={agent.emails_mtd ?? ""}
-                                onChange={(event) => patchBdcSalesTrackerAgent(agent.agent_id, "emails_mtd", event.target.value)}
-                              />
-                            </label>
-                            <label>
-                              <span>MTD Text</span>
-                              <input
-                                type="number"
-                                inputMode="numeric"
-                                min="0"
-                                value={agent.texts_mtd ?? ""}
-                                onChange={(event) => patchBdcSalesTrackerAgent(agent.agent_id, "texts_mtd", event.target.value)}
-                              />
-                            </label>
-                            <label>
-                              <span>Days Off</span>
-                              <input
-                                type="number"
-                                inputMode="numeric"
-                                min="0"
-                                value={agent.days_off ?? ""}
-                                onChange={(event) => patchBdcSalesTrackerAgent(agent.agent_id, "days_off", event.target.value)}
-                              />
-                            </label>
-                            <div className="bdc-sales-metrics-card">
-                              <span>Set / shown / sold</span>
-                              <strong>
-                                {formatPercent(agent.appointment_set_rate || 0)} / {formatPercent(agent.appointment_show_rate || 0)} /{" "}
-                                {formatPercent(agent.actual_sold_rate || 0)}
-                              </strong>
-                              <small>{agent.average_activity_label || "0 / 0 / 0"} calls / email / text</small>
-                            </div>
-                          </div>
-
-                          <div className="bdc-sales-agent-card__actions">
-                            <button
-                              type="button"
-                              onClick={() => saveBdcSalesTrackerMetrics(agent)}
-                              disabled={busy === `bdc-sales-metrics-${agent.agent_id}`}
-                            >
-                              {busy === `bdc-sales-metrics-${agent.agent_id}` ? "Saving..." : "Save Admin Metrics"}
-                            </button>
-                          </div>
-                        </>
-                      ) : (
-                        <div className="bdc-sales-metrics-grid bdc-sales-metrics-grid--static">
-                          <div className="bdc-sales-metrics-card">
-                            <span>Total Leads</span>
-                            <strong>{Number(agent.total_leads || 0)}</strong>
-                            <small>Manual admin report input</small>
-                          </div>
-                          <div className="bdc-sales-metrics-card">
-                            <span>Appts Created</span>
-                            <strong>{Number(agent.appointments_set || 0)}</strong>
-                            <small className={`bdc-sales-rate ${trackerBenchmarkTone(agent.appointment_set_rate, trackerBenchmarks.appointment_set_rate_floor)}`}>
-                              {formatPercent(agent.appointment_set_rate || 0)} of leads
-                            </small>
-                          </div>
-                          <div className="bdc-sales-metrics-card">
-                            <span>Appts Shown</span>
-                            <strong>{Number(agent.appointments_shown || 0)}</strong>
-                            <small className={`bdc-sales-rate ${trackerBenchmarkTone(agent.appointment_show_rate, trackerBenchmarks.appointment_show_rate_floor)}`}>
-                              {formatPercent(agent.appointment_show_rate || 0)} of set appointments
-                            </small>
-                          </div>
-                          <div className="bdc-sales-metrics-card">
-                            <span>Apt Sold</span>
-                            <strong>{Number(agent.actual_sold || 0)}</strong>
-                            <small className={`bdc-sales-rate ${trackerBenchmarkTone(agent.actual_sold_rate, trackerBenchmarks.sold_from_appointments_rate_floor)}`}>
-                              {formatPercent(agent.actual_sold_rate || 0)} sold from appointments set
-                            </small>
-                          </div>
-                          <div className="bdc-sales-metrics-card">
-                            <span>MTD Activity</span>
-                            <strong>{agent.average_activity_label || "0 / 0 / 0"}</strong>
-                            <small>Calls / email / text with {Number(agent.days_off || 0)} day(s) off</small>
-                          </div>
-                        </div>
-                      )}
-
-                          <div className="bdc-sales-entry-sheet">
-                            <div className="bdc-sales-entry-sheet__intro">
-                              <strong>DMS sales tracker</strong>
-                              <small>
-                                Paste one or many DMS numbers. Every DMS number becomes its own tracked deal row. Optional
-                                profile and note will stamp onto each row you create.
-                              </small>
-                              <div className="bdc-sales-entry-sheet__chips">
-                                <span className={`bdc-sales-entry-sheet__chip ${draftDealCount ? "is-ready" : ""}`}>
-                                  {draftDealCount
-                                    ? `${draftDealCount} separate ${draftDealCount === 1 ? "deal" : "deals"} ready`
-                                    : "Paste DMS numbers to stage separate deal rows"}
-                                </span>
-                                <span className="bdc-sales-entry-sheet__chip is-pending">
-                                  New rows start grey until Reynolds confirms them green
-                                </span>
+                        <details key={bdcSalesTrackerAgentKey(agent)} className="bdc-sales-agent-card">
+                          <summary className="bdc-sales-agent-card__summary">
+                            <div className="bdc-sales-agent-card__header">
+                              <div>
+                                <span className="eyebrow">Agent worksheet</span>
+                                <h3>{agent.agent_name}</h3>
+                                <p>
+                                  {Number(agent.actual_sold || 0)} appointment sold / {agent.sold_count} green Reynolds / {pendingCount} grey pending
+                                </p>
+                              </div>
+                              <div className={`bdc-sales-agent-card__status ${agent.active ? "is-active" : "is-inactive"}`}>
+                                {agent.active ? "Active" : "Historical"}
                               </div>
                             </div>
-                            <div className="bdc-sales-entry-grid bdc-sales-entry-grid--header bdc-sales-entry-grid--create">
-                              <span>DMS numbers</span>
-                              <span>Profile / customer</span>
-                              <span>Working note</span>
-                              <span>Action</span>
+                            <div className="bdc-sales-agent-card__summary-grid">
+                              <div className="bdc-sales-agent-card__summary-stat">
+                                <span>Apt sold</span>
+                                <strong>{Number(agent.actual_sold || 0)}</strong>
+                              </div>
+                              <div className="bdc-sales-agent-card__summary-stat">
+                                <span>Green sold</span>
+                                <strong>{Number(agent.sold_count || 0)}</strong>
+                              </div>
+                              <div className="bdc-sales-agent-card__summary-stat">
+                                <span>Grey pending</span>
+                                <strong>{pendingCount}</strong>
+                              </div>
+                              <div className="bdc-sales-agent-card__summary-stat">
+                                <span>Shown</span>
+                                <strong>{Number(agent.appointments_shown || 0)}</strong>
+                              </div>
                             </div>
-                            <div className="bdc-sales-entry-create bdc-sales-entry-grid bdc-sales-entry-grid--create">
-                              <label className="bdc-sales-entry-cell bdc-sales-entry-cell--batch">
-                                <textarea
-                                  rows={2}
-                                  value={draft.dms_numbers_text}
-                                  onChange={(event) =>
-                                    patchBdcSalesTrackerEntryDraft(agent.agent_id, "dms_numbers_text", event.target.value)
-                                  }
-                                  placeholder={"124913\n124914\n124915"}
-                                  aria-label={`DMS numbers for ${agent.agent_name}`}
-                                />
-                              </label>
-                              <label className="bdc-sales-entry-cell">
-                                <input
-                                  value={draft.profile_name}
-                                  onChange={(event) => patchBdcSalesTrackerEntryDraft(agent.agent_id, "profile_name", event.target.value)}
-                                  placeholder="Optional profile / customer"
-                                  aria-label={`Profile name for ${agent.agent_name}`}
-                                />
-                              </label>
-                              <label className="bdc-sales-entry-cell">
-                                <input
-                                  value={draft.notes}
-                                  onChange={(event) => patchBdcSalesTrackerEntryDraft(agent.agent_id, "notes", event.target.value)}
-                                  placeholder="Optional working note"
-                                  aria-label={`Working note for ${agent.agent_name}`}
-                                />
-                              </label>
-                              <button
-                                type="button"
-                                onClick={() => addBdcSalesTrackerEntry(agent)}
-                                disabled={busy === `bdc-sales-create-${agent.agent_id}`}
-                              >
-                                {busy === `bdc-sales-create-${agent.agent_id}`
-                                  ? "Adding..."
-                                  : draftDealCount > 1
-                                    ? `Add ${draftDealCount} Deals`
-                                    : draftDealCount === 1
-                                      ? "Add Deal"
-                                      : "Add Row"}
-                              </button>
+                            <div className="bdc-sales-agent-card__summary-rates">
+                              <span className={`bdc-sales-rate-pill ${trackerBenchmarkTone(agent.appointment_set_rate, trackerBenchmarks.appointment_set_rate_floor)}`}>
+                                Set {formatPercent(agent.appointment_set_rate || 0)}
+                              </span>
+                              <span className={`bdc-sales-rate-pill ${trackerBenchmarkTone(agent.appointment_show_rate, trackerBenchmarks.appointment_show_rate_floor)}`}>
+                                Show {formatPercent(agent.appointment_show_rate || 0)}
+                              </span>
+                              <span className={`bdc-sales-rate-pill ${trackerBenchmarkTone(agent.actual_sold_rate, trackerBenchmarks.sold_from_appointments_rate_floor)}`}>
+                                Sold {formatPercent(agent.actual_sold_rate || 0)}
+                              </span>
+                              <span className="bdc-sales-rate-pill is-neutral">
+                                Close {formatPercent(agent.sold_from_shown_rate || 0)}
+                              </span>
                             </div>
+                            <span className="bdc-sales-agent-card__toggle">Open worksheet</span>
+                          </summary>
 
-                            {agent.entries.length ? (
+                          <div className="bdc-sales-agent-card__body">
+                            {canEditTrackerAdmin ? (
                               <>
-                                <div className="bdc-sales-entry-grid bdc-sales-entry-grid--header">
-                                  <span>DMS #</span>
-                                  <span>Profile / customer</span>
-                                  <span>Working note</span>
-                                  <span>Status</span>
-                                  <span>Actions</span>
+                                <div className="bdc-sales-metrics-grid">
+                                  <label>
+                                    <span>Total Leads</span>
+                                    <input
+                                      type="number"
+                                      inputMode="numeric"
+                                      min="0"
+                                      value={agent.total_leads ?? ""}
+                                      onChange={(event) => patchBdcSalesTrackerAgent(agent.agent_id, "total_leads", event.target.value)}
+                                    />
+                                  </label>
+                                  <label>
+                                    <span>Appts Created</span>
+                                    <input
+                                      type="number"
+                                      inputMode="numeric"
+                                      min="0"
+                                      value={agent.appointments_set ?? ""}
+                                      onChange={(event) => patchBdcSalesTrackerAgent(agent.agent_id, "appointments_set", event.target.value)}
+                                    />
+                                  </label>
+                                  <label>
+                                    <span>Appts Shown</span>
+                                    <input
+                                      type="number"
+                                      inputMode="numeric"
+                                      min="0"
+                                      value={agent.appointments_shown ?? ""}
+                                      onChange={(event) => patchBdcSalesTrackerAgent(agent.agent_id, "appointments_shown", event.target.value)}
+                                    />
+                                  </label>
+                                  <label>
+                                    <span>Apt Sold</span>
+                                    <input
+                                      type="number"
+                                      inputMode="numeric"
+                                      min="0"
+                                      value={agent.actual_sold ?? ""}
+                                      onChange={(event) => patchBdcSalesTrackerAgent(agent.agent_id, "actual_sold", event.target.value)}
+                                    />
+                                  </label>
+                                  <label>
+                                    <span>MTD Calls</span>
+                                    <input
+                                      type="number"
+                                      inputMode="numeric"
+                                      min="0"
+                                      value={agent.calls_mtd ?? ""}
+                                      onChange={(event) => patchBdcSalesTrackerAgent(agent.agent_id, "calls_mtd", event.target.value)}
+                                    />
+                                  </label>
+                                  <label>
+                                    <span>MTD Email</span>
+                                    <input
+                                      type="number"
+                                      inputMode="numeric"
+                                      min="0"
+                                      value={agent.emails_mtd ?? ""}
+                                      onChange={(event) => patchBdcSalesTrackerAgent(agent.agent_id, "emails_mtd", event.target.value)}
+                                    />
+                                  </label>
+                                  <label>
+                                    <span>MTD Text</span>
+                                    <input
+                                      type="number"
+                                      inputMode="numeric"
+                                      min="0"
+                                      value={agent.texts_mtd ?? ""}
+                                      onChange={(event) => patchBdcSalesTrackerAgent(agent.agent_id, "texts_mtd", event.target.value)}
+                                    />
+                                  </label>
+                                  <label>
+                                    <span>Days Off</span>
+                                    <input
+                                      type="number"
+                                      inputMode="numeric"
+                                      min="0"
+                                      value={agent.days_off ?? ""}
+                                      onChange={(event) => patchBdcSalesTrackerAgent(agent.agent_id, "days_off", event.target.value)}
+                                    />
+                                  </label>
+                                  <div className="bdc-sales-metrics-card">
+                                    <span>Set / shown / sold</span>
+                                    <strong>
+                                      {formatPercent(agent.appointment_set_rate || 0)} / {formatPercent(agent.appointment_show_rate || 0)} /{" "}
+                                      {formatPercent(agent.actual_sold_rate || 0)}
+                                    </strong>
+                                    <small>{agent.average_activity_label || "0 / 0 / 0"} calls / email / text</small>
+                                  </div>
                                 </div>
-                                <div className="bdc-sales-entry-list">
-                                  {agent.entries.map((entry) => (
-                                    <div
-                                      key={`tracker-entry-${entry.id}`}
-                                      className={`bdc-sales-entry bdc-sales-entry-grid ${entry.sold ? "is-sold" : "is-pending"}`}
-                                    >
-                                      <label className="bdc-sales-entry-cell">
-                                        <input
-                                          value={entry.dms_number}
-                                          onChange={(event) => patchBdcSalesTrackerEntry(entry.id, "dms_number", event.target.value)}
-                                          placeholder="DMS number"
-                                          aria-label={`DMS number row ${entry.id}`}
-                                        />
-                                      </label>
-                                      <label className="bdc-sales-entry-cell">
-                                        <input
-                                          value={entry.profile_name}
-                                          onChange={(event) => patchBdcSalesTrackerEntry(entry.id, "profile_name", event.target.value)}
-                                          placeholder="Optional profile / customer"
-                                          aria-label={`Profile name row ${entry.id}`}
-                                        />
-                                      </label>
-                                      <label className="bdc-sales-entry-cell">
-                                        <input
-                                          value={entry.notes}
-                                          onChange={(event) => patchBdcSalesTrackerEntry(entry.id, "notes", event.target.value)}
-                                          placeholder="Working note"
-                                          aria-label={`Working note row ${entry.id}`}
-                                        />
-                                      </label>
-                                      <div className={`bdc-sales-entry__state ${entry.sold ? "is-sold" : "is-pending"}`}>
-                                        <span className={`bdc-sales-entry__badge ${entry.sold ? "is-sold" : ""}`}>
-                                          {entry.sold ? "Sold" : "Pending"}
-                                        </span>
-                                        <small>
-                                          {entry.sold && entry.sold_at ? `Reynolds ${dateTimeLabel(entry.sold_at)}` : "Still pending Reynolds"}
-                                        </small>
-                                      </div>
-                                      <div className="bdc-sales-entry__actions">
-                                        <button
-                                          type="button"
-                                          className="secondary"
-                                          onClick={() => saveBdcSalesTrackerEntry(entry)}
-                                          disabled={busy === `bdc-sales-entry-${entry.id}`}
-                                        >
-                                          {busy === `bdc-sales-entry-${entry.id}` ? "Saving..." : "Save"}
-                                        </button>
-                                        <button
-                                          type="button"
-                                          onClick={() => toggleBdcSalesTrackerEntrySold(entry)}
-                                          disabled={busy === `bdc-sales-sold-${entry.id}`}
-                                        >
-                                          {busy === `bdc-sales-sold-${entry.id}`
-                                            ? "Updating..."
-                                            : entry.sold
-                                              ? "Mark Pending"
-                                              : "Mark Sold"}
-                                        </button>
-                                        <button
-                                          type="button"
-                                          className="button-danger"
-                                          onClick={() => removeBdcSalesTrackerEntry(entry.id)}
-                                          disabled={busy === `bdc-sales-delete-${entry.id}`}
-                                        >
-                                          {busy === `bdc-sales-delete-${entry.id}` ? "Deleting..." : "Delete"}
-                                        </button>
-                                      </div>
-                                    </div>
-                                  ))}
+
+                                <div className="bdc-sales-agent-card__actions">
+                                  <button
+                                    type="button"
+                                    onClick={() => saveBdcSalesTrackerMetrics(agent)}
+                                    disabled={busy === `bdc-sales-metrics-${agent.agent_id}`}
+                                  >
+                                    {busy === `bdc-sales-metrics-${agent.agent_id}` ? "Saving..." : "Save Admin Metrics"}
+                                  </button>
                                 </div>
                               </>
                             ) : (
-                              <div className="empty">No tracked sales rows for {agent.agent_name} yet.</div>
+                              <div className="bdc-sales-metrics-grid bdc-sales-metrics-grid--static">
+                                <div className="bdc-sales-metrics-card">
+                                  <span>Total Leads</span>
+                                  <strong>{Number(agent.total_leads || 0)}</strong>
+                                  <small>Manual admin report input</small>
+                                </div>
+                                <div className="bdc-sales-metrics-card">
+                                  <span>Appts Created</span>
+                                  <strong>{Number(agent.appointments_set || 0)}</strong>
+                                  <small className={`bdc-sales-rate ${trackerBenchmarkTone(agent.appointment_set_rate, trackerBenchmarks.appointment_set_rate_floor)}`}>
+                                    {formatPercent(agent.appointment_set_rate || 0)} of leads
+                                  </small>
+                                </div>
+                                <div className="bdc-sales-metrics-card">
+                                  <span>Appts Shown</span>
+                                  <strong>{Number(agent.appointments_shown || 0)}</strong>
+                                  <small className={`bdc-sales-rate ${trackerBenchmarkTone(agent.appointment_show_rate, trackerBenchmarks.appointment_show_rate_floor)}`}>
+                                    {formatPercent(agent.appointment_show_rate || 0)} of set appointments
+                                  </small>
+                                </div>
+                                <div className="bdc-sales-metrics-card">
+                                  <span>Apt Sold</span>
+                                  <strong>{Number(agent.actual_sold || 0)}</strong>
+                                  <small className={`bdc-sales-rate ${trackerBenchmarkTone(agent.actual_sold_rate, trackerBenchmarks.sold_from_appointments_rate_floor)}`}>
+                                    {formatPercent(agent.actual_sold_rate || 0)} sold from appointments set
+                                  </small>
+                                </div>
+                                <div className="bdc-sales-metrics-card">
+                                  <span>MTD Activity</span>
+                                  <strong>{agent.average_activity_label || "0 / 0 / 0"}</strong>
+                                  <small>Calls / email / text with {Number(agent.days_off || 0)} day(s) off</small>
+                                </div>
+                              </div>
                             )}
+
+                            <div className="bdc-sales-entry-sheet">
+                              <div className="bdc-sales-entry-sheet__intro">
+                                <strong>DMS sales tracker</strong>
+                                <small>
+                                  Paste one or many DMS numbers. Every DMS number becomes its own tracked deal row. Optional
+                                  profile and note will stamp onto each row you create.
+                                </small>
+                                <div className="bdc-sales-entry-sheet__chips">
+                                  <span className={`bdc-sales-entry-sheet__chip ${draftDealCount ? "is-ready" : ""}`}>
+                                    {draftDealCount
+                                      ? `${draftDealCount} separate ${draftDealCount === 1 ? "deal" : "deals"} ready`
+                                      : "Paste DMS numbers to stage separate deal rows"}
+                                  </span>
+                                  <span className="bdc-sales-entry-sheet__chip is-pending">
+                                    New rows start grey until Reynolds confirms them green
+                                  </span>
+                                </div>
+                              </div>
+                              <div className="bdc-sales-entry-grid bdc-sales-entry-grid--header bdc-sales-entry-grid--create">
+                                <span>DMS numbers</span>
+                                <span>Profile / customer</span>
+                                <span>Working note</span>
+                                <span>Action</span>
+                              </div>
+                              <div className="bdc-sales-entry-create bdc-sales-entry-grid bdc-sales-entry-grid--create">
+                                <label className="bdc-sales-entry-cell bdc-sales-entry-cell--batch">
+                                  <textarea
+                                    rows={2}
+                                    value={draft.dms_numbers_text}
+                                    onChange={(event) =>
+                                      patchBdcSalesTrackerEntryDraft(agent.agent_id, "dms_numbers_text", event.target.value)
+                                    }
+                                    placeholder={"124913\n124914\n124915"}
+                                    aria-label={`DMS numbers for ${agent.agent_name}`}
+                                  />
+                                </label>
+                                <label className="bdc-sales-entry-cell">
+                                  <input
+                                    value={draft.profile_name}
+                                    onChange={(event) => patchBdcSalesTrackerEntryDraft(agent.agent_id, "profile_name", event.target.value)}
+                                    placeholder="Optional profile / customer"
+                                    aria-label={`Profile name for ${agent.agent_name}`}
+                                  />
+                                </label>
+                                <label className="bdc-sales-entry-cell">
+                                  <input
+                                    value={draft.notes}
+                                    onChange={(event) => patchBdcSalesTrackerEntryDraft(agent.agent_id, "notes", event.target.value)}
+                                    placeholder="Optional working note"
+                                    aria-label={`Working note for ${agent.agent_name}`}
+                                  />
+                                </label>
+                                <button
+                                  type="button"
+                                  onClick={() => addBdcSalesTrackerEntry(agent)}
+                                  disabled={busy === `bdc-sales-create-${agent.agent_id}`}
+                                >
+                                  {busy === `bdc-sales-create-${agent.agent_id}`
+                                    ? "Adding..."
+                                    : draftDealCount > 1
+                                      ? `Add ${draftDealCount} Deals`
+                                      : draftDealCount === 1
+                                        ? "Add Deal"
+                                        : "Add Row"}
+                                </button>
+                              </div>
+
+                              {agent.entries.length ? (
+                                <>
+                                  <div className="bdc-sales-entry-grid bdc-sales-entry-grid--header">
+                                    <span>DMS #</span>
+                                    <span>Profile / customer</span>
+                                    <span>Working note</span>
+                                    <span>Status</span>
+                                    <span>Actions</span>
+                                  </div>
+                                  <div className="bdc-sales-entry-list">
+                                    {agent.entries.map((entry) => (
+                                      <div
+                                        key={`tracker-entry-${entry.id}`}
+                                        className={`bdc-sales-entry bdc-sales-entry-grid ${entry.sold ? "is-sold" : "is-pending"}`}
+                                      >
+                                        <label className="bdc-sales-entry-cell">
+                                          <input
+                                            value={entry.dms_number}
+                                            onChange={(event) => patchBdcSalesTrackerEntry(entry.id, "dms_number", event.target.value)}
+                                            placeholder="DMS number"
+                                            aria-label={`DMS number row ${entry.id}`}
+                                          />
+                                        </label>
+                                        <label className="bdc-sales-entry-cell">
+                                          <input
+                                            value={entry.profile_name}
+                                            onChange={(event) => patchBdcSalesTrackerEntry(entry.id, "profile_name", event.target.value)}
+                                            placeholder="Optional profile / customer"
+                                            aria-label={`Profile name row ${entry.id}`}
+                                          />
+                                        </label>
+                                        <label className="bdc-sales-entry-cell">
+                                          <input
+                                            value={entry.notes}
+                                            onChange={(event) => patchBdcSalesTrackerEntry(entry.id, "notes", event.target.value)}
+                                            placeholder="Working note"
+                                            aria-label={`Working note row ${entry.id}`}
+                                          />
+                                        </label>
+                                        <div className={`bdc-sales-entry__state ${entry.sold ? "is-sold" : "is-pending"}`}>
+                                          <span className={`bdc-sales-entry__badge ${entry.sold ? "is-sold" : ""}`}>
+                                            {entry.sold ? "Sold" : "Pending"}
+                                          </span>
+                                          <small>
+                                            {entry.sold && entry.sold_at ? `Reynolds ${dateTimeLabel(entry.sold_at)}` : "Still pending Reynolds"}
+                                          </small>
+                                        </div>
+                                        <div className="bdc-sales-entry__actions">
+                                          <button
+                                            type="button"
+                                            className="secondary"
+                                            onClick={() => saveBdcSalesTrackerEntry(entry)}
+                                            disabled={busy === `bdc-sales-entry-${entry.id}`}
+                                          >
+                                            {busy === `bdc-sales-entry-${entry.id}` ? "Saving..." : "Save"}
+                                          </button>
+                                          <button
+                                            type="button"
+                                            onClick={() => toggleBdcSalesTrackerEntrySold(entry)}
+                                            disabled={busy === `bdc-sales-sold-${entry.id}`}
+                                          >
+                                            {busy === `bdc-sales-sold-${entry.id}`
+                                              ? "Updating..."
+                                              : entry.sold
+                                                ? "Mark Pending"
+                                                : "Mark Sold"}
+                                          </button>
+                                          <button
+                                            type="button"
+                                            className="button-danger"
+                                            onClick={() => removeBdcSalesTrackerEntry(entry.id)}
+                                            disabled={busy === `bdc-sales-delete-${entry.id}`}
+                                          >
+                                            {busy === `bdc-sales-delete-${entry.id}` ? "Deleting..." : "Delete"}
+                                          </button>
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </>
+                              ) : (
+                                <div className="empty">No tracked sales rows for {agent.agent_name} yet.</div>
+                              )}
+                            </div>
                           </div>
-                    </article>
-                  );
-                })
-              ) : (
-                <div className="panel">
-                  <span className="eyebrow">No BDC agents</span>
-                  <h3>Add your BDC roster first</h3>
-                  <p className="admin-note">The tracker uses the BDC agents list from the existing BDC setup.</p>
-                </div>
-              )}
+                        </details>
+                      );
+                    })
+                  ) : (
+                    <div className="panel">
+                      <span className="eyebrow">No BDC agents</span>
+                      <h3>Add your BDC roster first</h3>
+                      <p className="admin-note">The tracker uses the BDC agents list from the existing BDC setup.</p>
+                    </div>
+                  )}
                 </div>
 
-                <div className="panel bdc-sales-rules-panel">
-                  <div className="bdc-sales-summary-panel__header">
-                    <div>
+                <details className="panel bdc-sales-rules-panel bdc-sales-collapsible">
+                  <summary className="bdc-sales-collapsible__summary">
+                    <div className="bdc-sales-collapsible__copy">
                       <span className="eyebrow">Pinned rules</span>
                       <h3>Admin benchmark rules for appointment pacing</h3>
+                      <p className="admin-note">
+                        Collapse this most of the time. Open it when you need to tune the floors and targets that color the
+                        tracker.
+                      </p>
                     </div>
-                    <div className="bdc-sales-inline-summary bdc-sales-inline-summary--soft">
+                    <div className="bdc-sales-insights-panel__summary-chips">
                       <span>{monthLabel(bdcSalesTrackerMonth)}</span>
                       <span>{canEditTrackerAdmin ? "Admin editing unlocked" : "View only"}</span>
+                      <span>Set floor {bdcSalesTrackerRulesDraft.appointment_set_rate_floor || 0}%</span>
+                      <span>Show floor {bdcSalesTrackerRulesDraft.appointment_show_rate_floor || 0}%</span>
                     </div>
-                  </div>
-                  <p className="admin-note">
-                    Benchmark logic uses the funnel you asked for: leads to appointments set, appointments shown, and appointments sold. Update these thresholds any time you want to tighten or loosen the passing range.
-                  </p>
-                  <div className="bdc-sales-rules-grid">
+                    <span className="bdc-sales-collapsible__toggle">Open rules</span>
+                  </summary>
+                  <div className="bdc-sales-collapsible__body">
+                    <p className="admin-note">
+                      Benchmark logic uses the funnel you asked for: leads to appointments set, appointments shown, and
+                      appointments sold. Update these thresholds any time you want to tighten or loosen the passing range.
+                    </p>
+                    <div className="bdc-sales-rules-grid">
                     <label>
                       <span>Appt Set Floor %</span>
                       <input
@@ -5589,15 +5775,16 @@ export default function App() {
                         disabled={!canEditTrackerAdmin}
                       />
                     </label>
-                    <button
-                      type="button"
-                      onClick={saveBdcSalesTrackerRules}
-                      disabled={!canEditTrackerAdmin || busy === "bdc-sales-rules"}
-                    >
-                      {busy === "bdc-sales-rules" ? "Saving..." : canEditTrackerAdmin ? "Save Rules" : "Admin Only"}
-                    </button>
+                      <button
+                        type="button"
+                        onClick={saveBdcSalesTrackerRules}
+                        disabled={!canEditTrackerAdmin || busy === "bdc-sales-rules"}
+                      >
+                        {busy === "bdc-sales-rules" ? "Saving..." : canEditTrackerAdmin ? "Save Rules" : "Admin Only"}
+                      </button>
+                    </div>
                   </div>
-                </div>
+                </details>
               </>
             ) : null}
 
