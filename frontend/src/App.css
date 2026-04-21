@@ -2082,6 +2082,146 @@ th {
   gap: 16px;
 }
 
+.bdc-sales-workspace-panel {
+  display: grid;
+  gap: 18px;
+  border: 1px solid rgba(199, 101, 54, 0.2);
+  background:
+    radial-gradient(circle at top right, rgba(199, 101, 54, 0.16), transparent 34%),
+    linear-gradient(180deg, rgba(255, 251, 246, 0.98), rgba(250, 242, 233, 0.96));
+}
+
+.bdc-sales-workspace-panel__header,
+.bdc-sales-workspace-panel__quick-head {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.bdc-sales-workspace-panel__header > div,
+.bdc-sales-workspace-panel__quick-head > div,
+.bdc-sales-leaderboard__identity > div {
+  min-width: 0;
+}
+
+.bdc-sales-workspace-panel__header h3,
+.bdc-sales-workspace-panel__quick-head h4 {
+  margin: 0;
+  letter-spacing: -0.03em;
+}
+
+.bdc-sales-workspace-panel__header h3 {
+  font-size: clamp(1.35rem, 2vw, 1.75rem);
+}
+
+.bdc-sales-workspace-panel__quick-head h4 {
+  font-size: 1.06rem;
+}
+
+.bdc-sales-workspace-panel__header .admin-note,
+.bdc-sales-workspace-panel__quick-add .admin-note {
+  margin: 8px 0 0;
+}
+
+.bdc-sales-workspace-panel__layout {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: minmax(280px, 0.88fr) minmax(0, 1.12fr);
+  align-items: start;
+}
+
+.bdc-sales-workspace-panel__notes,
+.bdc-sales-workspace-panel__quick-add {
+  display: grid;
+  gap: 12px;
+  padding: 16px;
+  border-radius: 20px;
+  border: 1px solid rgba(31, 37, 43, 0.08);
+  background: rgba(255, 255, 255, 0.82);
+}
+
+.bdc-sales-workspace-panel__notes-field textarea {
+  min-height: 144px;
+  resize: vertical;
+}
+
+.bdc-sales-workspace-panel__actions {
+  display: flex;
+  justify-content: flex-start;
+}
+
+.bdc-sales-workspace-panel__stats {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.bdc-sales-workspace-panel__stats span {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 10px 12px;
+  border-radius: 16px;
+  background: rgba(245, 249, 255, 0.84);
+  border: 1px solid rgba(31, 124, 246, 0.12);
+  color: #516070;
+  font-size: 0.82rem;
+}
+
+.bdc-sales-workspace-panel__stats b {
+  font-size: 1.08rem;
+  line-height: 1;
+  letter-spacing: -0.04em;
+  color: #172033;
+}
+
+.bdc-sales-workspace-panel__quick-grid {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(0, 1.45fr) minmax(180px, 0.8fr) minmax(180px, 0.95fr) auto;
+  align-items: end;
+}
+
+.bdc-sales-workspace-panel__field {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.bdc-sales-workspace-panel__field span {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #6e7785;
+}
+
+.bdc-sales-workspace-panel__field textarea,
+.bdc-sales-workspace-panel__field input {
+  width: 100%;
+}
+
+.bdc-sales-workspace-panel__field--batch textarea {
+  min-height: 118px;
+  resize: vertical;
+}
+
+.bdc-sales-workspace-panel__submit {
+  min-width: 132px;
+  min-height: 48px;
+}
+
+.bdc-sales-workspace-panel__empty {
+  padding: 16px;
+  border-radius: 18px;
+  border: 1px dashed rgba(199, 101, 54, 0.28);
+  background: rgba(255, 248, 241, 0.8);
+  color: #6b5e4d;
+  line-height: 1.6;
+}
+
 .bdc-sales-collapsible {
   display: grid;
   gap: 0;
@@ -2202,6 +2342,7 @@ th {
 .bdc-sales-leaderboard__identity small,
 .bdc-sales-leaderboard__visuals small {
   color: var(--muted);
+  line-height: 1.5;
 }
 
 .bdc-sales-leaderboard__totals {
@@ -2213,6 +2354,7 @@ th {
 .bdc-sales-leaderboard__totals span {
   display: grid;
   gap: 4px;
+  min-width: 0;
   padding: 12px 14px;
   border-radius: 16px;
   border: 1px solid rgba(31, 37, 43, 0.08);
@@ -2257,6 +2399,7 @@ th {
   display: flex;
   gap: 8px;
   flex-wrap: wrap;
+  align-items: flex-start;
 }
 
 .bdc-sales-rate-pill {
@@ -2273,7 +2416,8 @@ th {
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  white-space: nowrap;
+  white-space: normal;
+  text-align: center;
 }
 
 .bdc-sales-rate-pill.is-good {
@@ -2383,6 +2527,7 @@ th {
 .bdc-sales-agent-card__summary-stat span {
   color: var(--muted);
   font-size: 0.82rem;
+  line-height: 1.35;
 }
 
 .bdc-sales-agent-card__summary-stat strong {
@@ -6065,6 +6210,8 @@ button.special-card:hover:not(:disabled) {
   .traffic-analysis-list__item,
   .traffic-analysis-section__summary,
   .traffic-analysis-section__meta,
+  .bdc-sales-workspace-panel__header,
+  .bdc-sales-workspace-panel__quick-head,
   .bdc-sales-insight-card__header,
   .bdc-sales-leaderboard__rail-top,
   .bdc-sales-summary-panel__header,
@@ -6083,6 +6230,8 @@ button.special-card:hover:not(:disabled) {
     grid-template-columns: 1fr;
   }
 
+  .bdc-sales-workspace-panel__layout,
+  .bdc-sales-workspace-panel__quick-grid,
   .bdc-sales-kpi-grid,
   .bdc-sales-insights-grid,
   .bdc-sales-leaderboard__totals,
@@ -6241,6 +6390,9 @@ button.special-card:hover:not(:disabled) {
   .freshup-hero,
   .freshup-layout,
   .fresh-up-form-grid,
+  .bdc-sales-workspace-panel__layout,
+  .bdc-sales-workspace-panel__quick-grid,
+  .bdc-sales-workspace-panel__stats,
   .bdc-sales-kpi-grid,
   .bdc-sales-insights-grid,
   .bdc-sales-tracker-hero__controls,
@@ -6282,6 +6434,10 @@ button.special-card:hover:not(:disabled) {
   .bdc-sales-view-toggle {
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+  }
+
+  .bdc-sales-workspace-panel__submit {
     width: 100%;
   }
 

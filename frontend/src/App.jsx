@@ -1329,7 +1329,7 @@ export default function App() {
   const [bdcSalesTrackerView, setBdcSalesTrackerView] = useState("tracker");
   const [bdcSalesTrackerGoalDraft, setBdcSalesTrackerGoalDraft] = useState("252");
   const [bdcSalesTrackerRulesDraft, setBdcSalesTrackerRulesDraft] = useState(() => defaultBdcSalesTrackerRulesDraft());
-  const [bdcSalesTrackerFocusKey, setBdcSalesTrackerFocusKey] = useState("all_sales_people");
+  const [bdcSalesTrackerFocusKey, setBdcSalesTrackerFocusKey] = useState("");
   const [bdcSalesTrackerFocusNoteDraft, setBdcSalesTrackerFocusNoteDraft] = useState("");
   const [bdcSalesTrackerEntryDrafts, setBdcSalesTrackerEntryDrafts] = useState({});
   const [bdcSalesTrackerDmsLogDraft, setBdcSalesTrackerDmsLogDraft] = useState(() => emptyBdcSalesTrackerDmsLogDraft());
@@ -1743,16 +1743,29 @@ export default function App() {
     (stage) => Number(stage.rate || 0) < Number(stage.floor || 0)
   );
   const trackerFocusOptions = [
-    { key: "all_sales_people", label: "All Sales People" },
     ...trackerAgents
       .filter((agent) => agent.active)
       .map((agent) => ({ key: `agent:${agent.agent_id}`, label: agent.agent_name })),
+    { key: "all_sales_people", label: "All Sales People" },
   ];
   const selectedTrackerFocus =
     trackerFocusOptions.find((option) => option.key === bdcSalesTrackerFocusKey) || trackerFocusOptions[0] || null;
   const selectedTrackerFocusNote =
     trackerFocusNotes.find((entry) => entry.focus_key === (selectedTrackerFocus?.key || "")) || null;
   const canEditTrackerAdmin = Boolean(adminSession && adminToken);
+  const selectedTrackerAgentId =
+    selectedTrackerFocus?.key && String(selectedTrackerFocus.key).startsWith("agent:")
+      ? Number(String(selectedTrackerFocus.key).split(":")[1] || 0)
+      : null;
+  const selectedTrackerAgent = selectedTrackerAgentId
+    ? trackerAgents.find((agent) => Number(agent.agent_id) === Number(selectedTrackerAgentId)) || null
+    : null;
+  const selectedTrackerAgentDraft = selectedTrackerAgent
+    ? bdcSalesTrackerEntryDrafts[selectedTrackerAgent.agent_id] || emptyBdcSalesTrackerEntryDraft()
+    : emptyBdcSalesTrackerEntryDraft();
+  const selectedTrackerDraftDealCount = selectedTrackerAgent
+    ? parseBdcSalesTrackerDraftNumbers(selectedTrackerAgentDraft.dms_numbers_text).length
+    : 0;
 
   function applyBdcSalesTrackerData(data) {
     setBdcSalesTracker(data);
@@ -4763,7 +4776,192 @@ export default function App() {
 
             {bdcSalesTrackerView === "tracker" ? (
               <>
-                <div className="bdc-sales-kpi-grid">
+                <div className={`panel bdc-sales-workspace-panel ${selectedTrackerAgent ? "is-agent-selected" : "is-team-view"}`}>
+                  <div className="bdc-sales-workspace-panel__header">
+                    <div>
+                      <span className="eyebrow">Agent input workspace</span>
+                      <h3>
+                        {selectedTrackerAgent
+                          ? `${selectedTrackerAgent.agent_name} input first`
+                          : "Choose an agent first, then enter notes and DMS tracking"}
+                      </h3>
+                      <p className="admin-note">
+                        This is the clean entry area the BDC agent should live in. Pick the roster view, save the month note,
+                        and drop in DMS numbers here before touching the reporting sections below.
+                      </p>
+                    </div>
+                    <div className="bdc-sales-inline-summary">
+                      <span>{selectedTrackerFocus?.label || "All Sales People"}</span>
+                      <span>{monthLabel(bdcSalesTrackerMonth)}</span>
+                      <span>
+                        {selectedTrackerFocusNote?.updated_at
+                          ? `Saved ${dateTimeLabel(selectedTrackerFocusNote.updated_at)}`
+                          : "No saved note yet"}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="bdc-sales-workspace-panel__layout">
+                    <div className="bdc-sales-workspace-panel__notes">
+                      <label>
+                        <span>Roster focus</span>
+                        <select
+                          value={selectedTrackerFocus?.key || "all_sales_people"}
+                          onChange={(event) => applyBdcSalesTrackerFocusSelection(event.target.value)}
+                        >
+                          {trackerFocusOptions.map((option) => (
+                            <option key={`tracker-workspace-focus-${option.key}`} value={option.key}>
+                              {option.label}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label className="bdc-sales-workspace-panel__notes-field">
+                        <span>Monthly tracking note</span>
+                        <textarea
+                          value={bdcSalesTrackerFocusNoteDraft}
+                          onChange={(event) => setBdcSalesTrackerFocusNoteDraft(event.target.value)}
+                          placeholder="Expected sold, active opportunities, and anything still in motion for this month."
+                        />
+                      </label>
+                      <div className="bdc-sales-workspace-panel__actions">
+                        <button
+                          type="button"
+                          onClick={saveBdcSalesTrackerFocusNotes}
+                          disabled={busy === "bdc-sales-focus-note"}
+                        >
+                          {busy === "bdc-sales-focus-note" ? "Saving..." : "Save Tracking Note"}
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="bdc-sales-workspace-panel__quick-add">
+                      <div className="bdc-sales-workspace-panel__quick-head">
+                        <div>
+                          <span className="eyebrow">Batch DMS entry</span>
+                          <h4>{selectedTrackerAgent ? "Add separate tracked deal rows" : "Select an agent to enable DMS entry"}</h4>
+                        </div>
+                        {selectedTrackerAgent ? (
+                          <div className="bdc-sales-workspace-panel__stats">
+                            <span>
+                              <b>{Number(selectedTrackerAgent.actual_sold || 0)}</b>
+                              Apt sold
+                            </span>
+                            <span>
+                              <b>{Number(selectedTrackerAgent.sold_count || 0)}</b>
+                              Green
+                            </span>
+                            <span>
+                              <b>{Number(selectedTrackerAgent.entries?.length || 0)}</b>
+                              Pending
+                            </span>
+                            <span>
+                              <b>{Number(selectedTrackerAgent.appointments_shown || 0)}</b>
+                              Shown
+                            </span>
+                          </div>
+                        ) : null}
+                      </div>
+
+                      {selectedTrackerAgent ? (
+                        <>
+                          <div className="bdc-sales-entry-sheet__chips">
+                            <span className={`bdc-sales-entry-sheet__chip ${selectedTrackerDraftDealCount ? "is-ready" : ""}`}>
+                              {selectedTrackerDraftDealCount
+                                ? `${selectedTrackerDraftDealCount} ${selectedTrackerDraftDealCount === 1 ? "deal" : "deals"} ready`
+                                : "Paste one or more DMS numbers"}
+                            </span>
+                            <span className="bdc-sales-entry-sheet__chip is-pending">
+                              New rows start grey until Reynolds confirms them green
+                            </span>
+                          </div>
+                          <div className="bdc-sales-workspace-panel__quick-grid">
+                            <label className="bdc-sales-workspace-panel__field bdc-sales-workspace-panel__field--batch">
+                              <span>DMS numbers</span>
+                              <textarea
+                                rows={4}
+                                value={selectedTrackerAgentDraft.dms_numbers_text}
+                                onChange={(event) =>
+                                  patchBdcSalesTrackerEntryDraft(
+                                    selectedTrackerAgent.agent_id,
+                                    "dms_numbers_text",
+                                    event.target.value
+                                  )
+                                }
+                                placeholder={"124913\n124914\n124915"}
+                                aria-label={`DMS numbers for ${selectedTrackerAgent.agent_name}`}
+                              />
+                            </label>
+                            <label className="bdc-sales-workspace-panel__field">
+                              <span>Profile / customer</span>
+                              <input
+                                value={selectedTrackerAgentDraft.profile_name}
+                                onChange={(event) =>
+                                  patchBdcSalesTrackerEntryDraft(
+                                    selectedTrackerAgent.agent_id,
+                                    "profile_name",
+                                    event.target.value
+                                  )
+                                }
+                                placeholder="Optional profile / customer"
+                              />
+                            </label>
+                            <label className="bdc-sales-workspace-panel__field">
+                              <span>Working note</span>
+                              <input
+                                value={selectedTrackerAgentDraft.notes}
+                                onChange={(event) =>
+                                  patchBdcSalesTrackerEntryDraft(selectedTrackerAgent.agent_id, "notes", event.target.value)
+                                }
+                                placeholder="Optional working note"
+                              />
+                            </label>
+                            <button
+                              type="button"
+                              className="bdc-sales-workspace-panel__submit"
+                              onClick={() => addBdcSalesTrackerEntry(selectedTrackerAgent)}
+                              disabled={busy === `bdc-sales-create-${selectedTrackerAgent.agent_id}`}
+                            >
+                              {busy === `bdc-sales-create-${selectedTrackerAgent.agent_id}`
+                                ? "Adding..."
+                                : selectedTrackerDraftDealCount > 1
+                                  ? `Add ${selectedTrackerDraftDealCount} Deals`
+                                  : selectedTrackerDraftDealCount === 1
+                                    ? "Add Deal"
+                                    : "Add Row"}
+                            </button>
+                          </div>
+                        </>
+                      ) : (
+                        <div className="bdc-sales-workspace-panel__empty">
+                          Choose Cindy, Kai, or Joanna from roster focus to turn on the agent entry area. All Sales People
+                          works best for a shared month note, not for batch DMS input.
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                <details className="panel bdc-sales-collapsible">
+                  <summary className="bdc-sales-collapsible__summary">
+                    <div className="bdc-sales-collapsible__copy">
+                      <span className="eyebrow">Month analytics</span>
+                      <h3>Goal pacing, funnel health, and DMS pipeline</h3>
+                      <p className="admin-note">
+                        These are supporting analytics. Keep them collapsed when the team is entering data and open them when
+                        you want to review the month.
+                      </p>
+                    </div>
+                    <div className="bdc-sales-insights-panel__summary-chips">
+                      <span>Goal {Math.round(trackerGoalValue || 0)}</span>
+                      <span>Green {trackerConfirmedCount}</span>
+                      <span>Projected {formatTrackerNumber(trackerProjection)}</span>
+                      <span>{trackerDaysLeft} days left</span>
+                    </div>
+                    <span className="bdc-sales-collapsible__toggle">Open analytics</span>
+                  </summary>
+                  <div className="bdc-sales-collapsible__body">
+                    <div className="bdc-sales-kpi-grid">
                   <article className="bdc-sales-kpi bdc-sales-kpi--primary bdc-sales-kpi--goal">
                     <div className="bdc-sales-kpi__label">
                       <span>Sold goal widget</span>
@@ -4896,7 +5094,9 @@ export default function App() {
                       </span>
                     </div>
                   </article>
-                </div>
+                    </div>
+                  </div>
+                </details>
 
                 <div className="panel bdc-sales-leaderboard-panel">
                   <div className="bdc-sales-summary-panel__header">
@@ -4926,8 +5126,8 @@ export default function App() {
                               <div>
                                 <strong>{agent.agent_name}</strong>
                                 <small>
-                                  {agent.active ? "Active agent" : "Historical agent"} · {Number(agent.total_leads || 0)} leads ·{" "}
-                                  {Number(agent.appointments_set || 0)} set · {Number(agent.appointments_shown || 0)} shown
+                                  {agent.active ? "Active agent" : "Historical agent"} | {Number(agent.total_leads || 0)} leads |{" "}
+                                  {Number(agent.appointments_set || 0)} set | {Number(agent.appointments_shown || 0)} shown
                                 </small>
                               </div>
                             </div>
@@ -5135,50 +5335,6 @@ export default function App() {
                     </article>
                   </div>
                 </details>
-
-                <div className="panel bdc-sales-focus-panel">
-                  <div className="bdc-sales-summary-panel__header">
-                    <div>
-                      <span className="eyebrow">Tracking notes</span>
-                      <h3>Expected sold and opportunity notes by roster view</h3>
-                    </div>
-                    <div className="bdc-sales-inline-summary bdc-sales-inline-summary--soft">
-                      <span>{selectedTrackerFocus?.label || "All Sales People"}</span>
-                      <span>{monthLabel(bdcSalesTrackerMonth)}</span>
-                      <span>{selectedTrackerFocusNote?.updated_at ? `Saved ${dateTimeLabel(selectedTrackerFocusNote.updated_at)}` : "No saved note yet"}</span>
-                    </div>
-                  </div>
-                  <div className="bdc-sales-focus-panel__form">
-                    <label>
-                      <span>Roster focus</span>
-                      <select
-                        value={selectedTrackerFocus?.key || "all_sales_people"}
-                        onChange={(event) => applyBdcSalesTrackerFocusSelection(event.target.value)}
-                      >
-                        {trackerFocusOptions.map((option) => (
-                          <option key={`tracker-focus-${option.key}`} value={option.key}>
-                            {option.label}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                    <label className="bdc-sales-focus-panel__notes">
-                      <span>Tracking notes for this month</span>
-                      <textarea
-                        value={bdcSalesTrackerFocusNoteDraft}
-                        onChange={(event) => setBdcSalesTrackerFocusNoteDraft(event.target.value)}
-                        placeholder="Expected sold, open opportunities without DMS yet, or anything the BDC rep is tracking for this month."
-                      />
-                    </label>
-                    <button
-                      type="button"
-                      onClick={saveBdcSalesTrackerFocusNotes}
-                      disabled={busy === "bdc-sales-focus-note"}
-                    >
-                      {busy === "bdc-sales-focus-note" ? "Saving..." : "Save Tracking Notes"}
-                    </button>
-                  </div>
-                </div>
 
                 <details className="panel bdc-sales-summary-panel bdc-sales-collapsible">
                   <summary className="bdc-sales-collapsible__summary">
