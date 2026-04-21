@@ -1519,12 +1519,44 @@ export default function App() {
   const trackerAppointmentShowRate = bdcSalesTrackerTeamTotals.appointmentsSet
     ? bdcSalesTrackerTeamTotals.appointmentsShown / bdcSalesTrackerTeamTotals.appointmentsSet
     : 0;
-  const trackerSoldFromAppointmentsRate = bdcSalesTrackerTeamTotals.appointmentsSet
-    ? bdcSalesTrackerTeamTotals.actualSold / bdcSalesTrackerTeamTotals.appointmentsSet
-    : 0;
   const trackerSoldFromShownRate = bdcSalesTrackerTeamTotals.appointmentsShown
     ? bdcSalesTrackerTeamTotals.actualSold / bdcSalesTrackerTeamTotals.appointmentsShown
     : 0;
+  const trackerFunnelScoreboard = [
+    {
+      key: "set",
+      label: "Leads to Set",
+      numerator: bdcSalesTrackerTeamTotals.appointmentsSet,
+      denominator: bdcSalesTrackerTeamTotals.totalLeads,
+      rate: trackerAppointmentSetRate,
+      floor: trackerBenchmarks.appointment_set_rate_floor,
+      target: trackerBenchmarks.appointment_set_rate_target,
+      tone: trackerBenchmarkTone(trackerAppointmentSetRate, trackerBenchmarks.appointment_set_rate_floor),
+    },
+    {
+      key: "shown",
+      label: "Set to Shown",
+      numerator: bdcSalesTrackerTeamTotals.appointmentsShown,
+      denominator: bdcSalesTrackerTeamTotals.appointmentsSet,
+      rate: trackerAppointmentShowRate,
+      floor: trackerBenchmarks.appointment_show_rate_floor,
+      target: trackerBenchmarks.appointment_show_rate_target,
+      tone: trackerBenchmarkTone(trackerAppointmentShowRate, trackerBenchmarks.appointment_show_rate_floor),
+    },
+    {
+      key: "sold",
+      label: "Shown to Sold",
+      numerator: bdcSalesTrackerTeamTotals.actualSold,
+      denominator: bdcSalesTrackerTeamTotals.appointmentsShown,
+      rate: trackerSoldFromShownRate,
+      floor: trackerBenchmarks.sold_from_appointments_rate_floor,
+      target: trackerBenchmarks.sold_from_appointments_rate_target,
+      tone: trackerBenchmarkTone(trackerSoldFromShownRate, trackerBenchmarks.sold_from_appointments_rate_floor),
+    },
+  ];
+  const trackerFunnelNeedsAttention = trackerFunnelScoreboard.some(
+    (stage) => Number(stage.rate || 0) < Number(stage.floor || 0)
+  );
   const trackerFocusOptions = [
     { key: "all_sales_people", label: "All Sales People" },
     ...trackerAgents
@@ -4523,35 +4555,59 @@ export default function App() {
                     </div>
                     <small>{monthLabel(bdcSalesTrackerMonth)} resets into a fresh tracker sheet next month.</small>
                   </article>
-                  <article
-                    className={`bdc-sales-kpi ${
-                      trackerAppointmentSetRate < trackerBenchmarks.appointment_set_rate_floor ||
-                      trackerAppointmentShowRate < trackerBenchmarks.appointment_show_rate_floor ||
-                      trackerSoldFromAppointmentsRate < trackerBenchmarks.sold_from_appointments_rate_floor
-                        ? "is-warning"
-                        : "is-positive"
-                    }`}
-                  >
+                  <article className={`bdc-sales-kpi bdc-sales-kpi--funnel ${trackerFunnelNeedsAttention ? "is-warning" : "is-positive"}`}>
                     <div className="bdc-sales-kpi__label">
                       <span>Appointment funnel</span>
                       <small>Leads to set to shown to sold against benchmarks</small>
                     </div>
-                    <strong>{bdcSalesTrackerTeamTotals.appointmentsShown}</strong>
-                    <div className="bdc-sales-kpi__stats">
-                      <span className={trackerBenchmarkTone(trackerAppointmentSetRate, trackerBenchmarks.appointment_set_rate_floor)}>
-                        Set rate {formatPercent(trackerAppointmentSetRate || 0)} | avg {formatPercent(trackerBenchmarks.appointment_set_rate_floor)} to {formatPercent(trackerBenchmarks.appointment_set_rate_target)}
-                      </span>
-                      <span className={trackerBenchmarkTone(trackerAppointmentShowRate, trackerBenchmarks.appointment_show_rate_floor)}>
-                        Show rate {formatPercent(trackerAppointmentShowRate || 0)} | avg {formatPercent(trackerBenchmarks.appointment_show_rate_floor)} to {formatPercent(trackerBenchmarks.appointment_show_rate_target)}
-                      </span>
-                      <span className={trackerBenchmarkTone(trackerSoldFromAppointmentsRate, trackerBenchmarks.sold_from_appointments_rate_floor)}>
-                        Sold from set {formatPercent(trackerSoldFromAppointmentsRate || 0)} | avg {formatPercent(trackerBenchmarks.sold_from_appointments_rate_floor)} to{" "}
-                        {formatPercent(trackerBenchmarks.sold_from_appointments_rate_ceiling)}
-                      </span>
-                      <span className={trackerBenchmarkTone(trackerSoldFromShownRate, trackerBenchmarks.sold_from_appointments_rate_floor)}>
-                        Close from shown {formatPercent(trackerSoldFromShownRate || 0)} | shown sold conversion
-                      </span>
+                    <div className="bdc-sales-funnel-board">
+                      <div className="bdc-sales-funnel-board__counts">
+                        <span>
+                          <b>{bdcSalesTrackerTeamTotals.totalLeads}</b>
+                          Leads
+                        </span>
+                        <span>
+                          <b>{bdcSalesTrackerTeamTotals.appointmentsSet}</b>
+                          Set
+                        </span>
+                        <span>
+                          <b>{bdcSalesTrackerTeamTotals.appointmentsShown}</b>
+                          Shown
+                        </span>
+                        <span>
+                          <b>{bdcSalesTrackerTeamTotals.actualSold}</b>
+                          Sold
+                        </span>
+                      </div>
+                      <div className="bdc-sales-funnel-stage-grid">
+                        {trackerFunnelScoreboard.map((stage) => (
+                          <article
+                            key={stage.key}
+                            className={`bdc-sales-funnel-stage ${stage.tone}`}
+                          >
+                            <div className="bdc-sales-funnel-stage__top">
+                              <span>{stage.label}</span>
+                              <div className="bdc-sales-funnel-stage__percent">{formatPercent(stage.rate || 0)}</div>
+                            </div>
+                            <div className="bdc-sales-funnel-stage__meta">
+                              <span>
+                                {stage.numerator} of {stage.denominator || 0}
+                              </span>
+                              <span>
+                                Pass line {formatPercent(stage.floor)} | target {formatPercent(stage.target)}
+                              </span>
+                            </div>
+                            <div className="bdc-sales-funnel-stage__track">
+                              <div
+                                className={`bdc-sales-funnel-stage__fill ${stage.tone}`}
+                                style={{ width: `${percentOfTotal(stage.rate, stage.target || stage.floor || 1)}%` }}
+                              />
+                            </div>
+                          </article>
+                        ))}
+                      </div>
                     </div>
+                    <small>Read this as one scoreboard: leads created, appointments shown, and sold conversion against your benchmark floor.</small>
                   </article>
                   <article className={`bdc-sales-kpi ${trackerBehindByValue >= 0 ? "is-warning" : "is-positive"}`}>
                     <div className="bdc-sales-kpi__label">
