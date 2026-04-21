@@ -48,7 +48,11 @@
         })
       );
     }
-    node.click?.();
+    const tagName = String(node.tagName || "").toUpperCase();
+    const role = String(node.getAttribute?.("role") || "").toLowerCase();
+    if (tagName === "INPUT" || tagName === "LABEL" || role === "checkbox") {
+      node.click?.();
+    }
     return true;
   }
 

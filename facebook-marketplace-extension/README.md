@@ -29,4 +29,5 @@ It does not auto-submit the listing.
 
 Notes:
 - No extra plugin is required. Just reload the extension after updates in `chrome://extensions`.
-- Version `0.4.1` keeps photo handling inside the extension and removes the old Quick Post JPG downloads from the browser.
+- Version `0.4.2` fixes a double-click issue that could open and then instantly close Facebook dropdowns before the helper selected anything.
+- Run `npm.cmd run test:harness --prefix facebook-marketplace-extension` to execute the local Marketplace form simulation harness.

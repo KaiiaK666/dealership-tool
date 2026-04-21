@@ -1,0 +1,11 @@
+{
+  "name": "dealership-marketplace-helper",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test:harness": "node harness/run-harness.mjs"
+  },
+  "devDependencies": {
+    "playwright-core": "^1.59.1"
+  }
+}

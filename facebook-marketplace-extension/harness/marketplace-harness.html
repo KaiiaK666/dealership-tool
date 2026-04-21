@@ -1,0 +1,499 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <title>Marketplace Harness</title>
+    <style>
+      body {
+        margin: 0;
+        font-family: Arial, sans-serif;
+        background: #eef1f5;
+      }
+
+      .shell {
+        display: grid;
+        grid-template-columns: 320px 1fr;
+        min-height: 100vh;
+      }
+
+      .sidebar {
+        background: #fff;
+        border-right: 1px solid #d6dbe3;
+        padding: 18px 14px 28px;
+      }
+
+      .stage {
+        padding: 22px;
+      }
+
+      .card {
+        background: #fff;
+        border: 1px solid #d6dbe3;
+        border-radius: 14px;
+        padding: 16px;
+        margin-bottom: 14px;
+      }
+
+      .field {
+        display: grid;
+        gap: 6px;
+        margin-bottom: 12px;
+      }
+
+      .field > span {
+        color: #3c4658;
+        font-size: 13px;
+        font-weight: 700;
+      }
+
+      .control,
+      textarea,
+      input {
+        width: 100%;
+        box-sizing: border-box;
+        border: 1px solid #bcc5d3;
+        border-radius: 12px;
+        background: #fff;
+        padding: 12px 14px;
+        font-size: 14px;
+      }
+
+      textarea {
+        min-height: 120px;
+        resize: vertical;
+      }
+
+      .combobox-shell {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        align-items: center;
+        gap: 10px;
+        border: 1px solid #bcc5d3;
+        border-radius: 12px;
+        background: #fff;
+        padding: 4px 6px 4px 12px;
+      }
+
+      .combobox-trigger {
+        border: 0;
+        background: transparent;
+        text-align: left;
+        padding: 8px 0;
+        font-size: 14px;
+      }
+
+      .combobox-pill {
+        color: #1f2937;
+        font-size: 14px;
+        font-weight: 700;
+        white-space: nowrap;
+      }
+
+      .menu-anchor {
+        position: relative;
+      }
+
+      .listbox {
+        position: absolute;
+        inset: calc(100% + 4px) 0 auto 0;
+        background: #fff;
+        border: 1px solid #bcc5d3;
+        border-radius: 12px;
+        box-shadow: 0 12px 24px rgba(15, 23, 42, 0.12);
+        padding: 6px;
+        z-index: 10;
+      }
+
+      .listbox[hidden] {
+        display: none;
+      }
+
+      .option {
+        display: block;
+        width: 100%;
+        border: 0;
+        background: transparent;
+        text-align: left;
+        border-radius: 10px;
+        padding: 10px 12px;
+      }
+
+      .option:hover {
+        background: #eef4ff;
+      }
+
+      .checkbox-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 12px;
+      }
+
+      .photo-drop {
+        display: grid;
+        gap: 8px;
+        border: 1px dashed #8a95a7;
+        border-radius: 14px;
+        background: #fbfcfe;
+        padding: 16px;
+        margin-bottom: 12px;
+      }
+
+      .photo-drop input[type="file"] {
+        padding: 0;
+        border: 0;
+      }
+
+      .photo-count {
+        color: #526074;
+        font-size: 13px;
+      }
+
+      .action-row {
+        display: flex;
+        gap: 10px;
+      }
+
+      .primary {
+        border: 0;
+        border-radius: 999px;
+        background: #1d4ed8;
+        color: #fff;
+        font-weight: 700;
+        padding: 12px 18px;
+      }
+
+      .primary[aria-disabled="true"] {
+        background: #aeb8c7;
+      }
+
+      .hidden {
+        display: none;
+      }
+
+      .preview {
+        background: #fff;
+        border: 1px solid #d6dbe3;
+        border-radius: 18px;
+        min-height: 720px;
+        padding: 24px;
+      }
+
+      pre {
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="shell">
+      <aside class="sidebar">
+        <div class="card" id="stepOne">
+          <div class="field menu-anchor" data-combobox-field="vehicle type">
+            <span id="vehicleTypeLabel">Vehicle type</span>
+            <div class="combobox-shell">
+              <button
+                type="button"
+                id="vehicleTypeTrigger"
+                class="combobox-trigger"
+                role="combobox"
+                aria-haspopup="listbox"
+                aria-expanded="false"
+                aria-labelledby="vehicleTypeLabel"
+              ></button>
+              <span id="vehicleTypePill" class="combobox-pill">Car/Truck</span>
+            </div>
+            <div id="vehicleTypeListbox" class="listbox" role="listbox" hidden></div>
+          </div>
+
+          <div class="photo-drop" id="photoDrop">
+            <strong>Add photos</strong>
+            <span class="photo-count" id="photoCount">Photos · 0 / 20</span>
+            <input id="photoInput" type="file" accept="image/*" multiple>
+          </div>
+
+          <label class="field">
+            <span>Location</span>
+            <input id="location" value="McAllen">
+          </label>
+
+          <label class="field">
+            <span>Year</span>
+            <input id="year">
+          </label>
+
+          <label class="field">
+            <span>Make</span>
+            <input id="make">
+          </label>
+
+          <label class="field">
+            <span>Model</span>
+            <input id="model">
+          </label>
+
+          <label class="field">
+            <span>Mileage</span>
+            <input id="mileage">
+          </label>
+
+          <label class="field">
+            <span>Price</span>
+            <input id="price">
+          </label>
+
+          <label class="field">
+            <span>Description</span>
+            <textarea id="description"></textarea>
+          </label>
+
+          <label class="checkbox-row">
+            <input id="cleanTitle" type="checkbox">
+            <span>Clean title</span>
+          </label>
+
+          <div class="field menu-anchor" data-combobox-field="condition">
+            <span>Condition</span>
+            <button type="button" class="control combobox-trigger" id="conditionTrigger" role="combobox" aria-haspopup="listbox"></button>
+            <div id="conditionListbox" class="listbox" role="listbox" hidden></div>
+          </div>
+
+          <div class="field menu-anchor" data-combobox-field="body style">
+            <span>Body style</span>
+            <button type="button" class="control combobox-trigger" id="bodyStyleTrigger" role="combobox" aria-haspopup="listbox"></button>
+            <div id="bodyStyleListbox" class="listbox" role="listbox" hidden></div>
+          </div>
+
+          <div class="field menu-anchor" data-combobox-field="fuel type">
+            <span>Fuel type</span>
+            <button type="button" class="control combobox-trigger" id="fuelTypeTrigger" role="combobox" aria-haspopup="listbox"></button>
+            <div id="fuelTypeListbox" class="listbox" role="listbox" hidden></div>
+          </div>
+
+          <div class="field menu-anchor" data-combobox-field="transmission">
+            <span>Transmission</span>
+            <button type="button" class="control combobox-trigger" id="transmissionTrigger" role="combobox" aria-haspopup="listbox"></button>
+            <div id="transmissionListbox" class="listbox" role="listbox" hidden></div>
+          </div>
+
+          <div class="action-row">
+            <button id="nextButton" class="primary" type="button" aria-disabled="true">Next</button>
+          </div>
+          <div id="progressLabel" aria-label="Currently on step 1 of 2"></div>
+        </div>
+
+        <div class="card hidden" id="stepTwo">
+          <label class="field">
+            <span>Title</span>
+            <input id="finalTitle">
+          </label>
+
+          <label class="field">
+            <span>Description</span>
+            <textarea id="finalDescription"></textarea>
+          </label>
+
+          <button id="publishButton" class="primary" type="button">Publish</button>
+        </div>
+      </aside>
+
+      <main class="stage">
+        <div class="preview">
+          <h1>Harness Preview</h1>
+          <p>This page intentionally mimics the Facebook vehicle listing form just enough for selector regression checks.</p>
+          <pre id="stateDump"></pre>
+        </div>
+      </main>
+    </div>
+
+    <script>
+      (() => {
+        const comboboxes = [
+          {
+            trigger: document.getElementById("vehicleTypeTrigger"),
+            listbox: document.getElementById("vehicleTypeListbox"),
+            field: "vehicleType",
+            initial: "",
+            visibleValueNode: document.getElementById("vehicleTypePill"),
+            options: ["Car/Truck", "Cars & Trucks", "Truck", "Car"],
+          },
+          {
+            trigger: document.getElementById("conditionTrigger"),
+            listbox: document.getElementById("conditionListbox"),
+            field: "condition",
+            initial: "",
+            options: ["New", "Excellent", "Very Good", "Good"],
+          },
+          {
+            trigger: document.getElementById("bodyStyleTrigger"),
+            listbox: document.getElementById("bodyStyleListbox"),
+            field: "bodyStyle",
+            initial: "",
+            options: ["SUV", "Sedan", "Truck", "Hatchback"],
+          },
+          {
+            trigger: document.getElementById("fuelTypeTrigger"),
+            listbox: document.getElementById("fuelTypeListbox"),
+            field: "fuelType",
+            initial: "",
+            options: ["Petrol", "Gasoline", "Hybrid", "Electric"],
+          },
+          {
+            trigger: document.getElementById("transmissionTrigger"),
+            listbox: document.getElementById("transmissionListbox"),
+            field: "transmission",
+            initial: "",
+            options: ["Automatic", "Manual"],
+          },
+        ];
+
+        const state = {
+          vehicleType: "",
+          condition: "",
+          bodyStyle: "",
+          fuelType: "",
+          transmission: "",
+          photos: 0,
+        };
+
+        function updateDump() {
+          const payload = {
+            progress: document.getElementById("stepTwo").classList.contains("hidden") ? "step1" : "step2",
+            vehicleTypePill: document.getElementById("vehicleTypePill").textContent.trim(),
+            vehicleTypeTriggerText: document.getElementById("vehicleTypeTrigger").textContent.trim(),
+            year: document.getElementById("year").value,
+            make: document.getElementById("make").value,
+            model: document.getElementById("model").value,
+            mileage: document.getElementById("mileage").value,
+            price: document.getElementById("price").value,
+            description: document.getElementById("description").value,
+            cleanTitle: document.getElementById("cleanTitle").checked,
+            condition: state.condition,
+            bodyStyle: state.bodyStyle,
+            fuelType: state.fuelType,
+            transmission: state.transmission,
+            photoCount: state.photos,
+            finalTitle: document.getElementById("finalTitle").value,
+            finalDescription: document.getElementById("finalDescription").value,
+          };
+          document.getElementById("stateDump").textContent = JSON.stringify(payload, null, 2);
+        }
+
+        function setComboValue(combo, value) {
+          state[combo.field] = value;
+          combo.trigger.textContent = value;
+          combo.trigger.setAttribute("aria-expanded", "false");
+          combo.listbox.hidden = true;
+          updateNextState();
+          updateDump();
+        }
+
+        function buildListbox(combo) {
+          combo.listbox.innerHTML = "";
+          combo.options.forEach((value) => {
+            const option = document.createElement("button");
+            option.type = "button";
+            option.className = "option";
+            option.setAttribute("role", "option");
+            option.textContent = value;
+            option.addEventListener("click", () => setComboValue(combo, value));
+            combo.listbox.appendChild(option);
+          });
+        }
+
+        comboboxes.forEach((combo) => {
+          buildListbox(combo);
+          combo.trigger.addEventListener("click", () => {
+            const nextOpen = combo.listbox.hidden;
+            document.querySelectorAll(".listbox").forEach((node) => {
+              node.hidden = true;
+            });
+            document.querySelectorAll('[role="combobox"]').forEach((node) => {
+              node.setAttribute("aria-expanded", "false");
+            });
+            combo.listbox.hidden = !nextOpen;
+            combo.trigger.setAttribute("aria-expanded", String(nextOpen));
+          });
+          if (combo.initial) setComboValue(combo, combo.initial);
+        });
+
+        document.addEventListener("click", (event) => {
+          if (!event.target.closest(".menu-anchor")) {
+            document.querySelectorAll(".listbox").forEach((node) => {
+              node.hidden = true;
+            });
+            document.querySelectorAll('[role="combobox"]').forEach((node) => {
+              node.setAttribute("aria-expanded", "false");
+            });
+          }
+        });
+
+        const photoInput = document.getElementById("photoInput");
+        photoInput.addEventListener("input", () => {
+          state.photos = Number(photoInput.files?.length || 0);
+          document.getElementById("photoCount").textContent = `Photos · ${state.photos} / 20`;
+          updateNextState();
+          updateDump();
+        });
+        photoInput.addEventListener("change", () => {
+          state.photos = Number(photoInput.files?.length || 0);
+          document.getElementById("photoCount").textContent = `Photos · ${state.photos} / 20`;
+          updateNextState();
+          updateDump();
+        });
+
+        function currentValuesReady() {
+          return Boolean(
+            document.getElementById("price").value &&
+            document.getElementById("year").value &&
+            document.getElementById("make").value &&
+            document.getElementById("model").value &&
+            document.getElementById("mileage").value &&
+            document.getElementById("description").value &&
+            document.getElementById("cleanTitle").checked &&
+            state.condition &&
+            state.bodyStyle &&
+            state.fuelType &&
+            state.transmission &&
+            state.photos > 0
+          );
+        }
+
+        function updateNextState() {
+          const nextButton = document.getElementById("nextButton");
+          const ready = currentValuesReady();
+          nextButton.disabled = !ready;
+          nextButton.setAttribute("aria-disabled", ready ? "false" : "true");
+        }
+
+        document.querySelectorAll("input, textarea").forEach((node) => {
+          node.addEventListener("input", () => {
+            updateNextState();
+            updateDump();
+          });
+          node.addEventListener("change", () => {
+            updateNextState();
+            updateDump();
+          });
+        });
+
+        document.getElementById("nextButton").addEventListener("click", () => {
+          if (document.getElementById("nextButton").getAttribute("aria-disabled") === "true") return;
+          document.getElementById("stepOne").classList.add("hidden");
+          document.getElementById("stepTwo").classList.remove("hidden");
+          document.getElementById("progressLabel").setAttribute("aria-label", "Currently on step 2 of 2");
+          updateDump();
+        });
+
+        window.harness = {
+          getState() {
+            return JSON.parse(document.getElementById("stateDump").textContent || "{}");
+          },
+        };
+
+        updateNextState();
+        updateDump();
+      })();
+    </script>
+  </body>
+</html>
