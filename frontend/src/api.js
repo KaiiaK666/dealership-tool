@@ -264,5 +264,17 @@ export const getBdcReport = (params = {}) =>
     start_date: params.startDate,
     end_date: params.endDate,
   })}`);
+export const getBdcSalesTracker = (params = {}) =>
+  request(`/api/bdc-sales-tracker${qs({ month: params.month })}`);
+export const updateBdcSalesTrackerMonth = (payload) =>
+  request("/api/bdc-sales-tracker/month", { method: "POST", body: payload });
+export const updateBdcSalesTrackerAgentMetrics = (agentId, payload) =>
+  request(`/api/bdc-sales-tracker/agents/${encodeURIComponent(agentId)}/metrics`, { method: "POST", body: payload });
+export const createBdcSalesTrackerEntry = (payload) =>
+  request("/api/bdc-sales-tracker/entries", { method: "POST", body: payload });
+export const updateBdcSalesTrackerEntry = (entryId, payload) =>
+  request(`/api/bdc-sales-tracker/entries/${encodeURIComponent(entryId)}`, { method: "PUT", body: payload });
+export const deleteBdcSalesTrackerEntry = (entryId) =>
+  request(`/api/bdc-sales-tracker/entries/${encodeURIComponent(entryId)}`, { method: "DELETE" });
 export const clearBdcHistory = (token) =>
   request("/api/admin/bdc/history", { method: "DELETE", headers: adminHeaders(token) });

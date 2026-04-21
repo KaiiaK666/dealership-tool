@@ -27,6 +27,7 @@ import {
   sendNotificationTestSms,
   getBdcLog,
   getBdcReport,
+  getBdcSalesTracker,
   getBdcState,
   getFreshUpLog,
   getFreshUpLinks,
@@ -48,6 +49,9 @@ import {
   undoReynoldsServiceDriveTrafficImport,
   updateBdcAgent,
   updateBdcDistribution,
+  updateBdcSalesTrackerAgentMetrics,
+  updateBdcSalesTrackerEntry,
+  updateBdcSalesTrackerMonth,
   updateFreshUpLinks,
   undoLastBdcAssign,
   updateBdcUndoSettings,
@@ -60,6 +64,8 @@ import {
   updateServiceDriveTraffic,
   uploadServiceDriveTrafficImages,
   updateServiceDriveTrafficSales,
+  createBdcSalesTrackerEntry,
+  deleteBdcSalesTrackerEntry,
 } from "./api.js";
 import "./App.css";
 
@@ -68,6 +74,7 @@ const TABS = [
   { id: "serviceNotes", label: "Service Drive Notes" },
   { id: "trafficAnalysis", label: "Service Drive Traffic Analysis" },
   { id: "bdc", label: "BDC Assign" },
+  { id: "bdcSalesTracker", label: "BDC Sales Tracker" },
   { id: "reports", label: "BDC Reports" },
   { id: "traffic", label: "Service Drive Traffic" },
   { id: "freshUp", label: "Freshup Log" },
@@ -424,6 +431,24 @@ function creditTierFromScore(scoreValue) {
 function formatMoney(value) {
   if (!Number.isFinite(value)) return "$0.00";
   return value.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 2 });
+}
+
+function formatPercent(value, digits = 1) {
+  const numeric = Number(value || 0);
+  return `${(numeric * 100).toFixed(digits)}%`;
+}
+
+function formatTrackerNumber(value, digits = 1) {
+  const numeric = Number(value || 0);
+  return Number.isFinite(numeric) ? numeric.toFixed(digits) : "0.0";
+}
+
+function bdcSalesTrackerAgentKey(agent) {
+  return `agent-${agent?.agent_id ?? "unknown"}`;
+}
+
+function emptyBdcSalesTrackerEntryDraft() {
+  return { dms_number: "", profile_name: "", notes: "" };
 }
 
 function fillMarketplaceTemplate(template, data) {
@@ -1095,6 +1120,10 @@ export default function App() {
   const [bdcUndoPassword, setBdcUndoPassword] = useState("");
   const [bdcLog, setBdcLog] = useState({ total: 0, entries: [] });
   const [bdcReport, setBdcReport] = useState(null);
+  const [bdcSalesTrackerMonth, setBdcSalesTrackerMonth] = useState(currentMonth());
+  const [bdcSalesTracker, setBdcSalesTracker] = useState(null);
+  const [bdcSalesTrackerGoalDraft, setBdcSalesTrackerGoalDraft] = useState("252");
+  const [bdcSalesTrackerEntryDrafts, setBdcSalesTrackerEntryDrafts] = useState({});
   const [daysOffData, setDaysOffData] = useState({ month: currentMonth(), entries: [] });
   const [selectedDaysOffSalesId, setSelectedDaysOffSalesId] = useState("");
   const [filters, setFilters] = useState({ salespersonId: "", leadStore: "", startDate: "", endDate: "" });
@@ -1354,6 +1383,24 @@ export default function App() {
   const selectedAgentLoopPreset =
     agentLoopPresets.find((item) => item.key === agentLoopForm.presetKey) || agentLoopPresets[0] || null;
   const selectedAgentLoopIsActive = ["queued", "running"].includes(String(selectedAgentRun?.status || "").toLowerCase());
+  const trackerAgents = bdcSalesTracker?.agents || [];
+  const bdcSalesTrackerTeamTotals = trackerAgents.reduce(
+    (totals, agent) => ({
+      totalLeads: totals.totalLeads + Number(agent.total_leads || 0),
+      appointmentsSet: totals.appointmentsSet + Number(agent.appointments_set || 0),
+      actualSold: totals.actualSold + Number(agent.actual_sold || 0),
+      calls: totals.calls + Number(agent.calls_mtd || 0),
+      emails: totals.emails + Number(agent.emails_mtd || 0),
+      texts: totals.texts + Number(agent.texts_mtd || 0),
+      trackerRows: totals.trackerRows + Number(agent.entries?.length || 0),
+    }),
+    { totalLeads: 0, appointmentsSet: 0, actualSold: 0, calls: 0, emails: 0, texts: 0, trackerRows: 0 }
+  );
+
+  function applyBdcSalesTrackerData(data) {
+    setBdcSalesTracker(data);
+    setBdcSalesTrackerGoalDraft(String(data?.goal ?? ""));
+  }
 
   async function loadAll(nextMonth = month, nextFilters = filters) {
     const [sales, bdc, service, log, report, distribution, undoSettings, tabs] = await Promise.all([
@@ -1502,6 +1549,163 @@ export default function App() {
     }
     const data = await getNotificationConfig(adminToken);
     setNotificationConfig(data);
+  }
+
+  async function refreshBdcSalesTracker(nextMonth = bdcSalesTrackerMonth) {
+    const data = await getBdcSalesTracker({ month: nextMonth });
+    applyBdcSalesTrackerData(data);
+  }
+
+  function patchBdcSalesTrackerAgent(agentId, field, value) {
+    setBdcSalesTracker((current) => {
+      if (!current) return current;
+      return {
+        ...current,
+        agents: (current.agents || []).map((agent) =>
+          agent.agent_id === agentId
+            ? {
+                ...agent,
+                [field]: value,
+              }
+            : agent
+        ),
+      };
+    });
+  }
+
+  function patchBdcSalesTrackerEntry(entryId, field, value) {
+    setBdcSalesTracker((current) => {
+      if (!current) return current;
+      return {
+        ...current,
+        agents: (current.agents || []).map((agent) => ({
+          ...agent,
+          entries: (agent.entries || []).map((entry) => (entry.id === entryId ? { ...entry, [field]: value } : entry)),
+        })),
+      };
+    });
+  }
+
+  function patchBdcSalesTrackerEntryDraft(agentId, field, value) {
+    setBdcSalesTrackerEntryDrafts((current) => ({
+      ...current,
+      [agentId]: {
+        ...(current[agentId] || emptyBdcSalesTrackerEntryDraft()),
+        [field]: value,
+      },
+    }));
+  }
+
+  async function saveBdcSalesTrackerGoal() {
+    setBusy("bdc-sales-goal");
+    setError("");
+    try {
+      const data = await updateBdcSalesTrackerMonth({
+        month: bdcSalesTrackerMonth,
+        goal: numericValue(bdcSalesTrackerGoalDraft),
+      });
+      applyBdcSalesTrackerData(data);
+    } catch (errorValue) {
+      setError(errText(errorValue));
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function saveBdcSalesTrackerMetrics(agent) {
+    setBusy(`bdc-sales-metrics-${agent.agent_id}`);
+    setError("");
+    try {
+      const data = await updateBdcSalesTrackerAgentMetrics(agent.agent_id, {
+        month: bdcSalesTrackerMonth,
+        total_leads: Math.round(numericValue(agent.total_leads)),
+        appointments_set: Math.round(numericValue(agent.appointments_set)),
+        actual_sold: Math.round(numericValue(agent.actual_sold)),
+        calls_mtd: Math.round(numericValue(agent.calls_mtd)),
+        emails_mtd: Math.round(numericValue(agent.emails_mtd)),
+        texts_mtd: Math.round(numericValue(agent.texts_mtd)),
+        days_off: Math.round(numericValue(agent.days_off)),
+      });
+      applyBdcSalesTrackerData(data);
+    } catch (errorValue) {
+      setError(errText(errorValue));
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function addBdcSalesTrackerEntry(agent) {
+    const draft = bdcSalesTrackerEntryDrafts[agent.agent_id] || emptyBdcSalesTrackerEntryDraft();
+    setBusy(`bdc-sales-create-${agent.agent_id}`);
+    setError("");
+    try {
+      const data = await createBdcSalesTrackerEntry({
+        month: bdcSalesTrackerMonth,
+        agent_id: agent.agent_id,
+        dms_number: draft.dms_number,
+        profile_name: draft.profile_name,
+        notes: draft.notes,
+        sold: false,
+      });
+      applyBdcSalesTrackerData(data);
+      setBdcSalesTrackerEntryDrafts((current) => ({
+        ...current,
+        [agent.agent_id]: emptyBdcSalesTrackerEntryDraft(),
+      }));
+    } catch (errorValue) {
+      setError(errText(errorValue));
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function saveBdcSalesTrackerEntry(entry) {
+    setBusy(`bdc-sales-entry-${entry.id}`);
+    setError("");
+    try {
+      const data = await updateBdcSalesTrackerEntry(entry.id, {
+        dms_number: entry.dms_number,
+        profile_name: entry.profile_name,
+        notes: entry.notes,
+        sold: Boolean(entry.sold),
+      });
+      applyBdcSalesTrackerData(data);
+    } catch (errorValue) {
+      setError(errText(errorValue));
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function toggleBdcSalesTrackerEntrySold(entry) {
+    setBusy(`bdc-sales-sold-${entry.id}`);
+    setError("");
+    try {
+      const data = await updateBdcSalesTrackerEntry(entry.id, {
+        dms_number: entry.dms_number,
+        profile_name: entry.profile_name,
+        notes: entry.notes,
+        sold: !entry.sold,
+      });
+      applyBdcSalesTrackerData(data);
+    } catch (errorValue) {
+      setError(errText(errorValue));
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function removeBdcSalesTrackerEntry(entryId) {
+    setBusy(`bdc-sales-delete-${entryId}`);
+    setError("");
+    try {
+      const data = await deleteBdcSalesTrackerEntry(entryId);
+      applyBdcSalesTrackerData(data);
+    } catch (errorValue) {
+      setError(errText(errorValue));
+    } finally {
+      setBusy("");
+    }
   }
 
   function applyTrafficSalespersonSelection(nextValue) {
@@ -1732,6 +1936,22 @@ export default function App() {
       active = false;
     };
   }, [month, filters.salespersonId, filters.leadStore, filters.startDate, filters.endDate]);
+
+  useEffect(() => {
+    let active = true;
+    const run = async () => {
+      try {
+        const data = await getBdcSalesTracker({ month: bdcSalesTrackerMonth });
+        if (active) applyBdcSalesTrackerData(data);
+      } catch (errorValue) {
+        if (active) setError(errText(errorValue));
+      }
+    };
+    run();
+    return () => {
+      active = false;
+    };
+  }, [bdcSalesTrackerMonth]);
 
   useEffect(() => {
     let active = true;
@@ -3865,6 +4085,379 @@ export default function App() {
                   </button>
                 </div>
               ) : null}
+            </div>
+          </section>
+        ) : null}
+
+        {tab === "bdcSalesTracker" ? (
+          <section className="stack">
+            <div className="panel bdc-sales-tracker-hero">
+              <div>
+                <span className="eyebrow">Current month BDC tracker</span>
+                <h2>Tracked sold deals, manual month inputs, and live pacing</h2>
+                <p className="admin-note">
+                  This mirrors the tracker workbook more than the calendar pages do. Add tracked sale rows by DMS number
+                  and profile name, mark them green when Reynolds confirms them, and keep the manual lead, activity, and
+                  sold inputs updated by agent.
+                </p>
+              </div>
+              <div className="bdc-sales-tracker-hero__controls">
+                <label>
+                  <span>Month</span>
+                  <input type="month" value={bdcSalesTrackerMonth} onChange={(event) => setBdcSalesTrackerMonth(event.target.value)} />
+                </label>
+                <label>
+                  <span>Monthly sold goal</span>
+                  <input
+                    type="number"
+                    inputMode="numeric"
+                    min="0"
+                    step="1"
+                    value={bdcSalesTrackerGoalDraft}
+                    onChange={(event) => setBdcSalesTrackerGoalDraft(event.target.value)}
+                  />
+                </label>
+                <button type="button" onClick={saveBdcSalesTrackerGoal} disabled={busy === "bdc-sales-goal"}>
+                  {busy === "bdc-sales-goal" ? "Saving..." : "Save Goal"}
+                </button>
+              </div>
+            </div>
+
+            <div className="stats bdc-sales-tracker-stats">
+              <div className="stat">
+                <span>Goal</span>
+                <strong>{Number(bdcSalesTracker?.summary?.goal || 0)}</strong>
+              </div>
+              <div className="stat">
+                <span>MTD tracked sold</span>
+                <strong>{bdcSalesTracker?.summary?.mtd_tracked ?? 0}</strong>
+              </div>
+              <div className="stat">
+                <span>Tracking</span>
+                <strong>{formatTrackerNumber(bdcSalesTracker?.summary?.tracking_projection || 0)}</strong>
+              </div>
+              <div className="stat">
+                <span>Daily goal</span>
+                <strong>{formatTrackerNumber(bdcSalesTracker?.summary?.daily_goal || 0)}</strong>
+              </div>
+              <div className="stat">
+                <span>Days worked / left</span>
+                <strong>
+                  {bdcSalesTracker?.summary?.days_worked ?? 0} / {bdcSalesTracker?.summary?.days_left ?? 0}
+                </strong>
+              </div>
+              <div className="stat">
+                <span>Should be at sold</span>
+                <strong>{formatTrackerNumber(bdcSalesTracker?.summary?.should_be_at_sold || 0)}</strong>
+              </div>
+              <div className="stat">
+                <span>{Number(bdcSalesTracker?.summary?.behind_by || 0) >= 0 ? "Behind by" : "Ahead by"}</span>
+                <strong>{formatTrackerNumber(Math.abs(Number(bdcSalesTracker?.summary?.behind_by || 0)))}</strong>
+              </div>
+              <div className="stat">
+                <span>Tracker rows</span>
+                <strong>{bdcSalesTrackerTeamTotals.trackerRows}</strong>
+              </div>
+            </div>
+
+            <div className="panel">
+              <div className="row">
+                <div>
+                  <span className="eyebrow">Team snapshot</span>
+                  <h3>Manual month inputs by BDC agent</h3>
+                </div>
+                <small>
+                  Leads {bdcSalesTrackerTeamTotals.totalLeads} · Set {bdcSalesTrackerTeamTotals.appointmentsSet} · Sold{" "}
+                  {bdcSalesTrackerTeamTotals.actualSold}
+                </small>
+              </div>
+              <div className="table-wrap">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Agent</th>
+                      <th>Tracked Sold</th>
+                      <th>Tracking</th>
+                      <th>Total Leads</th>
+                      <th>Apt Set</th>
+                      <th>Apt Set %</th>
+                      <th>Actual Sold</th>
+                      <th>Sold %</th>
+                      <th>Avg Apt / Day</th>
+                      <th>Avg Sold / Day</th>
+                      <th>Calls</th>
+                      <th>Email</th>
+                      <th>Text</th>
+                      <th>Avg C / E / T</th>
+                      <th>Days Off</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {trackerAgents.length ? (
+                      trackerAgents.map((agent) => (
+                        <tr key={`tracker-summary-${agent.agent_id}`}>
+                          <td>
+                            <strong>{agent.agent_name}</strong>
+                            <div className="table-subline">{agent.active ? "Active" : "Inactive / historical"}</div>
+                          </td>
+                          <td>{agent.sold_count}</td>
+                          <td>{formatTrackerNumber(agent.tracking_projection)}</td>
+                          <td>{Number(agent.total_leads || 0)}</td>
+                          <td>{Number(agent.appointments_set || 0)}</td>
+                          <td>{formatPercent(agent.appointment_set_rate || 0)}</td>
+                          <td>{Number(agent.actual_sold || 0)}</td>
+                          <td>{formatPercent(agent.actual_sold_rate || 0)}</td>
+                          <td>{formatTrackerNumber(agent.avg_appointments_per_day)}</td>
+                          <td>{formatTrackerNumber(agent.avg_sold_per_day)}</td>
+                          <td>{Number(agent.calls_mtd || 0)}</td>
+                          <td>{Number(agent.emails_mtd || 0)}</td>
+                          <td>{Number(agent.texts_mtd || 0)}</td>
+                          <td>{agent.average_activity_label || "0 / 0 / 0"}</td>
+                          <td>{Number(agent.days_off || 0)}</td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr>
+                        <td colSpan={15}>No BDC agents are configured yet.</td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+              <small className="admin-note">
+                Green rows are finalized in Reynolds. Neutral rows are still pending or just being tracked.
+              </small>
+            </div>
+
+            <div className="bdc-sales-agent-grid">
+              {trackerAgents.length ? (
+                trackerAgents.map((agent) => {
+                  const draft = bdcSalesTrackerEntryDrafts[agent.agent_id] || emptyBdcSalesTrackerEntryDraft();
+                  return (
+                    <article key={bdcSalesTrackerAgentKey(agent)} className="bdc-sales-agent-card">
+                      <div className="bdc-sales-agent-card__header">
+                        <div>
+                          <span className="eyebrow">BDC agent</span>
+                          <h3>{agent.agent_name}</h3>
+                          <p>
+                            {agent.sold_count} tracked sold · {formatTrackerNumber(agent.tracking_projection)} pace ·{" "}
+                            {Number(agent.actual_sold || 0)} manual sold
+                          </p>
+                        </div>
+                        <div className={`bdc-sales-agent-card__status ${agent.active ? "is-active" : "is-inactive"}`}>
+                          {agent.active ? "Active" : "Historical"}
+                        </div>
+                      </div>
+
+                      <div className="bdc-sales-metrics-grid">
+                        <label>
+                          <span>Total Leads</span>
+                          <input
+                            type="number"
+                            inputMode="numeric"
+                            min="0"
+                            value={agent.total_leads ?? ""}
+                            onChange={(event) => patchBdcSalesTrackerAgent(agent.agent_id, "total_leads", event.target.value)}
+                          />
+                        </label>
+                        <label>
+                          <span>Apt Set</span>
+                          <input
+                            type="number"
+                            inputMode="numeric"
+                            min="0"
+                            value={agent.appointments_set ?? ""}
+                            onChange={(event) => patchBdcSalesTrackerAgent(agent.agent_id, "appointments_set", event.target.value)}
+                          />
+                        </label>
+                        <label>
+                          <span>Actual Sold</span>
+                          <input
+                            type="number"
+                            inputMode="numeric"
+                            min="0"
+                            value={agent.actual_sold ?? ""}
+                            onChange={(event) => patchBdcSalesTrackerAgent(agent.agent_id, "actual_sold", event.target.value)}
+                          />
+                        </label>
+                        <label>
+                          <span>MTD Calls</span>
+                          <input
+                            type="number"
+                            inputMode="numeric"
+                            min="0"
+                            value={agent.calls_mtd ?? ""}
+                            onChange={(event) => patchBdcSalesTrackerAgent(agent.agent_id, "calls_mtd", event.target.value)}
+                          />
+                        </label>
+                        <label>
+                          <span>MTD Email</span>
+                          <input
+                            type="number"
+                            inputMode="numeric"
+                            min="0"
+                            value={agent.emails_mtd ?? ""}
+                            onChange={(event) => patchBdcSalesTrackerAgent(agent.agent_id, "emails_mtd", event.target.value)}
+                          />
+                        </label>
+                        <label>
+                          <span>MTD Text</span>
+                          <input
+                            type="number"
+                            inputMode="numeric"
+                            min="0"
+                            value={agent.texts_mtd ?? ""}
+                            onChange={(event) => patchBdcSalesTrackerAgent(agent.agent_id, "texts_mtd", event.target.value)}
+                          />
+                        </label>
+                        <label>
+                          <span>Days Off</span>
+                          <input
+                            type="number"
+                            inputMode="numeric"
+                            min="0"
+                            value={agent.days_off ?? ""}
+                            onChange={(event) => patchBdcSalesTrackerAgent(agent.agent_id, "days_off", event.target.value)}
+                          />
+                        </label>
+                        <div className="bdc-sales-metrics-card">
+                          <span>Apt set / sold</span>
+                          <strong>
+                            {formatPercent(agent.appointment_set_rate || 0)} · {formatPercent(agent.actual_sold_rate || 0)}
+                          </strong>
+                          <small>{agent.average_activity_label || "0 / 0 / 0"} calls / email / text</small>
+                        </div>
+                      </div>
+
+                      <div className="bdc-sales-agent-card__actions">
+                        <button
+                          type="button"
+                          onClick={() => saveBdcSalesTrackerMetrics(agent)}
+                          disabled={busy === `bdc-sales-metrics-${agent.agent_id}`}
+                        >
+                          {busy === `bdc-sales-metrics-${agent.agent_id}` ? "Saving..." : "Save Metrics"}
+                        </button>
+                      </div>
+
+                      <div className="bdc-sales-entry-create">
+                        <label>
+                          <span>DMS Number</span>
+                          <input
+                            value={draft.dms_number}
+                            onChange={(event) => patchBdcSalesTrackerEntryDraft(agent.agent_id, "dms_number", event.target.value)}
+                            placeholder="124913"
+                          />
+                        </label>
+                        <label>
+                          <span>Profile Name</span>
+                          <input
+                            value={draft.profile_name}
+                            onChange={(event) => patchBdcSalesTrackerEntryDraft(agent.agent_id, "profile_name", event.target.value)}
+                            placeholder="Customer profile name"
+                          />
+                        </label>
+                        <label className="bdc-sales-entry-create__notes">
+                          <span>Notes</span>
+                          <textarea
+                            rows={2}
+                            value={draft.notes}
+                            onChange={(event) => patchBdcSalesTrackerEntryDraft(agent.agent_id, "notes", event.target.value)}
+                            placeholder="Trade, desk status, appointment, or payroll note."
+                          />
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => addBdcSalesTrackerEntry(agent)}
+                          disabled={busy === `bdc-sales-create-${agent.agent_id}`}
+                        >
+                          {busy === `bdc-sales-create-${agent.agent_id}` ? "Adding..." : "Add Tracker Row"}
+                        </button>
+                      </div>
+
+                      <div className="bdc-sales-entry-list">
+                        {agent.entries.length ? (
+                          agent.entries.map((entry) => (
+                            <div key={`tracker-entry-${entry.id}`} className={`bdc-sales-entry ${entry.sold ? "is-sold" : ""}`}>
+                              <div className="bdc-sales-entry__top">
+                                <div>
+                                  <strong>{entry.profile_name || entry.dms_number || "Tracker row"}</strong>
+                                  <small>
+                                    {entry.sold && entry.sold_at ? `Finalized ${dateTimeLabel(entry.sold_at)}` : "Pending finalize"}
+                                  </small>
+                                </div>
+                                <span className={`bdc-sales-entry__badge ${entry.sold ? "is-sold" : ""}`}>
+                                  {entry.sold ? "Sold" : "Tracking"}
+                                </span>
+                              </div>
+                              <div className="bdc-sales-entry__fields">
+                                <label>
+                                  <span>DMS Number</span>
+                                  <input
+                                    value={entry.dms_number}
+                                    onChange={(event) => patchBdcSalesTrackerEntry(entry.id, "dms_number", event.target.value)}
+                                  />
+                                </label>
+                                <label>
+                                  <span>Profile Name</span>
+                                  <input
+                                    value={entry.profile_name}
+                                    onChange={(event) => patchBdcSalesTrackerEntry(entry.id, "profile_name", event.target.value)}
+                                  />
+                                </label>
+                              </div>
+                              <label>
+                                <span>Notes</span>
+                                <textarea
+                                  rows={2}
+                                  value={entry.notes}
+                                  onChange={(event) => patchBdcSalesTrackerEntry(entry.id, "notes", event.target.value)}
+                                />
+                              </label>
+                              <div className="bdc-sales-entry__actions">
+                                <button
+                                  type="button"
+                                  className="secondary"
+                                  onClick={() => saveBdcSalesTrackerEntry(entry)}
+                                  disabled={busy === `bdc-sales-entry-${entry.id}`}
+                                >
+                                  {busy === `bdc-sales-entry-${entry.id}` ? "Saving..." : "Save Row"}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => toggleBdcSalesTrackerEntrySold(entry)}
+                                  disabled={busy === `bdc-sales-sold-${entry.id}`}
+                                >
+                                  {busy === `bdc-sales-sold-${entry.id}`
+                                    ? "Updating..."
+                                    : entry.sold
+                                      ? "Mark Pending"
+                                      : "Mark Sold"}
+                                </button>
+                                <button
+                                  type="button"
+                                  className="button-danger"
+                                  onClick={() => removeBdcSalesTrackerEntry(entry.id)}
+                                  disabled={busy === `bdc-sales-delete-${entry.id}`}
+                                >
+                                  {busy === `bdc-sales-delete-${entry.id}` ? "Deleting..." : "Delete"}
+                                </button>
+                              </div>
+                            </div>
+                          ))
+                        ) : (
+                          <div className="empty">No tracked sales rows for {agent.agent_name} yet.</div>
+                        )}
+                      </div>
+                    </article>
+                  );
+                })
+              ) : (
+                <div className="panel">
+                  <span className="eyebrow">No BDC agents</span>
+                  <h3>Add your BDC roster first</h3>
+                  <p className="admin-note">The tracker uses the BDC agents list from the existing BDC setup.</p>
+                </div>
+              )}
             </div>
           </section>
         ) : null}

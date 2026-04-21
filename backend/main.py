@@ -93,6 +93,7 @@ TAB_VISIBILITY_IDS = (
     "serviceNotes",
     "trafficAnalysis",
     "bdc",
+    "bdcSalesTracker",
     "reports",
     "traffic",
     "freshUp",
@@ -100,6 +101,7 @@ TAB_VISIBILITY_IDS = (
     "quote",
     "specials",
 )
+BDC_SALES_TRACKER_DEFAULT_GOAL = 252.0
 DEFAULT_CORS_ORIGINS = [
     "http://localhost:4174",
     "http://127.0.0.1:4174",
@@ -482,6 +484,94 @@ class BdcUndoSettingsIn(BaseModel):
 
 class BdcUndoRequest(BaseModel):
     password: str = ""
+
+
+class BdcSalesTrackerMonthIn(BaseModel):
+    month: str
+    goal: float = BDC_SALES_TRACKER_DEFAULT_GOAL
+
+
+class BdcSalesTrackerAgentMetricsIn(BaseModel):
+    month: str
+    total_leads: int = 0
+    appointments_set: int = 0
+    actual_sold: int = 0
+    calls_mtd: int = 0
+    emails_mtd: int = 0
+    texts_mtd: int = 0
+    days_off: int = 0
+
+
+class BdcSalesTrackerEntryIn(BaseModel):
+    month: str
+    agent_id: int
+    dms_number: str = ""
+    profile_name: str = ""
+    notes: str = ""
+    sold: bool = False
+
+
+class BdcSalesTrackerEntryUpdateIn(BaseModel):
+    dms_number: str = ""
+    profile_name: str = ""
+    notes: str = ""
+    sold: bool = False
+
+
+class BdcSalesTrackerEntryOut(BaseModel):
+    id: int
+    month: str
+    agent_id: int
+    agent_name: str
+    dms_number: str = ""
+    profile_name: str = ""
+    notes: str = ""
+    sold: bool = False
+    sold_at: str = ""
+    created_at: str
+    updated_at: str
+    created_ts: float
+    updated_ts: float
+
+
+class BdcSalesTrackerAgentOut(BaseModel):
+    agent_id: int
+    agent_name: str
+    active: bool = True
+    sold_count: int = 0
+    tracking_projection: float = 0.0
+    total_leads: int = 0
+    appointments_set: int = 0
+    appointment_set_rate: float = 0.0
+    actual_sold: int = 0
+    actual_sold_rate: float = 0.0
+    avg_appointments_per_day: float = 0.0
+    avg_sold_per_day: float = 0.0
+    calls_mtd: int = 0
+    emails_mtd: int = 0
+    texts_mtd: int = 0
+    average_activity_label: str = "0 / 0 / 0"
+    days_off: int = 0
+    entries: List[BdcSalesTrackerEntryOut] = []
+
+
+class BdcSalesTrackerSummaryOut(BaseModel):
+    goal: float = BDC_SALES_TRACKER_DEFAULT_GOAL
+    mtd_tracked: int = 0
+    tracking_projection: float = 0.0
+    daily_goal: float = 0.0
+    working_days: int = 0
+    days_worked: int = 0
+    days_left: int = 0
+    should_be_at_sold: float = 0.0
+    behind_by: float = 0.0
+
+
+class BdcSalesTrackerOut(BaseModel):
+    month: str
+    goal: float = BDC_SALES_TRACKER_DEFAULT_GOAL
+    summary: BdcSalesTrackerSummaryOut
+    agents: List[BdcSalesTrackerAgentOut]
 
 
 class TabVisibilityItem(BaseModel):
@@ -1597,6 +1687,58 @@ def init_db() -> None:
     ensure_column("bdc_assignment_log", "notification_email_status", "TEXT NOT NULL DEFAULT ''")
     db_execute(
         """
+        CREATE TABLE IF NOT EXISTS bdc_sales_tracker_months (
+            month_key TEXT PRIMARY KEY,
+            goal REAL NOT NULL DEFAULT 252,
+            created_ts REAL NOT NULL,
+            updated_ts REAL NOT NULL
+        )
+        """
+    )
+    db_execute(
+        """
+        CREATE TABLE IF NOT EXISTS bdc_sales_tracker_agent_metrics (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            month_key TEXT NOT NULL,
+            agent_id INTEGER NOT NULL,
+            agent_name TEXT NOT NULL,
+            total_leads INTEGER NOT NULL DEFAULT 0,
+            appointments_set INTEGER NOT NULL DEFAULT 0,
+            actual_sold INTEGER NOT NULL DEFAULT 0,
+            calls_mtd INTEGER NOT NULL DEFAULT 0,
+            emails_mtd INTEGER NOT NULL DEFAULT 0,
+            texts_mtd INTEGER NOT NULL DEFAULT 0,
+            days_off INTEGER NOT NULL DEFAULT 0,
+            created_ts REAL NOT NULL,
+            updated_ts REAL NOT NULL,
+            UNIQUE(month_key, agent_id)
+        )
+        """
+    )
+    db_execute(
+        """
+        CREATE TABLE IF NOT EXISTS bdc_sales_tracker_entries (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            month_key TEXT NOT NULL,
+            agent_id INTEGER NOT NULL,
+            agent_name TEXT NOT NULL,
+            dms_number TEXT NOT NULL DEFAULT '',
+            profile_name TEXT NOT NULL DEFAULT '',
+            notes TEXT NOT NULL DEFAULT '',
+            sold INTEGER NOT NULL DEFAULT 0,
+            sold_ts REAL,
+            sold_at TEXT NOT NULL DEFAULT '',
+            display_order INTEGER NOT NULL DEFAULT 0,
+            created_ts REAL NOT NULL,
+            created_at TEXT NOT NULL,
+            updated_ts REAL NOT NULL,
+            updated_at TEXT NOT NULL
+        )
+        """
+    )
+    db_execute("CREATE INDEX IF NOT EXISTS idx_bdc_sales_tracker_entries_month ON bdc_sales_tracker_entries(month_key, agent_id, display_order, id)")
+    db_execute(
+        """
         CREATE TABLE IF NOT EXISTS freshup_log (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             created_ts REAL NOT NULL,
@@ -1851,6 +1993,24 @@ def bdc_log_out(row: Dict[str, Any]) -> BdcAssignmentOut:
         customer_phone=str(row.get("customer_phone") or ""),
         notification_sms_status=str(row.get("notification_sms_status") or ""),
         notification_email_status=str(row.get("notification_email_status") or ""),
+    )
+
+
+def bdc_sales_tracker_entry_out(row: Dict[str, Any]) -> BdcSalesTrackerEntryOut:
+    return BdcSalesTrackerEntryOut(
+        id=int(row.get("id") or 0),
+        month=str(row.get("month_key") or ""),
+        agent_id=int(row.get("agent_id") or 0),
+        agent_name=str(row.get("agent_name") or ""),
+        dms_number=str(row.get("dms_number") or ""),
+        profile_name=str(row.get("profile_name") or ""),
+        notes=str(row.get("notes") or ""),
+        sold=bool(int(row.get("sold") or 0)),
+        sold_at=str(row.get("sold_at") or ""),
+        created_at=str(row.get("created_at") or ""),
+        updated_at=str(row.get("updated_at") or ""),
+        created_ts=float(row.get("created_ts") or 0.0),
+        updated_ts=float(row.get("updated_ts") or 0.0),
     )
 
 
@@ -2109,6 +2269,358 @@ def fetch_bdc_agents(include_inactive: bool = False) -> List[BdcAgentOut]:
         query += " WHERE active = 1"
     query += " ORDER BY active DESC, name ASC, id ASC"
     return [bdc_agent_out(row) for row in db_query_all(query)]
+
+
+def normalize_tracker_goal(value: Any) -> float:
+    try:
+        goal = float(value or 0)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail="goal must be a number") from exc
+    if goal < 0:
+        raise HTTPException(status_code=400, detail="goal cannot be negative")
+    return round(goal, 2)
+
+
+def normalize_tracker_count(value: Any, field_name: str) -> int:
+    try:
+        count = int(float(value or 0))
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=f"{field_name} must be a whole number") from exc
+    if count < 0:
+        raise HTTPException(status_code=400, detail=f"{field_name} cannot be negative")
+    return count
+
+
+def tracker_working_days(month_key: str) -> int:
+    return sum(1 for day in month_dates(month_key) if not is_sunday(day))
+
+
+def tracker_days_worked(month_key: str) -> int:
+    dates = month_dates(month_key)
+    if not dates:
+        return 0
+    today_local = now_local().date()
+    if today_local <= dates[0]:
+        return 0
+    if today_local > dates[-1]:
+        return tracker_working_days(month_key)
+    return sum(1 for day in dates if day < today_local and not is_sunday(day))
+
+
+def tracker_average_activity_label(calls: int, emails: int, texts: int, working_days_value: int, days_off: int) -> str:
+    effective_days = max(working_days_value - days_off, 0)
+    if effective_days <= 0:
+        return "0 / 0 / 0"
+    return (
+        f"{round(calls / effective_days)} / "
+        f"{round(emails / effective_days)} / "
+        f"{round(texts / effective_days)}"
+    )
+
+
+def fetch_bdc_sales_tracker_goal(month_key: str) -> float:
+    row = db_query_one("SELECT goal FROM bdc_sales_tracker_months WHERE month_key = ?", (month_key,))
+    if not row:
+        return BDC_SALES_TRACKER_DEFAULT_GOAL
+    return float(row.get("goal") or BDC_SALES_TRACKER_DEFAULT_GOAL)
+
+
+def upsert_bdc_sales_tracker_month(payload: BdcSalesTrackerMonthIn) -> BdcSalesTrackerOut:
+    month_key = parse_month_key(payload.month)
+    goal = normalize_tracker_goal(payload.goal)
+    now_ts = time.time()
+    db_execute(
+        """
+        INSERT INTO bdc_sales_tracker_months (month_key, goal, created_ts, updated_ts)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(month_key) DO UPDATE
+        SET goal = excluded.goal,
+            updated_ts = excluded.updated_ts
+        """,
+        (month_key, goal, now_ts, now_ts),
+    )
+    return fetch_bdc_sales_tracker(month_key)
+
+
+def get_bdc_sales_tracker_entry_row(entry_id: int) -> Optional[Dict[str, Any]]:
+    return db_query_one("SELECT * FROM bdc_sales_tracker_entries WHERE id = ?", (int(entry_id),))
+
+
+def fetch_bdc_sales_tracker(month_key: str) -> BdcSalesTrackerOut:
+    month_key = parse_month_key(month_key)
+    goal = fetch_bdc_sales_tracker_goal(month_key)
+    working_days = tracker_working_days(month_key)
+    days_worked = tracker_days_worked(month_key)
+    days_left = max(working_days - days_worked, 0)
+    daily_goal = goal / working_days if working_days else 0.0
+
+    roster = fetch_bdc_agents(include_inactive=True)
+    order_map = {agent.id: index for index, agent in enumerate(roster)}
+    agent_rows: Dict[int, Dict[str, Any]] = {
+        agent.id: {"agent_id": agent.id, "agent_name": agent.name, "active": agent.active}
+        for agent in roster
+    }
+    metrics_rows = db_query_all(
+        """
+        SELECT *
+        FROM bdc_sales_tracker_agent_metrics
+        WHERE month_key = ?
+        ORDER BY agent_name COLLATE NOCASE ASC, agent_id ASC
+        """,
+        (month_key,),
+    )
+    entry_rows = db_query_all(
+        """
+        SELECT *
+        FROM bdc_sales_tracker_entries
+        WHERE month_key = ?
+        ORDER BY agent_id ASC, display_order ASC, id ASC
+        """,
+        (month_key,),
+    )
+    metrics_by_agent = {int(row.get("agent_id") or 0): row for row in metrics_rows if row.get("agent_id") is not None}
+    entries_by_agent: Dict[int, List[BdcSalesTrackerEntryOut]] = {}
+    for row in entry_rows:
+        agent_id = int(row.get("agent_id") or 0)
+        if agent_id not in agent_rows:
+            agent_rows[agent_id] = {
+                "agent_id": agent_id,
+                "agent_name": str(row.get("agent_name") or f"Agent {agent_id}"),
+                "active": False,
+            }
+        entries_by_agent.setdefault(agent_id, []).append(bdc_sales_tracker_entry_out(row))
+    for row in metrics_rows:
+        agent_id = int(row.get("agent_id") or 0)
+        if agent_id not in agent_rows:
+            agent_rows[agent_id] = {
+                "agent_id": agent_id,
+                "agent_name": str(row.get("agent_name") or f"Agent {agent_id}"),
+                "active": False,
+            }
+
+    sorted_agent_ids = sorted(
+        agent_rows.keys(),
+        key=lambda agent_id: (
+            order_map.get(agent_id, 9999),
+            str(agent_rows[agent_id].get("agent_name") or "").lower(),
+            agent_id,
+        ),
+    )
+
+    agents: List[BdcSalesTrackerAgentOut] = []
+    mtd_tracked = 0
+    for agent_id in sorted_agent_ids:
+        agent_meta = agent_rows[agent_id]
+        metrics = metrics_by_agent.get(agent_id) or {}
+        entries = entries_by_agent.get(agent_id, [])
+        sold_count = sum(1 for entry in entries if entry.sold)
+        total_leads = normalize_tracker_count(metrics.get("total_leads") or 0, "total_leads")
+        appointments_set = normalize_tracker_count(metrics.get("appointments_set") or 0, "appointments_set")
+        actual_sold = normalize_tracker_count(metrics.get("actual_sold") or 0, "actual_sold")
+        calls_mtd = normalize_tracker_count(metrics.get("calls_mtd") or 0, "calls_mtd")
+        emails_mtd = normalize_tracker_count(metrics.get("emails_mtd") or 0, "emails_mtd")
+        texts_mtd = normalize_tracker_count(metrics.get("texts_mtd") or 0, "texts_mtd")
+        days_off = normalize_tracker_count(metrics.get("days_off") or 0, "days_off")
+        appointment_set_rate = (appointments_set / total_leads) if total_leads else 0.0
+        actual_sold_rate = (actual_sold / appointments_set) if appointments_set else 0.0
+        avg_appointments_per_day = (appointments_set / days_worked) if days_worked else 0.0
+        avg_sold_per_day = (actual_sold / days_worked) if days_worked else 0.0
+        tracking_projection = (sold_count / days_worked * working_days) if days_worked else 0.0
+        mtd_tracked += sold_count
+        agents.append(
+            BdcSalesTrackerAgentOut(
+                agent_id=agent_id,
+                agent_name=str(agent_meta.get("agent_name") or f"Agent {agent_id}"),
+                active=bool(agent_meta.get("active")),
+                sold_count=sold_count,
+                tracking_projection=tracking_projection,
+                total_leads=total_leads,
+                appointments_set=appointments_set,
+                appointment_set_rate=appointment_set_rate,
+                actual_sold=actual_sold,
+                actual_sold_rate=actual_sold_rate,
+                avg_appointments_per_day=avg_appointments_per_day,
+                avg_sold_per_day=avg_sold_per_day,
+                calls_mtd=calls_mtd,
+                emails_mtd=emails_mtd,
+                texts_mtd=texts_mtd,
+                average_activity_label=tracker_average_activity_label(calls_mtd, emails_mtd, texts_mtd, days_worked, days_off),
+                days_off=days_off,
+                entries=entries,
+            )
+        )
+
+    tracking_projection = (mtd_tracked / days_worked * working_days) if days_worked else 0.0
+    should_be_at_sold = daily_goal * days_worked
+    return BdcSalesTrackerOut(
+        month=month_key,
+        goal=goal,
+        summary=BdcSalesTrackerSummaryOut(
+            goal=goal,
+            mtd_tracked=mtd_tracked,
+            tracking_projection=tracking_projection,
+            daily_goal=daily_goal,
+            working_days=working_days,
+            days_worked=days_worked,
+            days_left=days_left,
+            should_be_at_sold=should_be_at_sold,
+            behind_by=should_be_at_sold - mtd_tracked,
+        ),
+        agents=agents,
+    )
+
+
+def update_bdc_sales_tracker_agent_metrics(agent_id: int, payload: BdcSalesTrackerAgentMetricsIn) -> BdcSalesTrackerOut:
+    month_key = parse_month_key(payload.month)
+    agent_row = get_bdc_agent_row(agent_id)
+    if not agent_row:
+        raise HTTPException(status_code=404, detail="BDC agent not found")
+    total_leads = normalize_tracker_count(payload.total_leads, "total_leads")
+    appointments_set = normalize_tracker_count(payload.appointments_set, "appointments_set")
+    actual_sold = normalize_tracker_count(payload.actual_sold, "actual_sold")
+    calls_mtd = normalize_tracker_count(payload.calls_mtd, "calls_mtd")
+    emails_mtd = normalize_tracker_count(payload.emails_mtd, "emails_mtd")
+    texts_mtd = normalize_tracker_count(payload.texts_mtd, "texts_mtd")
+    days_off = normalize_tracker_count(payload.days_off, "days_off")
+    now_ts = time.time()
+    db_execute(
+        """
+        INSERT INTO bdc_sales_tracker_agent_metrics (
+            month_key, agent_id, agent_name, total_leads, appointments_set, actual_sold,
+            calls_mtd, emails_mtd, texts_mtd, days_off, created_ts, updated_ts
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(month_key, agent_id) DO UPDATE
+        SET agent_name = excluded.agent_name,
+            total_leads = excluded.total_leads,
+            appointments_set = excluded.appointments_set,
+            actual_sold = excluded.actual_sold,
+            calls_mtd = excluded.calls_mtd,
+            emails_mtd = excluded.emails_mtd,
+            texts_mtd = excluded.texts_mtd,
+            days_off = excluded.days_off,
+            updated_ts = excluded.updated_ts
+        """,
+        (
+            month_key,
+            int(agent_row.get("id") or 0),
+            str(agent_row.get("name") or ""),
+            total_leads,
+            appointments_set,
+            actual_sold,
+            calls_mtd,
+            emails_mtd,
+            texts_mtd,
+            days_off,
+            now_ts,
+            now_ts,
+        ),
+    )
+    return fetch_bdc_sales_tracker(month_key)
+
+
+def create_bdc_sales_tracker_entry(payload: BdcSalesTrackerEntryIn) -> BdcSalesTrackerOut:
+    month_key = parse_month_key(payload.month)
+    agent_row = get_bdc_agent_row(payload.agent_id)
+    if not agent_row:
+        raise HTTPException(status_code=404, detail="BDC agent not found")
+    dms_number = normalize_short_text(payload.dms_number, "dms_number", max_len=80)
+    profile_name = normalize_short_text(payload.profile_name, "profile_name", max_len=180)
+    notes = normalize_notes(payload.notes, "notes", max_len=1000)
+    if not dms_number and not profile_name:
+        raise HTTPException(status_code=400, detail="enter a DMS number or profile name")
+    now_ts = time.time()
+    now_at = now_iso()
+    sold = bool(payload.sold)
+    order_row = db_query_one(
+        "SELECT COALESCE(MAX(display_order), -1) AS max_order FROM bdc_sales_tracker_entries WHERE month_key = ? AND agent_id = ?",
+        (month_key, int(agent_row.get("id") or 0)),
+    ) or {}
+    display_order = int(order_row.get("max_order") or -1) + 1
+    db_insert(
+        """
+        INSERT INTO bdc_sales_tracker_entries (
+            month_key, agent_id, agent_name, dms_number, profile_name, notes, sold,
+            sold_ts, sold_at, display_order, created_ts, created_at, updated_ts, updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            month_key,
+            int(agent_row.get("id") or 0),
+            str(agent_row.get("name") or ""),
+            dms_number,
+            profile_name,
+            notes,
+            1 if sold else 0,
+            now_ts if sold else None,
+            now_at if sold else "",
+            display_order,
+            now_ts,
+            now_at,
+            now_ts,
+            now_at,
+        ),
+    )
+    return fetch_bdc_sales_tracker(month_key)
+
+
+def update_bdc_sales_tracker_entry(entry_id: int, payload: BdcSalesTrackerEntryUpdateIn) -> BdcSalesTrackerOut:
+    row = get_bdc_sales_tracker_entry_row(entry_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="tracker row not found")
+    dms_number = normalize_short_text(payload.dms_number, "dms_number", max_len=80)
+    profile_name = normalize_short_text(payload.profile_name, "profile_name", max_len=180)
+    notes = normalize_notes(payload.notes, "notes", max_len=1000)
+    if not dms_number and not profile_name:
+        raise HTTPException(status_code=400, detail="enter a DMS number or profile name")
+    sold = bool(payload.sold)
+    now_ts = time.time()
+    now_at = now_iso()
+    sold_ts = float(row.get("sold_ts") or 0.0) if row.get("sold_ts") is not None else None
+    sold_at = str(row.get("sold_at") or "")
+    was_sold = bool(int(row.get("sold") or 0))
+    if sold and not was_sold:
+        sold_ts = now_ts
+        sold_at = now_at
+    if not sold:
+        sold_ts = None
+        sold_at = ""
+    db_execute(
+        """
+        UPDATE bdc_sales_tracker_entries
+        SET dms_number = ?,
+            profile_name = ?,
+            notes = ?,
+            sold = ?,
+            sold_ts = ?,
+            sold_at = ?,
+            updated_ts = ?,
+            updated_at = ?
+        WHERE id = ?
+        """,
+        (
+            dms_number,
+            profile_name,
+            notes,
+            1 if sold else 0,
+            sold_ts,
+            sold_at,
+            now_ts,
+            now_at,
+            int(entry_id),
+        ),
+    )
+    return fetch_bdc_sales_tracker(str(row.get("month_key") or ""))
+
+
+def delete_bdc_sales_tracker_entry(entry_id: int) -> BdcSalesTrackerOut:
+    row = get_bdc_sales_tracker_entry_row(entry_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="tracker row not found")
+    month_key = str(row.get("month_key") or "")
+    db_execute("DELETE FROM bdc_sales_tracker_entries WHERE id = ?", (int(entry_id),))
+    return fetch_bdc_sales_tracker(month_key)
 
 
 def fetch_days_off_month(month_key: str) -> DaysOffMonthOut:
@@ -5596,6 +6108,42 @@ def get_bdc_report(
         start_date=start_date,
         end_date=end_date,
     )
+
+
+@app.get("/api/bdc-sales-tracker", response_model=BdcSalesTrackerOut)
+def get_bdc_sales_tracker_public(month: str) -> BdcSalesTrackerOut:
+    return fetch_bdc_sales_tracker(month)
+
+
+@app.post("/api/bdc-sales-tracker/month", response_model=BdcSalesTrackerOut)
+def post_bdc_sales_tracker_month(payload: BdcSalesTrackerMonthIn) -> BdcSalesTrackerOut:
+    return upsert_bdc_sales_tracker_month(payload)
+
+
+@app.post("/api/bdc-sales-tracker/agents/{agent_id}/metrics", response_model=BdcSalesTrackerOut)
+def post_bdc_sales_tracker_agent_metrics(
+    agent_id: int,
+    payload: BdcSalesTrackerAgentMetricsIn,
+) -> BdcSalesTrackerOut:
+    return update_bdc_sales_tracker_agent_metrics(agent_id, payload)
+
+
+@app.post("/api/bdc-sales-tracker/entries", response_model=BdcSalesTrackerOut)
+def post_bdc_sales_tracker_entry(payload: BdcSalesTrackerEntryIn) -> BdcSalesTrackerOut:
+    return create_bdc_sales_tracker_entry(payload)
+
+
+@app.put("/api/bdc-sales-tracker/entries/{entry_id}", response_model=BdcSalesTrackerOut)
+def put_bdc_sales_tracker_entry(
+    entry_id: int,
+    payload: BdcSalesTrackerEntryUpdateIn,
+) -> BdcSalesTrackerOut:
+    return update_bdc_sales_tracker_entry(entry_id, payload)
+
+
+@app.delete("/api/bdc-sales-tracker/entries/{entry_id}", response_model=BdcSalesTrackerOut)
+def delete_bdc_sales_tracker_entry_route(entry_id: int) -> BdcSalesTrackerOut:
+    return delete_bdc_sales_tracker_entry(entry_id)
 
 
 @app.delete("/api/admin/bdc/history", response_model=BdcHistoryClearOut)

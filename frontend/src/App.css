@@ -1500,12 +1500,195 @@ th {
   max-width: 56ch;
 }
 
+.table-subline {
+  margin-top: 4px;
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
 .report-item b {
   font-size: 1.3rem;
 }
 
 .editor-card h4 {
   margin-bottom: 12px;
+}
+
+.bdc-sales-tracker-hero,
+.bdc-sales-agent-card,
+.bdc-sales-entry,
+.bdc-sales-metrics-card {
+  display: grid;
+  gap: 14px;
+}
+
+.bdc-sales-tracker-hero__controls,
+.bdc-sales-metrics-grid,
+.bdc-sales-entry__fields {
+  display: grid;
+  gap: 12px;
+}
+
+.bdc-sales-tracker-hero {
+  grid-template-columns: minmax(0, 1.2fr) minmax(280px, 0.8fr);
+  align-items: end;
+}
+
+.bdc-sales-tracker-hero__controls {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: end;
+}
+
+.bdc-sales-tracker-hero__controls button {
+  min-height: 48px;
+}
+
+.bdc-sales-agent-grid {
+  display: grid;
+  gap: 18px;
+}
+
+.bdc-sales-agent-card {
+  padding: 18px;
+  border-radius: 24px;
+  border: 1px solid var(--line);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(247, 241, 232, 0.84));
+  box-shadow: var(--card-shadow);
+}
+
+.bdc-sales-agent-card__header {
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.bdc-sales-agent-card__header h3 {
+  margin: 0;
+}
+
+.bdc-sales-agent-card__header p {
+  margin: 8px 0 0;
+  color: var(--muted);
+}
+
+.bdc-sales-agent-card__status,
+.bdc-sales-entry__badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 34px;
+  padding: 0 14px;
+  border-radius: 999px;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.bdc-sales-agent-card__status.is-active {
+  color: #16664d;
+  background: rgba(32, 151, 116, 0.12);
+  border: 1px solid rgba(32, 151, 116, 0.18);
+}
+
+.bdc-sales-agent-card__status.is-inactive {
+  color: #6b5e4d;
+  background: rgba(123, 110, 91, 0.1);
+  border: 1px solid rgba(123, 110, 91, 0.14);
+}
+
+.bdc-sales-metrics-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.bdc-sales-entry__fields {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.bdc-sales-metrics-card {
+  padding: 14px 16px;
+  border-radius: 18px;
+  border: 1px solid rgba(31, 37, 43, 0.08);
+  background: rgba(255, 255, 255, 0.78);
+}
+
+.bdc-sales-metrics-card span,
+.bdc-sales-entry__top small {
+  color: var(--muted);
+}
+
+.bdc-sales-metrics-card strong {
+  font-size: 1.1rem;
+  line-height: 1.1;
+}
+
+.bdc-sales-agent-card__actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.bdc-sales-entry-create {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(0, 0.7fr) minmax(0, 1fr) minmax(0, 1.2fr) auto;
+  align-items: end;
+  padding-top: 4px;
+}
+
+.bdc-sales-entry-create__notes textarea {
+  min-height: 90px;
+}
+
+.bdc-sales-entry-list {
+  display: grid;
+  gap: 12px;
+}
+
+.bdc-sales-entry {
+  padding: 16px;
+  border-radius: 20px;
+  border: 1px solid rgba(123, 110, 91, 0.16);
+  background: rgba(249, 245, 238, 0.9);
+}
+
+.bdc-sales-entry.is-sold {
+  border-color: rgba(52, 168, 83, 0.28);
+  background:
+    radial-gradient(circle at top right, rgba(52, 168, 83, 0.14), transparent 36%),
+    rgba(244, 255, 247, 0.98);
+}
+
+.bdc-sales-entry__top,
+.bdc-sales-entry__actions {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.bdc-sales-entry__top strong {
+  display: block;
+  line-height: 1.15;
+}
+
+.bdc-sales-entry__badge {
+  color: #7b5a13;
+  background: rgba(255, 224, 141, 0.24);
+  border: 1px solid rgba(185, 137, 17, 0.18);
+}
+
+.bdc-sales-entry__badge.is-sold {
+  color: #16664d;
+  background: rgba(32, 151, 116, 0.14);
+  border-color: rgba(32, 151, 116, 0.18);
+}
+
+.bdc-sales-entry__actions {
+  justify-content: flex-end;
+  flex-wrap: wrap;
 }
 
 .store-roster-grid {
@@ -4583,7 +4766,9 @@ button.special-card:hover:not(:disabled) {
   .traffic-analysis-brand-card__top,
   .traffic-analysis-list__item,
   .traffic-analysis-section__summary,
-  .traffic-analysis-section__meta {
+  .traffic-analysis-section__meta,
+  .bdc-sales-agent-card__header,
+  .bdc-sales-entry__top {
     flex-direction: column;
     align-items: flex-start;
   }
@@ -4592,6 +4777,18 @@ button.special-card:hover:not(:disabled) {
   .traffic-analysis-panel--wide,
   .traffic-analysis-panel--chat {
     grid-column: 1 / -1;
+  }
+
+  .bdc-sales-tracker-hero {
+    grid-template-columns: 1fr;
+  }
+
+  .bdc-sales-metrics-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .bdc-sales-entry-create {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
 
@@ -4703,6 +4900,10 @@ button.special-card:hover:not(:disabled) {
   .freshup-hero,
   .freshup-layout,
   .fresh-up-form-grid,
+  .bdc-sales-tracker-hero__controls,
+  .bdc-sales-metrics-grid,
+  .bdc-sales-entry-create,
+  .bdc-sales-entry__fields,
   .note-copy,
   .note-admin-grid,
   .traffic-upload-row,
@@ -4721,6 +4922,8 @@ button.special-card:hover:not(:disabled) {
   }
 
   .controls > *,
+  .bdc-sales-agent-card__actions > *,
+  .bdc-sales-entry__actions > *,
   .traffic-notes-hero__actions > *,
   .traffic-toolbar__actions > *,
   .traffic-toolbar__controls > * {
@@ -4886,6 +5089,8 @@ button.special-card:hover:not(:disabled) {
 
   .service-notes-kpi,
   .meta-item,
+  .bdc-sales-entry,
+  .bdc-sales-metrics-card,
   .note-copy__block {
     padding: 12px;
     border-radius: 16px;
@@ -4961,6 +5166,11 @@ button.special-card:hover:not(:disabled) {
   .notification-test-actions {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .bdc-sales-entry__actions,
+  .bdc-sales-agent-card__actions {
+    justify-content: stretch;
   }
 }
 
