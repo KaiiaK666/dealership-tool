@@ -4610,7 +4610,7 @@ export default function App() {
                   <div className="bdc-sales-summary-panel__header">
                     <div>
                       <span className="eyebrow">Worksheet recreation</span>
-                      <h3>DMS log current queue and dated history</h3>
+                      <h3>DMS log quick entry and dated history</h3>
                     </div>
                     <div className="bdc-sales-inline-summary bdc-sales-inline-summary--soft">
                       <span>Current {trackerDmsLog.current_entries.length}</span>
@@ -4619,8 +4619,8 @@ export default function App() {
                     </div>
                   </div>
                   <p className="admin-note">
-                    This mirrors the `DMS LOG` sheet structure: left side current queue, right side historical dated log.
-                    Add a customer here, then move it into the log when it should be recorded as part of the dated history.
+                    New rows now log immediately on entry. The left side is only for quick add and for any rows you move
+                    back out of history to clean up before logging again.
                   </p>
                 </div>
 
@@ -4628,8 +4628,8 @@ export default function App() {
                   <article className="panel bdc-dms-log-panel">
                     <div className="row">
                       <div>
-                        <span className="eyebrow">Current queue</span>
-                        <h3>Customer Name / Apt Set Under</h3>
+                        <span className="eyebrow">Quick add</span>
+                        <h3>Log customer name / apt set under</h3>
                       </div>
                     </div>
                     <div className="bdc-dms-log-create">
@@ -4654,7 +4654,7 @@ export default function App() {
                         />
                       </label>
                       <button type="button" onClick={addBdcSalesTrackerDmsLogEntry} disabled={busy === "bdc-dms-create"}>
-                        {busy === "bdc-dms-create" ? "Adding..." : "Add Current Row"}
+                        {busy === "bdc-dms-create" ? "Logging..." : "Add To Log"}
                       </button>
                     </div>
 
@@ -4704,7 +4704,7 @@ export default function App() {
                           </div>
                         ))
                       ) : (
-                        <div className="empty">No current DMS queue rows yet.</div>
+                        <div className="empty">No current queue rows. New entries now log immediately.</div>
                       )}
                     </div>
                   </article>

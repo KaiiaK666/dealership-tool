@@ -2478,7 +2478,7 @@ def fetch_bdc_sales_tracker(month_key: str) -> BdcSalesTrackerOut:
         SELECT *
         FROM bdc_sales_tracker_dms_log
         WHERE month_key = ?
-        ORDER BY logged ASC, display_order ASC, logged_ts DESC, id DESC
+        ORDER BY logged ASC, CASE WHEN logged = 0 THEN display_order ELSE 0 END ASC, logged_ts DESC, id DESC
         """,
         (month_key,),
     )
@@ -2744,20 +2744,15 @@ def create_bdc_sales_tracker_dms_log_entry(payload: BdcSalesTrackerDmsLogEntryIn
         raise HTTPException(status_code=400, detail="customer_name is required")
     now_ts = time.time()
     now_at = now_local_input_value()
-    order_row = db_query_one(
-        "SELECT COALESCE(MAX(display_order), -1) AS max_order FROM bdc_sales_tracker_dms_log WHERE month_key = ? AND logged = 0",
-        (month_key,),
-    ) or {}
-    display_order = int(order_row.get("max_order") or -1) + 1
     db_insert(
         """
         INSERT INTO bdc_sales_tracker_dms_log (
             month_key, customer_name, apt_set_under, logged, logged_ts, logged_at,
             display_order, created_ts, created_at, updated_ts, updated_at
         )
-        VALUES (?, ?, ?, 0, NULL, '', ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, 1, ?, ?, 0, ?, ?, ?, ?)
         """,
-        (month_key, customer_name, apt_set_under, display_order, now_ts, now_at, now_ts, now_at),
+        (month_key, customer_name, apt_set_under, now_ts, now_at, now_ts, now_at, now_ts, now_at),
     )
     return fetch_bdc_sales_tracker(month_key)
 
