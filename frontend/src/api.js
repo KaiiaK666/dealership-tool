@@ -167,6 +167,10 @@ export const getServiceDriveTraffic = (params = {}) =>
   })}`);
 export const getTrafficPdfs = () => request("/api/traffic/pdfs");
 export const getSpecials = () => request("/api/specials");
+export const updateSpecialsConfig = (token, payload) =>
+  request("/api/admin/specials/config", { method: "POST", body: payload, headers: adminHeaders(token) });
+export const importSpecialFeed = (token, payload) =>
+  request("/api/admin/specials/import-feed", { method: "POST", body: payload, headers: adminHeaders(token), timeout: 60000 });
 export const getQuoteRates = () => request("/api/quote/rates");
 export const getMarketplaceTemplate = () => request("/api/marketplace/template");
 export const getBdcDistribution = () => request("/api/bdc/distribution");

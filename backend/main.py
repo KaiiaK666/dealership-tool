@@ -88,6 +88,7 @@ BDC_UNDO_REQUIRE_META_KEY = "bdc:undo:require_password"
 BDC_UNDO_PASSWORD_META_KEY = "bdc:undo:password"
 TAB_VISIBILITY_META_KEY = "tabs:visibility"
 FRESHUP_LINKS_META_KEY = "freshup:links"
+SPECIALS_USED_SOURCE_META_KEY = "specials:used_source_url"
 TAB_VISIBILITY_IDS = (
     "serviceCalendar",
     "serviceNotes",
@@ -109,6 +110,25 @@ BDC_SALES_TRACKER_DEFAULT_APPOINTMENT_SHOW_RATE_TARGET = 0.60
 BDC_SALES_TRACKER_DEFAULT_SOLD_FROM_APPOINTMENTS_RATE_FLOOR = 0.10
 BDC_SALES_TRACKER_DEFAULT_SOLD_FROM_APPOINTMENTS_RATE_TARGET = 0.15
 BDC_SALES_TRACKER_DEFAULT_SOLD_FROM_APPOINTMENTS_RATE_CEILING = 0.18
+SPECIALS_KIA_NEW_URL = "https://www.bertogdenmissionkia.com/new-specials/"
+SPECIALS_MAZDA_NEW_URL = "https://www.bertogdenmissionmazda.com/new-vehicles/"
+SPECIALS_SOURCE_DEFINITIONS: Dict[str, Dict[str, str]] = {
+    "kia_new": {
+        "label": "Kia New Specials",
+        "default_url": SPECIALS_KIA_NEW_URL,
+        "category": "new_specials",
+    },
+    "mazda_new": {
+        "label": "Mazda New Inventory Picks",
+        "default_url": SPECIALS_MAZDA_NEW_URL,
+        "category": "new_inventory",
+    },
+    "used_srp": {
+        "label": "Used Deal Picks",
+        "default_url": "",
+        "category": "used_inventory",
+    },
+}
 DEFAULT_CORS_ORIGINS = [
     "http://localhost:4174",
     "http://127.0.0.1:4174",
@@ -837,8 +857,68 @@ class SpecialOut(BaseModel):
     created_ts: float
 
 
+class VehicleSpecialEntryOut(BaseModel):
+    id: int
+    source_key: str
+    source_label: str
+    source_url: str
+    badge: str
+    title: str
+    subtitle: str
+    price_text: str
+    payment_text: str
+    mileage_text: str
+    note: str
+    score: float
+    score_label: str
+    image_url: str
+    link_url: str
+    imported_ts: float
+
+
+class VehicleSpecialSectionOut(BaseModel):
+    key: str
+    label: str
+    source_url: str
+    category: str
+    imported_ts: float
+    entries: List[VehicleSpecialEntryOut]
+
+
+class SpecialsConfigOut(BaseModel):
+    kia_new_url: str
+    mazda_new_url: str
+    used_srp_url: str
+
+
 class SpecialsListOut(BaseModel):
     entries: List[SpecialOut]
+    vehicle_sections: List[VehicleSpecialSectionOut] = []
+    config: SpecialsConfigOut
+
+
+class VehicleSpecialImportEntryIn(BaseModel):
+    badge: str = ""
+    title: str = ""
+    subtitle: str = ""
+    price_text: str = ""
+    payment_text: str = ""
+    mileage_text: str = ""
+    note: str = ""
+    score: Optional[float] = None
+    score_label: str = ""
+    image_url: str = ""
+    link_url: str = ""
+
+
+class VehicleSpecialImportIn(BaseModel):
+    source_key: str
+    source_url: str = ""
+    entries: List[VehicleSpecialImportEntryIn]
+
+
+class SpecialsConfigIn(BaseModel):
+    used_srp_url: str = ""
 
 
 class AgentLoopPresetOut(BaseModel):
@@ -1743,6 +1823,116 @@ def set_meta(key: str, value: str) -> None:
     )
 
 
+def normalize_optional_url(value: str, field_name: str = "url", max_len: int = 500) -> str:
+    text = normalize_short_text(value, field_name, max_len=max_len)
+    if not text:
+        return ""
+    parsed = urllib.parse.urlparse(text)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise HTTPException(status_code=400, detail=f"{field_name} must be a full http(s) URL")
+    return text
+
+
+def normalize_special_source_key(value: str) -> str:
+    key = normalize_short_text(value, "source_key", max_len=40).lower()
+    if key not in SPECIALS_SOURCE_DEFINITIONS:
+        raise HTTPException(status_code=400, detail="unknown specials source")
+    return key
+
+
+def specials_source_definition(source_key: str) -> Dict[str, str]:
+    return SPECIALS_SOURCE_DEFINITIONS[normalize_special_source_key(source_key)]
+
+
+def get_specials_config() -> SpecialsConfigOut:
+    used_srp_url = normalize_optional_url(str(get_meta(SPECIALS_USED_SOURCE_META_KEY) or ""), "used_srp_url") if str(get_meta(SPECIALS_USED_SOURCE_META_KEY) or "").strip() else ""
+    return SpecialsConfigOut(
+        kia_new_url=SPECIALS_KIA_NEW_URL,
+        mazda_new_url=SPECIALS_MAZDA_NEW_URL,
+        used_srp_url=used_srp_url,
+    )
+
+
+def save_specials_config(payload: SpecialsConfigIn) -> SpecialsConfigOut:
+    used_srp_url = normalize_optional_url(payload.used_srp_url, "used_srp_url") if str(payload.used_srp_url or "").strip() else ""
+    set_meta(SPECIALS_USED_SOURCE_META_KEY, used_srp_url)
+    return get_specials_config()
+
+
+def numeric_token_from_text(value: str) -> float:
+    text = str(value or "")
+    match = re.search(r"(\d[\d,]*)(?:\.\d+)?", text)
+    if not match:
+        return 0.0
+    try:
+        return float(match.group(1).replace(",", ""))
+    except ValueError:
+        return 0.0
+
+
+def parse_vehicle_year(value: str) -> int:
+    match = re.search(r"\b((?:19|20)\d{2})\b", str(value or ""))
+    return int(match.group(1)) if match else 0
+
+
+def score_used_special_candidate(title: str, price_text: str, mileage_text: str) -> Tuple[float, str]:
+    current_year = now_local().year
+    year_value = parse_vehicle_year(title)
+    price_value = numeric_token_from_text(price_text)
+    mileage_value = numeric_token_from_text(mileage_text)
+
+    price_score = 0.0
+    if price_value:
+        if price_value <= 18000:
+            price_score = 45.0
+        elif price_value <= 24000:
+            price_score = 36.0
+        elif price_value <= 30000:
+            price_score = 28.0
+        elif price_value <= 36000:
+            price_score = 20.0
+        else:
+            price_score = 12.0
+
+    mileage_score = 0.0
+    if mileage_value:
+        if mileage_value <= 15000:
+            mileage_score = 35.0
+        elif mileage_value <= 30000:
+            mileage_score = 28.0
+        elif mileage_value <= 45000:
+            mileage_score = 22.0
+        elif mileage_value <= 60000:
+            mileage_score = 16.0
+        else:
+            mileage_score = 8.0
+
+    year_score = 0.0
+    if year_value:
+        age = max(0, current_year - year_value)
+        if age <= 1:
+            year_score = 20.0
+        elif age <= 2:
+            year_score = 16.0
+        elif age <= 3:
+            year_score = 12.0
+        elif age <= 5:
+            year_score = 8.0
+        else:
+            year_score = 4.0
+
+    score = round(price_score + mileage_score + year_score, 1)
+    if score >= 80:
+        label = "Strong deal"
+    elif score >= 60:
+        label = "Solid value"
+    elif score >= 40:
+        label = "Watch list"
+    else:
+        label = "Needs review"
+    return score, label
+
+
 def init_db() -> None:
     db_execute(
         """
@@ -2085,6 +2275,29 @@ def init_db() -> None:
         )
         """
     )
+    db_execute(
+        """
+        CREATE TABLE IF NOT EXISTS special_feed_entries (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            source_key TEXT NOT NULL,
+            source_label TEXT NOT NULL DEFAULT '',
+            source_url TEXT NOT NULL DEFAULT '',
+            badge TEXT NOT NULL DEFAULT '',
+            title TEXT NOT NULL,
+            subtitle TEXT NOT NULL DEFAULT '',
+            price_text TEXT NOT NULL DEFAULT '',
+            payment_text TEXT NOT NULL DEFAULT '',
+            mileage_text TEXT NOT NULL DEFAULT '',
+            note TEXT NOT NULL DEFAULT '',
+            score REAL NOT NULL DEFAULT 0,
+            score_label TEXT NOT NULL DEFAULT '',
+            image_url TEXT NOT NULL DEFAULT '',
+            link_url TEXT NOT NULL DEFAULT '',
+            imported_ts REAL NOT NULL
+        )
+        """
+    )
+    db_execute("CREATE INDEX IF NOT EXISTS idx_special_feed_entries_source_key ON special_feed_entries(source_key, id DESC)")
     db_execute(
         """
         CREATE TABLE IF NOT EXISTS marketplace_template (
@@ -2482,6 +2695,27 @@ def special_out(row: Dict[str, Any]) -> SpecialOut:
         original_filename=str(row.get("original_filename") or ""),
         image_url=str(row.get("image_url") or ""),
         created_ts=float(row.get("created_ts") or 0.0),
+    )
+
+
+def vehicle_special_entry_out(row: Dict[str, Any]) -> VehicleSpecialEntryOut:
+    return VehicleSpecialEntryOut(
+        id=int(row.get("id") or 0),
+        source_key=str(row.get("source_key") or ""),
+        source_label=str(row.get("source_label") or ""),
+        source_url=str(row.get("source_url") or ""),
+        badge=str(row.get("badge") or ""),
+        title=str(row.get("title") or ""),
+        subtitle=str(row.get("subtitle") or ""),
+        price_text=str(row.get("price_text") or ""),
+        payment_text=str(row.get("payment_text") or ""),
+        mileage_text=str(row.get("mileage_text") or ""),
+        note=str(row.get("note") or ""),
+        score=float(row.get("score") or 0.0),
+        score_label=str(row.get("score_label") or ""),
+        image_url=str(row.get("image_url") or ""),
+        link_url=str(row.get("link_url") or ""),
+        imported_ts=float(row.get("imported_ts") or 0.0),
     )
 
 
@@ -6095,9 +6329,138 @@ def create_traffic_pdf(title: str, upload: UploadFile) -> TrafficPdfOut:
     return traffic_pdf_out(row)
 
 
+def fetch_vehicle_special_sections() -> List[VehicleSpecialSectionOut]:
+    config = get_specials_config()
+    rows = db_query_all("SELECT * FROM special_feed_entries ORDER BY source_key ASC, score DESC, id DESC")
+    grouped: Dict[str, List[VehicleSpecialEntryOut]] = {}
+    imported_at_map: Dict[str, float] = {}
+    for row in rows:
+        item = vehicle_special_entry_out(row)
+        grouped.setdefault(item.source_key, []).append(item)
+        imported_at_map[item.source_key] = max(imported_at_map.get(item.source_key, 0.0), item.imported_ts)
+
+    config_map = {
+        "kia_new": config.kia_new_url,
+        "mazda_new": config.mazda_new_url,
+        "used_srp": config.used_srp_url,
+    }
+    sections: List[VehicleSpecialSectionOut] = []
+    for source_key, definition in SPECIALS_SOURCE_DEFINITIONS.items():
+        entries = grouped.get(source_key, [])
+        if source_key == "used_srp" and entries:
+            entries = sorted(entries, key=lambda item: (-float(item.score or 0.0), -float(item.imported_ts or 0.0), -item.id))[:8]
+        elif entries:
+            entries = entries[:8]
+        sections.append(
+            VehicleSpecialSectionOut(
+                key=source_key,
+                label=definition["label"],
+                source_url=config_map.get(source_key) or definition.get("default_url", ""),
+                category=definition["category"],
+                imported_ts=float(imported_at_map.get(source_key, 0.0)),
+                entries=entries,
+            )
+        )
+    return sections
+
+
 def fetch_specials() -> SpecialsListOut:
     rows = db_query_all("SELECT * FROM specials ORDER BY created_ts DESC, id DESC")
-    return SpecialsListOut(entries=[special_out(row) for row in rows])
+    return SpecialsListOut(
+        entries=[special_out(row) for row in rows],
+        vehicle_sections=fetch_vehicle_special_sections(),
+        config=get_specials_config(),
+    )
+
+
+def import_vehicle_special_feed(payload: VehicleSpecialImportIn) -> SpecialsListOut:
+    source_key = normalize_special_source_key(payload.source_key)
+    source_definition = specials_source_definition(source_key)
+    config = get_specials_config()
+    config_url_map = {
+        "kia_new": config.kia_new_url,
+        "mazda_new": config.mazda_new_url,
+        "used_srp": config.used_srp_url,
+    }
+    resolved_source_url = (
+        normalize_optional_url(payload.source_url, "source_url")
+        if str(payload.source_url or "").strip()
+        else str(config_url_map.get(source_key) or source_definition.get("default_url") or "")
+    )
+
+    now_ts = time.time()
+    dedupe_keys: set[Tuple[str, str, str, str]] = set()
+    normalized_rows: List[Tuple[Any, ...]] = []
+    for item in payload.entries:
+        raw_title = str(item.title or "").strip()
+        raw_link = str(item.link_url or "").strip()
+        if not raw_title and not raw_link:
+            continue
+        title = normalize_short_text(raw_title or raw_link, "title", max_len=180)
+        badge = normalize_short_text(item.badge or source_definition["label"], "badge", max_len=80)
+        subtitle = normalize_short_text(item.subtitle or "", "subtitle", max_len=220)
+        price_text = normalize_short_text(item.price_text or "", "price_text", max_len=80)
+        payment_text = normalize_short_text(item.payment_text or "", "payment_text", max_len=120)
+        mileage_text = normalize_short_text(item.mileage_text or "", "mileage_text", max_len=80)
+        note = normalize_short_text(item.note or "", "note", max_len=260)
+        image_url = normalize_optional_url(item.image_url, "image_url") if str(item.image_url or "").strip() else ""
+        link_url = normalize_optional_url(item.link_url, "link_url") if str(item.link_url or "").strip() else ""
+        score = float(item.score or 0.0)
+        score_label = normalize_short_text(item.score_label or "", "score_label", max_len=80)
+        if source_key == "used_srp":
+            auto_score, auto_label = score_used_special_candidate(title, price_text, mileage_text)
+            score = auto_score
+            score_label = auto_label
+        dedupe_key = (title.lower(), link_url.lower(), price_text.lower(), mileage_text.lower())
+        if dedupe_key in dedupe_keys:
+            continue
+        dedupe_keys.add(dedupe_key)
+        normalized_rows.append(
+            (
+                source_key,
+                source_definition["label"],
+                resolved_source_url,
+                badge,
+                title,
+                subtitle,
+                price_text,
+                payment_text,
+                mileage_text,
+                note,
+                score,
+                score_label,
+                image_url,
+                link_url,
+                now_ts,
+            )
+        )
+
+    db_execute("DELETE FROM special_feed_entries WHERE source_key = ?", (source_key,))
+    for row in normalized_rows[:24]:
+        db_insert(
+            """
+            INSERT INTO special_feed_entries (
+                source_key,
+                source_label,
+                source_url,
+                badge,
+                title,
+                subtitle,
+                price_text,
+                payment_text,
+                mileage_text,
+                note,
+                score,
+                score_label,
+                image_url,
+                link_url,
+                imported_ts
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            row,
+        )
+    return fetch_specials()
 
 
 def create_special(title: str, tag: str, upload: UploadFile) -> SpecialOut:
@@ -6363,6 +6726,21 @@ def get_traffic_pdfs() -> TrafficPdfListOut:
 @app.get("/api/specials", response_model=SpecialsListOut)
 def get_specials() -> SpecialsListOut:
     return fetch_specials()
+
+
+@app.post("/api/admin/specials/config", response_model=SpecialsConfigOut)
+def post_specials_config(payload: SpecialsConfigIn, authorization: Optional[str] = Header(default=None)) -> SpecialsConfigOut:
+    require_admin(authorization)
+    return save_specials_config(payload)
+
+
+@app.post("/api/admin/specials/import-feed", response_model=SpecialsListOut)
+def post_specials_import_feed(
+    payload: VehicleSpecialImportIn,
+    authorization: Optional[str] = Header(default=None),
+) -> SpecialsListOut:
+    require_admin(authorization)
+    return import_vehicle_special_feed(payload)
 
 
 @app.get("/api/quote/rates", response_model=QuoteRateListOut)

@@ -34,6 +34,7 @@ import {
   getFreshUpAnalytics,
   getBdcDistribution,
   getBdcUndoSettings,
+  importSpecialFeed,
   getMarketplaceTemplate,
   getQuoteRates,
   getSalespeople,
@@ -61,6 +62,7 @@ import {
   updateQuoteRates,
   updateSalesperson,
   updateSpecial,
+  updateSpecialsConfig,
   updateTabVisibility,
   updateServiceDriveAssignment,
   updateServiceDriveTraffic,
@@ -87,6 +89,27 @@ const TABS = [
   { id: "quote", label: "Quote Tool" },
   { id: "specials", label: "Specials" },
   { id: "admin", label: "Admin" },
+];
+
+const SPECIAL_FEED_SOURCES = [
+  {
+    key: "kia_new",
+    label: "Kia New Specials",
+    description: "Imports the live Kia specials page and turns it into generated offer tiles.",
+    defaultUrl: "https://www.bertogdenmissionkia.com/new-specials/",
+  },
+  {
+    key: "mazda_new",
+    label: "Mazda New Inventory Picks",
+    description: "Imports the Mazda new inventory page so you can feature current new-car spots in the specials tab.",
+    defaultUrl: "https://www.bertogdenmissionmazda.com/new-vehicles/",
+  },
+  {
+    key: "used_srp",
+    label: "Used Deal Picks",
+    description: "Imports a used SRP page, scores vehicles by price and miles, and surfaces the strongest deal tiles separately.",
+    defaultUrl: "",
+  },
 ];
 
 function emptySalesForm() {
@@ -690,6 +713,131 @@ async function copyTextValue(value) {
   document.body.removeChild(area);
 }
 
+async function readClipboardText() {
+  if (typeof navigator !== "undefined" && navigator.clipboard?.readText) {
+    return navigator.clipboard.readText();
+  }
+  throw new Error("Clipboard read is not available in this browser.");
+}
+
+function buildSpecialFeedImportScript(sourceKey) {
+  return `(async () => {
+  const SOURCE_KEY = ${JSON.stringify(sourceKey)};
+  const collapse = (value) => String(value || "").replace(/\\s+/g, " ").trim();
+  const titlePattern = /\\b(?:19|20)\\d{2}\\b/;
+  const firstMatch = (text, pattern) => {
+    const match = String(text || "").match(pattern);
+    return match ? collapse(match[0]) : "";
+  };
+  const firstLine = (text, predicate) =>
+    String(text || "")
+      .split(/\\n+/)
+      .map(collapse)
+      .find((line) => line && predicate(line)) || "";
+  const titleFrom = (node, text) => {
+    const heading = Array.from(node.querySelectorAll("h1,h2,h3,h4,h5,strong,[class*='title'],[class*='model']"))
+      .map((el) => collapse(el.innerText))
+      .find((line) => line && (titlePattern.test(line) || line.length >= 12));
+    return (
+      heading ||
+      firstLine(text, (line) => titlePattern.test(line)) ||
+      firstLine(text, (line) => line.length >= 12) ||
+      ""
+    );
+  };
+  const badgeFrom = (node) =>
+    collapse(
+      node.querySelector("[class*='badge'], [class*='tag'], [class*='eyebrow'], [class*='label']")?.innerText ||
+        (SOURCE_KEY === "used_srp" ? "Used Deal Pick" : SOURCE_KEY === "kia_new" ? "Kia New" : "Mazda New")
+    );
+  const hrefFrom = (node) => node.querySelector("a[href]")?.href || "";
+  const imageFrom = (node) => node.querySelector("img")?.src || "";
+  const subtitleFrom = (text, title) =>
+    firstLine(
+      text,
+      (line) =>
+        line !== title &&
+        !line.startsWith("$") &&
+        !/miles?/i.test(line) &&
+        !/apr|lease|finance|msrp|stock/i.test(line) &&
+        line.length <= 96
+    );
+  const noteFrom = (text, title, subtitle) =>
+    firstLine(
+      text,
+      (line) =>
+        line &&
+        line !== title &&
+        line !== subtitle &&
+        /lease|apr|finance|stock|vin|drive|payment|special|discount|save/i.test(line) &&
+        line.length <= 140
+    );
+  const qualifies = (text, href) => {
+    const hasMoney = /\\$\\s?\\d/.test(text);
+    const hasMiles = /\\b\\d[\\d,]*\\s*miles?\\b/i.test(text);
+    const hasYear = titlePattern.test(text);
+    if (SOURCE_KEY === "kia_new") return hasMoney || /lease|apr|finance|signing|payment/i.test(text);
+    if (SOURCE_KEY === "mazda_new") return hasYear && (href.includes("/inventory/") || hasMoney || /msrp|sale/i.test(text));
+    return hasYear && (hasMiles || hasMoney || href.includes("/inventory/"));
+  };
+  const anchorCandidates = Array.from(document.querySelectorAll("a[href]"))
+    .filter((anchor) => {
+      const href = anchor.href || "";
+      return SOURCE_KEY === "kia_new" ? /inventory|special/i.test(href) : /\\/inventory\\//i.test(href);
+    })
+    .map((anchor) => anchor.closest("article, li, section, div") || anchor);
+  const genericCandidates = Array.from(
+    document.querySelectorAll("article, [class*='vehicle'], [class*='special'], [class*='offer'], [class*='card'], li")
+  );
+  const nodes = Array.from(new Set([...anchorCandidates, ...genericCandidates]));
+  const seen = new Set();
+  const entries = [];
+  for (const node of nodes) {
+    if (!node || typeof node.querySelectorAll !== "function") continue;
+    const text = collapse(node.innerText || node.textContent || "");
+    if (text.length < 40 || text.length > 1400) continue;
+    const href = hrefFrom(node);
+    if (!qualifies(text, href)) continue;
+    const title = titleFrom(node, text);
+    if (!title) continue;
+    const subtitle = subtitleFrom(text, title);
+    const priceText = firstMatch(text, /\\$\\s?\\d[\\d,]*(?:\\.\\d{2})?(?!\\s*(?:\\/\\s*)?(?:mo|month))/i);
+    const paymentText =
+      firstMatch(text, /\\$\\s?\\d[\\d,]*(?:\\.\\d{2})?\\s*(?:\\/\\s*)?(?:mo|month)\\b/i) ||
+      firstMatch(text, /\\$\\s?\\d[\\d,]*(?:\\.\\d{2})?\\s+due at signing\\b/i);
+    const mileageText = firstMatch(text, /\\b\\d[\\d,]*\\s*miles?\\b/i);
+    const note = noteFrom(text, title, subtitle);
+    const dedupeKey = [title.toLowerCase(), href.toLowerCase(), priceText.toLowerCase(), mileageText.toLowerCase()].join("|");
+    if (seen.has(dedupeKey)) continue;
+    seen.add(dedupeKey);
+    entries.push({
+      badge: badgeFrom(node),
+      title,
+      subtitle,
+      price_text: priceText,
+      payment_text: paymentText,
+      mileage_text: mileageText,
+      note,
+      image_url: imageFrom(node),
+      link_url: href,
+    });
+  }
+  const payload = {
+    source_key: SOURCE_KEY,
+    source_url: location.href,
+    entries: entries.slice(0, SOURCE_KEY === "used_srp" ? 24 : 16),
+  };
+  const output = JSON.stringify(payload);
+  try {
+    await navigator.clipboard.writeText(output);
+    alert(\`Copied \${payload.entries.length} \${SOURCE_KEY} entries to the clipboard.\`);
+  } catch (error) {
+    console.log(output);
+    prompt("Copy specials payload", output);
+  }
+})();`;
+}
+
 function sortTrafficEntries(entries) {
   return [...(entries || [])].sort((left, right) => {
     const leftTs = Number(left?.appointment_ts || 0);
@@ -1157,6 +1305,15 @@ export default function App() {
   const [trafficAnalysisLoading, setTrafficAnalysisLoading] = useState(false);
   const [trafficPdfs, setTrafficPdfs] = useState([]);
   const [specials, setSpecials] = useState([]);
+  const [specialVehicleSections, setSpecialVehicleSections] = useState([]);
+  const [specialsConfig, setSpecialsConfig] = useState({
+    kia_new_url: SPECIAL_FEED_SOURCES[0].defaultUrl,
+    mazda_new_url: SPECIAL_FEED_SOURCES[1].defaultUrl,
+    used_srp_url: SPECIAL_FEED_SOURCES[2].defaultUrl,
+  });
+  const [specialsConfigDraft, setSpecialsConfigDraft] = useState({ used_srp_url: "" });
+  const [specialsImportPayload, setSpecialsImportPayload] = useState("");
+  const [specialsImportStatus, setSpecialsImportStatus] = useState("");
   const [selectedSpecialId, setSelectedSpecialId] = useState(null);
   const [bdcState, setBdcState] = useState(null);
   const [bdcDistribution, setBdcDistribution] = useState({ mode: "franchise" });
@@ -1308,6 +1465,8 @@ export default function App() {
     ? daysOffEntriesBySalesperson.get(selectedDaysOffSalesperson.id) || []
     : [];
   const selectedSpecial = specials.find((item) => item.id === selectedSpecialId) || specials[0] || null;
+  const specialFeedSourceMap = Object.fromEntries(SPECIAL_FEED_SOURCES.map((item) => [item.key, item]));
+  const populatedSpecialVehicleSections = specialVehicleSections.filter((section) => (section.entries || []).length);
   const selectedTrafficSalesperson =
     activeSales.find((person) => String(person.id) === String(selectedTrafficSalesId)) || null;
   const selectedTrafficSalesStore =
@@ -1676,6 +1835,14 @@ export default function App() {
   async function refreshSpecials() {
     const data = await getSpecials();
     setSpecials(data.entries || []);
+    setSpecialVehicleSections(data.vehicle_sections || []);
+    const nextConfig = data.config || {
+      kia_new_url: SPECIAL_FEED_SOURCES[0].defaultUrl,
+      mazda_new_url: SPECIAL_FEED_SOURCES[1].defaultUrl,
+      used_srp_url: SPECIAL_FEED_SOURCES[2].defaultUrl,
+    };
+    setSpecialsConfig(nextConfig);
+    setSpecialsConfigDraft({ used_srp_url: nextConfig.used_srp_url || "" });
     setResourceLoadState((current) => ({ ...current, specials: true }));
   }
 
@@ -3319,6 +3486,84 @@ export default function App() {
       setError(errText(errorValue));
     } finally {
       setBusy("");
+    }
+  }
+
+  function specialsSourceUrl(sourceKey) {
+    if (sourceKey === "kia_new") return specialsConfig.kia_new_url || specialFeedSourceMap.kia_new?.defaultUrl || "";
+    if (sourceKey === "mazda_new") return specialsConfig.mazda_new_url || specialFeedSourceMap.mazda_new?.defaultUrl || "";
+    return specialsConfigDraft.used_srp_url || specialsConfig.used_srp_url || specialFeedSourceMap.used_srp?.defaultUrl || "";
+  }
+
+  async function copySpecialImportScript(sourceKey) {
+    try {
+      await copyTextValue(buildSpecialFeedImportScript(sourceKey));
+      setSpecialsImportStatus(`Copied the ${specialFeedSourceMap[sourceKey]?.label || "specials"} import script. Open the source page, paste it into the browser console, then import the copied payload here.`);
+      setError("");
+    } catch (errorValue) {
+      setError(errText(errorValue));
+    }
+  }
+
+  async function saveSpecialsSourceConfig() {
+    setBusy("specials-config");
+    setError("");
+    try {
+      const nextConfig = await updateSpecialsConfig(adminToken, {
+        used_srp_url: specialsConfigDraft.used_srp_url,
+      });
+      setSpecialsConfig(nextConfig);
+      setSpecialsConfigDraft({ used_srp_url: nextConfig.used_srp_url || "" });
+      setSpecialsImportStatus("Saved the used SRP source URL.");
+      await refreshSpecials();
+    } catch (errorValue) {
+      setError(errText(errorValue));
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function importSpecialFeedPayload(rawPayload, fallbackSourceKey = "") {
+    const rawText = String(rawPayload || "").trim();
+    if (!rawText) {
+      setError("Paste a specials payload first.");
+      return;
+    }
+    setBusy(`specials-import-${fallbackSourceKey || "payload"}`);
+    setError("");
+    try {
+      const parsed = JSON.parse(rawText);
+      const sourceKey = parsed.source_key || fallbackSourceKey;
+      if (!sourceKey) {
+        throw new Error("Payload is missing a source key.");
+      }
+      const saved = await importSpecialFeed(adminToken, {
+        source_key: sourceKey,
+        source_url: parsed.source_url || specialsSourceUrl(sourceKey),
+        entries: Array.isArray(parsed.entries) ? parsed.entries : [],
+      });
+      setSpecials(saved.entries || []);
+      setSpecialVehicleSections(saved.vehicle_sections || []);
+      if (saved.config) {
+        setSpecialsConfig(saved.config);
+        setSpecialsConfigDraft({ used_srp_url: saved.config.used_srp_url || "" });
+      }
+      setResourceLoadState((current) => ({ ...current, specials: true }));
+      setSpecialsImportPayload("");
+      setSpecialsImportStatus(`Imported ${(parsed.entries || []).length} ${specialFeedSourceMap[sourceKey]?.label || "special"} entries.`);
+    } catch (errorValue) {
+      setError(errText(errorValue));
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function importSpecialFeedFromClipboard(sourceKey) {
+    try {
+      const clipboardValue = await readClipboardText();
+      await importSpecialFeedPayload(clipboardValue, sourceKey);
+    } catch (errorValue) {
+      setError(errText(errorValue));
     }
   }
 
@@ -6824,9 +7069,97 @@ export default function App() {
 
         {tab === "specials" ? (
           <section className="stack">
-            <div className="panel">
+            <div className="panel specials-panel-header">
               <span className="eyebrow">Specials</span>
-              <h2>Offer tiles</h2>
+              <h2>Live website specials and graphic tiles</h2>
+              <p className="admin-note">
+                Kia and Mazda website picks can now live here alongside your manual 1080 x 1080 graphics. Used vehicles get their own
+                scored deal-pick section once the SRP feed is imported.
+              </p>
+              <div className="specials-panel-header__chips">
+                <span>{populatedSpecialVehicleSections.length} live source section{populatedSpecialVehicleSections.length === 1 ? "" : "s"}</span>
+                <span>{specials.length} manual tile{specials.length === 1 ? "" : "s"}</span>
+                <span>{specialsConfig.used_srp_url ? "Used SRP configured" : "Used SRP waiting on URL"}</span>
+              </div>
+            </div>
+
+            {specialVehicleSections.map((section) => {
+              const sourceMeta = specialFeedSourceMap[section.key] || null;
+              const sectionUrl = section.source_url || sourceMeta?.defaultUrl || "";
+              return (
+                <div key={section.key} className="panel special-feed-section">
+                  <div className="special-feed-section__header">
+                    <div>
+                      <span className="eyebrow">{section.label}</span>
+                      <h3>
+                        {section.key === "used_srp"
+                          ? "Good-deal used tiles based on imported price and mileage"
+                          : "Website-sourced vehicle specials cached from the live page"}
+                      </h3>
+                      <p className="admin-note">{sourceMeta?.description || "Imported directly from the live website source."}</p>
+                    </div>
+                    <div className="special-feed-section__meta">
+                      {section.imported_ts ? <span>Imported {dateTimeLabel(section.imported_ts)}</span> : <span>Not imported yet</span>}
+                      {sectionUrl ? (
+                        <a href={sectionUrl} target="_blank" rel="noreferrer">
+                          Open source
+                        </a>
+                      ) : (
+                        <span>Source URL pending</span>
+                      )}
+                    </div>
+                  </div>
+
+                  {section.entries?.length ? (
+                    <div className="special-feed-grid">
+                      {section.entries.map((item) => {
+                        const Wrapper = item.link_url ? "a" : "div";
+                        const wrapperProps = item.link_url
+                          ? { href: item.link_url, target: "_blank", rel: "noreferrer" }
+                          : {};
+                        return (
+                          <Wrapper
+                            key={`special-feed-${section.key}-${item.id}`}
+                            className={`special-feed-card ${section.key === "used_srp" ? "is-used" : ""}`}
+                            {...wrapperProps}
+                          >
+                            <div className="special-feed-card__art">
+                              {item.image_url ? <img src={item.image_url} alt={item.title} /> : null}
+                              <div className="special-feed-card__overlay">
+                                <span>{item.badge || section.label}</span>
+                                {item.score_label ? <strong>{item.score_label}</strong> : null}
+                              </div>
+                            </div>
+                            <div className="special-feed-card__copy">
+                              <strong>{item.title}</strong>
+                              {item.subtitle ? <p>{item.subtitle}</p> : null}
+                              <div className="special-feed-card__chips">
+                                {item.price_text ? <span>{item.price_text}</span> : null}
+                                {item.payment_text ? <span>{item.payment_text}</span> : null}
+                                {item.mileage_text ? <span>{item.mileage_text}</span> : null}
+                                {item.score ? <span>Score {Math.round(item.score)}</span> : null}
+                              </div>
+                              {item.note ? <small>{item.note}</small> : null}
+                            </div>
+                          </Wrapper>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div className="empty">
+                      {section.key === "used_srp" && !sectionUrl
+                        ? "Add the used SRP URL in Admin > Specials, then import the live page payload."
+                        : "No imported entries yet for this source. Use Admin > Specials to bring in the live page data."}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+
+            <div className="panel">
+              <span className="eyebrow">Graphic tile library</span>
+              <h3>Manual uploaded promo graphics</h3>
+              <p className="admin-note">Keep your square offer graphics here for polished promotions and click any tile to preview it larger.</p>
             </div>
 
             {selectedSpecial ? (
@@ -6834,14 +7167,14 @@ export default function App() {
                 <div className="specials-hero__copy">
                   <span className="eyebrow">{selectedSpecial.tag}</span>
                   <h2>{selectedSpecial.title}</h2>
-                  <p>Click any tile below to switch the current offer.</p>
+                  <p>Click any manual tile below to switch the current graphic.</p>
                 </div>
                 <div className="specials-hero__media">
                   <img src={assetUrl(selectedSpecial.image_url)} alt={selectedSpecial.title} />
                 </div>
               </div>
             ) : (
-              <div className="empty">No specials uploaded yet.</div>
+              <div className="empty">No manual specials uploaded yet.</div>
             )}
 
             <div className="specials-grid">
@@ -9064,6 +9397,90 @@ export default function App() {
                           ) : (
                             <div className="empty">No specials uploaded yet.</div>
                           )}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="panel special-feed-admin-panel">
+                      <div className="special-feed-admin-panel__header">
+                        <div>
+                          <span className="eyebrow">Website imports</span>
+                          <h3>Bring Kia, Mazda, and used SRP specials into the tab</h3>
+                          <p className="admin-note">
+                            The dealership sites are protected behind Cloudflare, so the app cannot scrape them directly from the server.
+                            Instead, copy the import script below, run it in the browser console on the live source page, then paste or import
+                            the generated payload here. The app caches the result and turns it into tile graphics.
+                          </p>
+                        </div>
+                        {specialsImportStatus ? <div className="special-feed-admin-panel__status">{specialsImportStatus}</div> : null}
+                      </div>
+
+                      <div className="special-feed-admin-grid">
+                        {SPECIAL_FEED_SOURCES.map((source) => (
+                          <article key={`special-source-${source.key}`} className="special-feed-admin-card">
+                            <div className="special-feed-admin-card__copy">
+                              <span>{source.label}</span>
+                              <strong>{source.description}</strong>
+                            </div>
+                            <div className="special-feed-admin-card__url">
+                              <label>
+                                <span>Source URL</span>
+                                <input
+                                  value={source.key === "used_srp" ? specialsConfigDraft.used_srp_url : specialsSourceUrl(source.key)}
+                                  onChange={(event) =>
+                                    source.key === "used_srp"
+                                      ? setSpecialsConfigDraft({ used_srp_url: event.target.value })
+                                      : null
+                                  }
+                                  readOnly={source.key !== "used_srp"}
+                                  placeholder={source.defaultUrl || "Paste the used SRP URL"}
+                                />
+                              </label>
+                              {source.key === "used_srp" ? (
+                                <button type="button" className="secondary" onClick={saveSpecialsSourceConfig} disabled={busy === "specials-config"}>
+                                  {busy === "specials-config" ? "Saving..." : "Save Used URL"}
+                                </button>
+                              ) : null}
+                            </div>
+                            <div className="special-feed-admin-card__actions">
+                              <button type="button" className="secondary" onClick={() => copySpecialImportScript(source.key)}>
+                                Copy Import Script
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => importSpecialFeedFromClipboard(source.key)}
+                                disabled={busy === `specials-import-${source.key}`}
+                              >
+                                {busy === `specials-import-${source.key}` ? "Importing..." : "Import From Clipboard"}
+                              </button>
+                              {specialsSourceUrl(source.key) ? (
+                                <a href={specialsSourceUrl(source.key)} target="_blank" rel="noreferrer">
+                                  Open Source
+                                </a>
+                              ) : null}
+                            </div>
+                          </article>
+                        ))}
+                      </div>
+
+                      <div className="special-feed-admin-manual">
+                        <label>
+                          <span>Manual payload paste</span>
+                          <textarea
+                            rows={8}
+                            value={specialsImportPayload}
+                            onChange={(event) => setSpecialsImportPayload(event.target.value)}
+                            placeholder='Paste the JSON payload copied from the browser import script here if you want a manual fallback.'
+                          />
+                        </label>
+                        <div className="controls">
+                          <button
+                            type="button"
+                            onClick={() => importSpecialFeedPayload(specialsImportPayload)}
+                            disabled={busy === "specials-import-payload"}
+                          >
+                            {busy === "specials-import-payload" ? "Importing..." : "Import Pasted Payload"}
+                          </button>
                         </div>
                       </div>
                     </div>
