@@ -464,6 +464,8 @@ function defaultBdcSalesTrackerRulesDraft() {
   return {
     appointment_set_rate_floor: "20",
     appointment_set_rate_target: "30",
+    appointment_show_rate_floor: "50",
+    appointment_show_rate_target: "60",
     sold_from_appointments_rate_floor: "10",
     sold_from_appointments_rate_target: "15",
     sold_from_appointments_rate_ceiling: "18",
@@ -490,6 +492,10 @@ function percentOfTotal(value, total) {
   const safeTotal = Number(total || 0);
   if (!safeTotal) return 0;
   return Math.max(0, Math.min(100, (Number(value || 0) / safeTotal) * 100));
+}
+
+function trackerBenchmarkTone(rate, floor) {
+  return Number(rate || 0) >= Number(floor || 0) ? "is-good" : "is-bad";
 }
 
 function fillMarketplaceTemplate(template, data) {
@@ -1434,6 +1440,8 @@ export default function App() {
   const trackerBenchmarks = bdcSalesTracker?.benchmarks || {
     appointment_set_rate_floor: 0.2,
     appointment_set_rate_target: 0.3,
+    appointment_show_rate_floor: 0.5,
+    appointment_show_rate_target: 0.6,
     sold_from_appointments_rate_floor: 0.1,
     sold_from_appointments_rate_target: 0.15,
     sold_from_appointments_rate_ceiling: 0.18,
@@ -1452,13 +1460,14 @@ export default function App() {
     (totals, agent) => ({
       totalLeads: totals.totalLeads + Number(agent.total_leads || 0),
       appointmentsSet: totals.appointmentsSet + Number(agent.appointments_set || 0),
+      appointmentsShown: totals.appointmentsShown + Number(agent.appointments_shown || 0),
       actualSold: totals.actualSold + Number(agent.actual_sold || 0),
       calls: totals.calls + Number(agent.calls_mtd || 0),
       emails: totals.emails + Number(agent.emails_mtd || 0),
       texts: totals.texts + Number(agent.texts_mtd || 0),
       trackerRows: totals.trackerRows + Number(agent.entries?.length || 0),
     }),
-    { totalLeads: 0, appointmentsSet: 0, actualSold: 0, calls: 0, emails: 0, texts: 0, trackerRows: 0 }
+    { totalLeads: 0, appointmentsSet: 0, appointmentsShown: 0, actualSold: 0, calls: 0, emails: 0, texts: 0, trackerRows: 0 }
   );
   const trackerConfirmedCount = Number(bdcSalesTracker?.summary?.mtd_tracked || 0);
   const trackerPendingCount = Math.max(0, bdcSalesTrackerTeamTotals.trackerRows - trackerConfirmedCount);
@@ -1507,8 +1516,14 @@ export default function App() {
   const trackerAppointmentSetRate = bdcSalesTrackerTeamTotals.totalLeads
     ? bdcSalesTrackerTeamTotals.appointmentsSet / bdcSalesTrackerTeamTotals.totalLeads
     : 0;
+  const trackerAppointmentShowRate = bdcSalesTrackerTeamTotals.appointmentsSet
+    ? bdcSalesTrackerTeamTotals.appointmentsShown / bdcSalesTrackerTeamTotals.appointmentsSet
+    : 0;
   const trackerSoldFromAppointmentsRate = bdcSalesTrackerTeamTotals.appointmentsSet
     ? bdcSalesTrackerTeamTotals.actualSold / bdcSalesTrackerTeamTotals.appointmentsSet
+    : 0;
+  const trackerSoldFromShownRate = bdcSalesTrackerTeamTotals.appointmentsShown
+    ? bdcSalesTrackerTeamTotals.actualSold / bdcSalesTrackerTeamTotals.appointmentsShown
     : 0;
   const trackerFocusOptions = [
     { key: "all_sales_people", label: "All Sales People" },
@@ -1528,6 +1543,8 @@ export default function App() {
     setBdcSalesTrackerRulesDraft({
       appointment_set_rate_floor: String(Math.round(Number(data?.benchmarks?.appointment_set_rate_floor || 0.2) * 100)),
       appointment_set_rate_target: String(Math.round(Number(data?.benchmarks?.appointment_set_rate_target || 0.3) * 100)),
+      appointment_show_rate_floor: String(Math.round(Number(data?.benchmarks?.appointment_show_rate_floor || 0.5) * 100)),
+      appointment_show_rate_target: String(Math.round(Number(data?.benchmarks?.appointment_show_rate_target || 0.6) * 100)),
       sold_from_appointments_rate_floor: String(
         Math.round(Number(data?.benchmarks?.sold_from_appointments_rate_floor || 0.1) * 100)
       ),
@@ -1770,6 +1787,7 @@ export default function App() {
         month: bdcSalesTrackerMonth,
         total_leads: Math.round(numericValue(agent.total_leads)),
         appointments_set: Math.round(numericValue(agent.appointments_set)),
+        appointments_shown: Math.round(numericValue(agent.appointments_shown)),
         actual_sold: Math.round(numericValue(agent.actual_sold)),
         calls_mtd: Math.round(numericValue(agent.calls_mtd)),
         emails_mtd: Math.round(numericValue(agent.emails_mtd)),
@@ -1792,6 +1810,8 @@ export default function App() {
         month: bdcSalesTrackerMonth,
         appointment_set_rate_floor: numericValue(bdcSalesTrackerRulesDraft.appointment_set_rate_floor) / 100,
         appointment_set_rate_target: numericValue(bdcSalesTrackerRulesDraft.appointment_set_rate_target) / 100,
+        appointment_show_rate_floor: numericValue(bdcSalesTrackerRulesDraft.appointment_show_rate_floor) / 100,
+        appointment_show_rate_target: numericValue(bdcSalesTrackerRulesDraft.appointment_show_rate_target) / 100,
         sold_from_appointments_rate_floor: numericValue(bdcSalesTrackerRulesDraft.sold_from_appointments_rate_floor) / 100,
         sold_from_appointments_rate_target: numericValue(bdcSalesTrackerRulesDraft.sold_from_appointments_rate_target) / 100,
         sold_from_appointments_rate_ceiling: numericValue(bdcSalesTrackerRulesDraft.sold_from_appointments_rate_ceiling) / 100,
@@ -4503,18 +4523,33 @@ export default function App() {
                     </div>
                     <small>{monthLabel(bdcSalesTrackerMonth)} resets into a fresh tracker sheet next month.</small>
                   </article>
-                  <article className={`bdc-sales-kpi ${trackerAppointmentSetRate < trackerBenchmarks.appointment_set_rate_floor || trackerSoldFromAppointmentsRate < trackerBenchmarks.sold_from_appointments_rate_floor ? "is-warning" : "is-positive"}`}>
+                  <article
+                    className={`bdc-sales-kpi ${
+                      trackerAppointmentSetRate < trackerBenchmarks.appointment_set_rate_floor ||
+                      trackerAppointmentShowRate < trackerBenchmarks.appointment_show_rate_floor ||
+                      trackerSoldFromAppointmentsRate < trackerBenchmarks.sold_from_appointments_rate_floor
+                        ? "is-warning"
+                        : "is-positive"
+                    }`}
+                  >
                     <div className="bdc-sales-kpi__label">
-                      <span>Appointment analytics</span>
-                      <small>Manual report inputs against your benchmark rules</small>
+                      <span>Appointment funnel</span>
+                      <small>Leads to set to shown to sold against benchmarks</small>
                     </div>
-                    <strong>{formatPercent(trackerAppointmentSetRate || 0)}</strong>
+                    <strong>{bdcSalesTrackerTeamTotals.appointmentsShown}</strong>
                     <div className="bdc-sales-kpi__stats">
-                      <span>Appt set benchmark {formatPercent(trackerBenchmarks.appointment_set_rate_floor)} to {formatPercent(trackerBenchmarks.appointment_set_rate_target)}</span>
-                      <span>Sold from appts {formatPercent(trackerSoldFromAppointmentsRate || 0)}</span>
-                      <span>
-                        Sold from appts benchmark {formatPercent(trackerBenchmarks.sold_from_appointments_rate_floor)} to{" "}
+                      <span className={trackerBenchmarkTone(trackerAppointmentSetRate, trackerBenchmarks.appointment_set_rate_floor)}>
+                        Set rate {formatPercent(trackerAppointmentSetRate || 0)} | avg {formatPercent(trackerBenchmarks.appointment_set_rate_floor)} to {formatPercent(trackerBenchmarks.appointment_set_rate_target)}
+                      </span>
+                      <span className={trackerBenchmarkTone(trackerAppointmentShowRate, trackerBenchmarks.appointment_show_rate_floor)}>
+                        Show rate {formatPercent(trackerAppointmentShowRate || 0)} | avg {formatPercent(trackerBenchmarks.appointment_show_rate_floor)} to {formatPercent(trackerBenchmarks.appointment_show_rate_target)}
+                      </span>
+                      <span className={trackerBenchmarkTone(trackerSoldFromAppointmentsRate, trackerBenchmarks.sold_from_appointments_rate_floor)}>
+                        Sold from set {formatPercent(trackerSoldFromAppointmentsRate || 0)} | avg {formatPercent(trackerBenchmarks.sold_from_appointments_rate_floor)} to{" "}
                         {formatPercent(trackerBenchmarks.sold_from_appointments_rate_ceiling)}
+                      </span>
+                      <span className={trackerBenchmarkTone(trackerSoldFromShownRate, trackerBenchmarks.sold_from_appointments_rate_floor)}>
+                        Close from shown {formatPercent(trackerSoldFromShownRate || 0)} | shown sold conversion
                       </span>
                     </div>
                   </article>
@@ -4720,6 +4755,7 @@ export default function App() {
                     <div className="bdc-sales-inline-summary">
                       <span>Leads {bdcSalesTrackerTeamTotals.totalLeads}</span>
                       <span>Set {bdcSalesTrackerTeamTotals.appointmentsSet}</span>
+                      <span>Shown {bdcSalesTrackerTeamTotals.appointmentsShown}</span>
                       <span>Sold {bdcSalesTrackerTeamTotals.actualSold}</span>
                     </div>
                   </div>
@@ -4733,9 +4769,13 @@ export default function App() {
                           <th>Leads</th>
                           <th>Appts Created</th>
                           <th>Appt Set %</th>
+                          <th>Appts Shown</th>
+                          <th>Show %</th>
                           <th>Apt Sold</th>
                           <th>Sold from Appts %</th>
+                          <th>Close from Show %</th>
                           <th>Avg Appts / Day</th>
+                          <th>Avg Shown / Day</th>
                           <th>Avg Sold / Day</th>
                           <th>Calls</th>
                           <th>Email</th>
@@ -4756,10 +4796,20 @@ export default function App() {
                               <td>{formatTrackerNumber(agent.tracking_projection)}</td>
                               <td>{Number(agent.total_leads || 0)}</td>
                               <td>{Number(agent.appointments_set || 0)}</td>
-                              <td>{formatPercent(agent.appointment_set_rate || 0)}</td>
+                              <td className={`bdc-sales-rate ${trackerBenchmarkTone(agent.appointment_set_rate, trackerBenchmarks.appointment_set_rate_floor)}`}>
+                                {formatPercent(agent.appointment_set_rate || 0)}
+                              </td>
+                              <td>{Number(agent.appointments_shown || 0)}</td>
+                              <td className={`bdc-sales-rate ${trackerBenchmarkTone(agent.appointment_show_rate, trackerBenchmarks.appointment_show_rate_floor)}`}>
+                                {formatPercent(agent.appointment_show_rate || 0)}
+                              </td>
                               <td>{Number(agent.actual_sold || 0)}</td>
-                              <td>{formatPercent(agent.actual_sold_rate || 0)}</td>
+                              <td className={`bdc-sales-rate ${trackerBenchmarkTone(agent.actual_sold_rate, trackerBenchmarks.sold_from_appointments_rate_floor)}`}>
+                                {formatPercent(agent.actual_sold_rate || 0)}
+                              </td>
+                              <td>{formatPercent(agent.sold_from_shown_rate || 0)}</td>
                               <td>{formatTrackerNumber(agent.avg_appointments_per_day)}</td>
+                              <td>{formatTrackerNumber(agent.avg_shown_per_day)}</td>
                               <td>{formatTrackerNumber(agent.avg_sold_per_day)}</td>
                               <td>{Number(agent.calls_mtd || 0)}</td>
                               <td>{Number(agent.emails_mtd || 0)}</td>
@@ -4770,7 +4820,7 @@ export default function App() {
                           ))
                         ) : (
                           <tr>
-                            <td colSpan={15}>No BDC agents are configured yet.</td>
+                            <td colSpan={19}>No BDC agents are configured yet.</td>
                           </tr>
                         )}
                       </tbody>
@@ -4793,8 +4843,8 @@ export default function App() {
                               <span className="eyebrow">BDC agent</span>
                               <h3>{agent.agent_name}</h3>
                               <p>
-                                {agent.sold_count} tracked sold / {formatTrackerNumber(agent.tracking_projection)} pace /{" "}
-                                {Number(agent.actual_sold || 0)} manual sold
+                                {agent.sold_count} tracked green sold / {Number(agent.appointments_shown || 0)} shown /{" "}
+                                {Number(agent.actual_sold || 0)} appointment sold
                               </p>
                             </div>
                             <div className={`bdc-sales-agent-card__status ${agent.active ? "is-active" : "is-inactive"}`}>
@@ -4823,6 +4873,16 @@ export default function App() {
                                 min="0"
                                 value={agent.appointments_set ?? ""}
                                 onChange={(event) => patchBdcSalesTrackerAgent(agent.agent_id, "appointments_set", event.target.value)}
+                              />
+                            </label>
+                            <label>
+                              <span>Appts Shown</span>
+                              <input
+                                type="number"
+                                inputMode="numeric"
+                                min="0"
+                                value={agent.appointments_shown ?? ""}
+                                onChange={(event) => patchBdcSalesTrackerAgent(agent.agent_id, "appointments_shown", event.target.value)}
                               />
                             </label>
                             <label>
@@ -4876,9 +4936,10 @@ export default function App() {
                               />
                             </label>
                             <div className="bdc-sales-metrics-card">
-                              <span>Appt set / sold from appts</span>
+                              <span>Set / shown / sold</span>
                               <strong>
-                                {formatPercent(agent.appointment_set_rate || 0)} / {formatPercent(agent.actual_sold_rate || 0)}
+                                {formatPercent(agent.appointment_set_rate || 0)} / {formatPercent(agent.appointment_show_rate || 0)} /{" "}
+                                {formatPercent(agent.actual_sold_rate || 0)}
                               </strong>
                               <small>{agent.average_activity_label || "0 / 0 / 0"} calls / email / text</small>
                             </div>
@@ -4904,12 +4965,23 @@ export default function App() {
                           <div className="bdc-sales-metrics-card">
                             <span>Appts Created</span>
                             <strong>{Number(agent.appointments_set || 0)}</strong>
-                            <small>{formatPercent(agent.appointment_set_rate || 0)} of leads</small>
+                            <small className={`bdc-sales-rate ${trackerBenchmarkTone(agent.appointment_set_rate, trackerBenchmarks.appointment_set_rate_floor)}`}>
+                              {formatPercent(agent.appointment_set_rate || 0)} of leads
+                            </small>
+                          </div>
+                          <div className="bdc-sales-metrics-card">
+                            <span>Appts Shown</span>
+                            <strong>{Number(agent.appointments_shown || 0)}</strong>
+                            <small className={`bdc-sales-rate ${trackerBenchmarkTone(agent.appointment_show_rate, trackerBenchmarks.appointment_show_rate_floor)}`}>
+                              {formatPercent(agent.appointment_show_rate || 0)} of set appointments
+                            </small>
                           </div>
                           <div className="bdc-sales-metrics-card">
                             <span>Apt Sold</span>
                             <strong>{Number(agent.actual_sold || 0)}</strong>
-                            <small>{formatPercent(agent.actual_sold_rate || 0)} sold from appts</small>
+                            <small className={`bdc-sales-rate ${trackerBenchmarkTone(agent.actual_sold_rate, trackerBenchmarks.sold_from_appointments_rate_floor)}`}>
+                              {formatPercent(agent.actual_sold_rate || 0)} sold from appointments set
+                            </small>
                           </div>
                           <div className="bdc-sales-metrics-card">
                             <span>MTD Activity</span>
@@ -5094,7 +5166,7 @@ export default function App() {
                     </div>
                   </div>
                   <p className="admin-note">
-                    Benchmark logic uses appointment set rate from leads and sold-from-appointments rate from the manual month inputs. Update these rules as the store benchmark changes.
+                    Benchmark logic uses the funnel you asked for: leads to appointments set, appointments shown, and appointments sold. Update these thresholds any time you want to tighten or loosen the passing range.
                   </p>
                   <div className="bdc-sales-rules-grid">
                     <label>
@@ -5126,6 +5198,40 @@ export default function App() {
                           setBdcSalesTrackerRulesDraft((current) => ({
                             ...current,
                             appointment_set_rate_target: event.target.value,
+                          }))
+                        }
+                        disabled={!canEditTrackerAdmin}
+                      />
+                    </label>
+                    <label>
+                      <span>Show Floor %</span>
+                      <input
+                        type="number"
+                        inputMode="decimal"
+                        min="0"
+                        max="100"
+                        value={bdcSalesTrackerRulesDraft.appointment_show_rate_floor}
+                        onChange={(event) =>
+                          setBdcSalesTrackerRulesDraft((current) => ({
+                            ...current,
+                            appointment_show_rate_floor: event.target.value,
+                          }))
+                        }
+                        disabled={!canEditTrackerAdmin}
+                      />
+                    </label>
+                    <label>
+                      <span>Show Target %</span>
+                      <input
+                        type="number"
+                        inputMode="decimal"
+                        min="0"
+                        max="100"
+                        value={bdcSalesTrackerRulesDraft.appointment_show_rate_target}
+                        onChange={(event) =>
+                          setBdcSalesTrackerRulesDraft((current) => ({
+                            ...current,
+                            appointment_show_rate_target: event.target.value,
                           }))
                         }
                         disabled={!canEditTrackerAdmin}

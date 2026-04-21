@@ -1684,6 +1684,16 @@ th {
   font-size: 0.9rem;
 }
 
+.bdc-sales-kpi__stats span.is-good,
+.bdc-sales-rate.is-good {
+  color: #16664d;
+}
+
+.bdc-sales-kpi__stats span.is-bad,
+.bdc-sales-rate.is-bad {
+  color: #b8502a;
+}
+
 .bdc-sales-kpi__triples b {
   font-size: 1.15rem;
   color: #172033;
@@ -1987,8 +1997,12 @@ th {
 }
 
 .bdc-sales-rules-grid {
-  grid-template-columns: repeat(5, minmax(0, 1fr)) auto;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
   align-items: end;
+}
+
+.bdc-sales-rules-grid button {
+  min-height: 46px;
 }
 
 .bdc-sales-agent-grid {
@@ -2088,6 +2102,10 @@ th {
 .bdc-sales-metrics-card strong {
   font-size: 1.1rem;
   line-height: 1.1;
+}
+
+.bdc-sales-rate {
+  font-weight: 700;
 }
 
 .bdc-sales-agent-card__actions {

@@ -104,6 +104,8 @@ TAB_VISIBILITY_IDS = (
 BDC_SALES_TRACKER_DEFAULT_GOAL = 252.0
 BDC_SALES_TRACKER_DEFAULT_APPOINTMENT_SET_RATE_FLOOR = 0.20
 BDC_SALES_TRACKER_DEFAULT_APPOINTMENT_SET_RATE_TARGET = 0.30
+BDC_SALES_TRACKER_DEFAULT_APPOINTMENT_SHOW_RATE_FLOOR = 0.50
+BDC_SALES_TRACKER_DEFAULT_APPOINTMENT_SHOW_RATE_TARGET = 0.60
 BDC_SALES_TRACKER_DEFAULT_SOLD_FROM_APPOINTMENTS_RATE_FLOOR = 0.10
 BDC_SALES_TRACKER_DEFAULT_SOLD_FROM_APPOINTMENTS_RATE_TARGET = 0.15
 BDC_SALES_TRACKER_DEFAULT_SOLD_FROM_APPOINTMENTS_RATE_CEILING = 0.18
@@ -500,6 +502,8 @@ class BdcSalesTrackerBenchmarksIn(BaseModel):
     month: str
     appointment_set_rate_floor: float = BDC_SALES_TRACKER_DEFAULT_APPOINTMENT_SET_RATE_FLOOR
     appointment_set_rate_target: float = BDC_SALES_TRACKER_DEFAULT_APPOINTMENT_SET_RATE_TARGET
+    appointment_show_rate_floor: float = BDC_SALES_TRACKER_DEFAULT_APPOINTMENT_SHOW_RATE_FLOOR
+    appointment_show_rate_target: float = BDC_SALES_TRACKER_DEFAULT_APPOINTMENT_SHOW_RATE_TARGET
     sold_from_appointments_rate_floor: float = BDC_SALES_TRACKER_DEFAULT_SOLD_FROM_APPOINTMENTS_RATE_FLOOR
     sold_from_appointments_rate_target: float = BDC_SALES_TRACKER_DEFAULT_SOLD_FROM_APPOINTMENTS_RATE_TARGET
     sold_from_appointments_rate_ceiling: float = BDC_SALES_TRACKER_DEFAULT_SOLD_FROM_APPOINTMENTS_RATE_CEILING
@@ -509,6 +513,7 @@ class BdcSalesTrackerAgentMetricsIn(BaseModel):
     month: str
     total_leads: int = 0
     appointments_set: int = 0
+    appointments_shown: int = 0
     actual_sold: int = 0
     calls_mtd: int = 0
     emails_mtd: int = 0
@@ -611,9 +616,13 @@ class BdcSalesTrackerAgentOut(BaseModel):
     total_leads: int = 0
     appointments_set: int = 0
     appointment_set_rate: float = 0.0
+    appointments_shown: int = 0
+    appointment_show_rate: float = 0.0
     actual_sold: int = 0
     actual_sold_rate: float = 0.0
+    sold_from_shown_rate: float = 0.0
     avg_appointments_per_day: float = 0.0
+    avg_shown_per_day: float = 0.0
     avg_sold_per_day: float = 0.0
     calls_mtd: int = 0
     emails_mtd: int = 0
@@ -626,6 +635,8 @@ class BdcSalesTrackerAgentOut(BaseModel):
 class BdcSalesTrackerBenchmarksOut(BaseModel):
     appointment_set_rate_floor: float = BDC_SALES_TRACKER_DEFAULT_APPOINTMENT_SET_RATE_FLOOR
     appointment_set_rate_target: float = BDC_SALES_TRACKER_DEFAULT_APPOINTMENT_SET_RATE_TARGET
+    appointment_show_rate_floor: float = BDC_SALES_TRACKER_DEFAULT_APPOINTMENT_SHOW_RATE_FLOOR
+    appointment_show_rate_target: float = BDC_SALES_TRACKER_DEFAULT_APPOINTMENT_SHOW_RATE_TARGET
     sold_from_appointments_rate_floor: float = BDC_SALES_TRACKER_DEFAULT_SOLD_FROM_APPOINTMENTS_RATE_FLOOR
     sold_from_appointments_rate_target: float = BDC_SALES_TRACKER_DEFAULT_SOLD_FROM_APPOINTMENTS_RATE_TARGET
     sold_from_appointments_rate_ceiling: float = BDC_SALES_TRACKER_DEFAULT_SOLD_FROM_APPOINTMENTS_RATE_CEILING
@@ -1826,6 +1837,8 @@ def init_db() -> None:
             goal REAL NOT NULL DEFAULT 252,
             appointment_set_rate_floor REAL NOT NULL DEFAULT 0.2,
             appointment_set_rate_target REAL NOT NULL DEFAULT 0.3,
+            appointment_show_rate_floor REAL NOT NULL DEFAULT 0.5,
+            appointment_show_rate_target REAL NOT NULL DEFAULT 0.6,
             sold_from_appointments_rate_floor REAL NOT NULL DEFAULT 0.1,
             sold_from_appointments_rate_target REAL NOT NULL DEFAULT 0.15,
             sold_from_appointments_rate_ceiling REAL NOT NULL DEFAULT 0.18,
@@ -1843,6 +1856,16 @@ def init_db() -> None:
         "bdc_sales_tracker_months",
         "appointment_set_rate_target",
         f"REAL NOT NULL DEFAULT {BDC_SALES_TRACKER_DEFAULT_APPOINTMENT_SET_RATE_TARGET}",
+    )
+    ensure_column(
+        "bdc_sales_tracker_months",
+        "appointment_show_rate_floor",
+        f"REAL NOT NULL DEFAULT {BDC_SALES_TRACKER_DEFAULT_APPOINTMENT_SHOW_RATE_FLOOR}",
+    )
+    ensure_column(
+        "bdc_sales_tracker_months",
+        "appointment_show_rate_target",
+        f"REAL NOT NULL DEFAULT {BDC_SALES_TRACKER_DEFAULT_APPOINTMENT_SHOW_RATE_TARGET}",
     )
     ensure_column(
         "bdc_sales_tracker_months",
@@ -1868,6 +1891,7 @@ def init_db() -> None:
             agent_name TEXT NOT NULL,
             total_leads INTEGER NOT NULL DEFAULT 0,
             appointments_set INTEGER NOT NULL DEFAULT 0,
+            appointments_shown INTEGER NOT NULL DEFAULT 0,
             actual_sold INTEGER NOT NULL DEFAULT 0,
             calls_mtd INTEGER NOT NULL DEFAULT 0,
             emails_mtd INTEGER NOT NULL DEFAULT 0,
@@ -1879,6 +1903,7 @@ def init_db() -> None:
         )
         """
     )
+    ensure_column("bdc_sales_tracker_agent_metrics", "appointments_shown", "INTEGER NOT NULL DEFAULT 0")
     db_execute(
         """
         CREATE TABLE IF NOT EXISTS bdc_sales_tracker_entries (
@@ -2566,6 +2591,8 @@ def fetch_bdc_sales_tracker_benchmarks(month_key: str) -> BdcSalesTrackerBenchma
         SELECT
             appointment_set_rate_floor,
             appointment_set_rate_target,
+            appointment_show_rate_floor,
+            appointment_show_rate_target,
             sold_from_appointments_rate_floor,
             sold_from_appointments_rate_target,
             sold_from_appointments_rate_ceiling
@@ -2580,6 +2607,12 @@ def fetch_bdc_sales_tracker_benchmarks(month_key: str) -> BdcSalesTrackerBenchma
         ),
         appointment_set_rate_target=float(
             row.get("appointment_set_rate_target") if row else BDC_SALES_TRACKER_DEFAULT_APPOINTMENT_SET_RATE_TARGET
+        ),
+        appointment_show_rate_floor=float(
+            row.get("appointment_show_rate_floor") if row else BDC_SALES_TRACKER_DEFAULT_APPOINTMENT_SHOW_RATE_FLOOR
+        ),
+        appointment_show_rate_target=float(
+            row.get("appointment_show_rate_target") if row else BDC_SALES_TRACKER_DEFAULT_APPOINTMENT_SHOW_RATE_TARGET
         ),
         sold_from_appointments_rate_floor=float(
             row.get("sold_from_appointments_rate_floor")
@@ -2624,6 +2657,12 @@ def upsert_bdc_sales_tracker_benchmarks(payload: BdcSalesTrackerBenchmarksIn) ->
     appointment_set_rate_target = normalize_tracker_rate(
         payload.appointment_set_rate_target, "appointment_set_rate_target"
     )
+    appointment_show_rate_floor = normalize_tracker_rate(
+        payload.appointment_show_rate_floor, "appointment_show_rate_floor"
+    )
+    appointment_show_rate_target = normalize_tracker_rate(
+        payload.appointment_show_rate_target, "appointment_show_rate_target"
+    )
     sold_from_appointments_rate_floor = normalize_tracker_rate(
         payload.sold_from_appointments_rate_floor, "sold_from_appointments_rate_floor"
     )
@@ -2635,6 +2674,8 @@ def upsert_bdc_sales_tracker_benchmarks(payload: BdcSalesTrackerBenchmarksIn) ->
     )
     if appointment_set_rate_floor > appointment_set_rate_target:
         raise HTTPException(status_code=400, detail="appointment set floor cannot be above the target")
+    if appointment_show_rate_floor > appointment_show_rate_target:
+        raise HTTPException(status_code=400, detail="appointment show floor cannot be above the target")
     if sold_from_appointments_rate_floor > sold_from_appointments_rate_target:
         raise HTTPException(status_code=400, detail="sold from appointments floor cannot be above the target")
     if sold_from_appointments_rate_target > sold_from_appointments_rate_ceiling:
@@ -2647,16 +2688,20 @@ def upsert_bdc_sales_tracker_benchmarks(payload: BdcSalesTrackerBenchmarksIn) ->
             goal,
             appointment_set_rate_floor,
             appointment_set_rate_target,
+            appointment_show_rate_floor,
+            appointment_show_rate_target,
             sold_from_appointments_rate_floor,
             sold_from_appointments_rate_target,
             sold_from_appointments_rate_ceiling,
             created_ts,
             updated_ts
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(month_key) DO UPDATE
         SET appointment_set_rate_floor = excluded.appointment_set_rate_floor,
             appointment_set_rate_target = excluded.appointment_set_rate_target,
+            appointment_show_rate_floor = excluded.appointment_show_rate_floor,
+            appointment_show_rate_target = excluded.appointment_show_rate_target,
             sold_from_appointments_rate_floor = excluded.sold_from_appointments_rate_floor,
             sold_from_appointments_rate_target = excluded.sold_from_appointments_rate_target,
             sold_from_appointments_rate_ceiling = excluded.sold_from_appointments_rate_ceiling,
@@ -2667,6 +2712,8 @@ def upsert_bdc_sales_tracker_benchmarks(payload: BdcSalesTrackerBenchmarksIn) ->
             fetch_bdc_sales_tracker_goal(month_key),
             appointment_set_rate_floor,
             appointment_set_rate_target,
+            appointment_show_rate_floor,
+            appointment_show_rate_target,
             sold_from_appointments_rate_floor,
             sold_from_appointments_rate_target,
             sold_from_appointments_rate_ceiling,
@@ -2798,14 +2845,18 @@ def fetch_bdc_sales_tracker(month_key: str) -> BdcSalesTrackerOut:
         sold_count = sum(1 for entry in entries if entry.sold)
         total_leads = normalize_tracker_count(metrics.get("total_leads") or 0, "total_leads")
         appointments_set = normalize_tracker_count(metrics.get("appointments_set") or 0, "appointments_set")
+        appointments_shown = normalize_tracker_count(metrics.get("appointments_shown") or 0, "appointments_shown")
         actual_sold = normalize_tracker_count(metrics.get("actual_sold") or 0, "actual_sold")
         calls_mtd = normalize_tracker_count(metrics.get("calls_mtd") or 0, "calls_mtd")
         emails_mtd = normalize_tracker_count(metrics.get("emails_mtd") or 0, "emails_mtd")
         texts_mtd = normalize_tracker_count(metrics.get("texts_mtd") or 0, "texts_mtd")
         days_off = normalize_tracker_count(metrics.get("days_off") or 0, "days_off")
         appointment_set_rate = (appointments_set / total_leads) if total_leads else 0.0
+        appointment_show_rate = (appointments_shown / appointments_set) if appointments_set else 0.0
         actual_sold_rate = (actual_sold / appointments_set) if appointments_set else 0.0
+        sold_from_shown_rate = (actual_sold / appointments_shown) if appointments_shown else 0.0
         avg_appointments_per_day = (appointments_set / days_worked) if days_worked else 0.0
+        avg_shown_per_day = (appointments_shown / days_worked) if days_worked else 0.0
         avg_sold_per_day = (actual_sold / days_worked) if days_worked else 0.0
         tracking_projection = (sold_count / days_worked * working_days) if days_worked else 0.0
         mtd_tracked += sold_count
@@ -2819,9 +2870,13 @@ def fetch_bdc_sales_tracker(month_key: str) -> BdcSalesTrackerOut:
                 total_leads=total_leads,
                 appointments_set=appointments_set,
                 appointment_set_rate=appointment_set_rate,
+                appointments_shown=appointments_shown,
+                appointment_show_rate=appointment_show_rate,
                 actual_sold=actual_sold,
                 actual_sold_rate=actual_sold_rate,
+                sold_from_shown_rate=sold_from_shown_rate,
                 avg_appointments_per_day=avg_appointments_per_day,
+                avg_shown_per_day=avg_shown_per_day,
                 avg_sold_per_day=avg_sold_per_day,
                 calls_mtd=calls_mtd,
                 emails_mtd=emails_mtd,
@@ -2865,6 +2920,7 @@ def update_bdc_sales_tracker_agent_metrics(agent_id: int, payload: BdcSalesTrack
         raise HTTPException(status_code=404, detail="BDC agent not found")
     total_leads = normalize_tracker_count(payload.total_leads, "total_leads")
     appointments_set = normalize_tracker_count(payload.appointments_set, "appointments_set")
+    appointments_shown = normalize_tracker_count(payload.appointments_shown, "appointments_shown")
     actual_sold = normalize_tracker_count(payload.actual_sold, "actual_sold")
     calls_mtd = normalize_tracker_count(payload.calls_mtd, "calls_mtd")
     emails_mtd = normalize_tracker_count(payload.emails_mtd, "emails_mtd")
@@ -2874,14 +2930,15 @@ def update_bdc_sales_tracker_agent_metrics(agent_id: int, payload: BdcSalesTrack
     db_execute(
         """
         INSERT INTO bdc_sales_tracker_agent_metrics (
-            month_key, agent_id, agent_name, total_leads, appointments_set, actual_sold,
+            month_key, agent_id, agent_name, total_leads, appointments_set, appointments_shown, actual_sold,
             calls_mtd, emails_mtd, texts_mtd, days_off, created_ts, updated_ts
         )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ON CONFLICT(month_key, agent_id) DO UPDATE
         SET agent_name = excluded.agent_name,
             total_leads = excluded.total_leads,
             appointments_set = excluded.appointments_set,
+            appointments_shown = excluded.appointments_shown,
             actual_sold = excluded.actual_sold,
             calls_mtd = excluded.calls_mtd,
             emails_mtd = excluded.emails_mtd,
@@ -2895,6 +2952,7 @@ def update_bdc_sales_tracker_agent_metrics(agent_id: int, payload: BdcSalesTrack
             str(agent_row.get("name") or ""),
             total_leads,
             appointments_set,
+            appointments_shown,
             actual_sold,
             calls_mtd,
             emails_mtd,
