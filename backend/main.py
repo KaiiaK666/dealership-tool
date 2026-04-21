@@ -23,6 +23,34 @@ from pydantic import BaseModel
 from orgtool_api import app as orgtool_app
 
 
+def load_local_env_file(file_path: str) -> None:
+    if not os.path.exists(file_path):
+        return
+    try:
+        with open(file_path, "r", encoding="utf-8") as handle:
+            for raw_line in handle:
+                line = raw_line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                if line.lower().startswith("export "):
+                    line = line[7:].lstrip()
+                if "=" not in line:
+                    continue
+                key, value = line.split("=", 1)
+                key = key.strip()
+                if not key:
+                    continue
+                value = value.strip()
+                if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+                    value = value[1:-1]
+                os.environ.setdefault(key, value)
+    except OSError:
+        return
+
+
+load_local_env_file(os.path.join(os.path.dirname(__file__), ".env"))
+
+
 DB_PATH = os.getenv(
     "DEALER_DB_PATH",
     os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "dealership.db"),
@@ -36,8 +64,8 @@ for path in (DATA_ROOT, UPLOADS_ROOT, TRAFFIC_PDF_ROOT, SPECIALS_ROOT, TRAFFIC_O
     if path:
         os.makedirs(path, exist_ok=True)
 RULES_TIMEZONE = os.getenv("DEALER_TIMEZONE", "America/Chicago").strip() or "America/Chicago"
-ADMIN_USERNAME = os.getenv("DEALER_ADMIN_USERNAME", "admin").strip() or "admin"
-ADMIN_PASSWORD = os.getenv("DEALER_ADMIN_PASSWORD", "admin123").strip() or "admin123"
+ADMIN_USERNAME = os.getenv("DEALER_ADMIN_USERNAME", "").strip()
+ADMIN_PASSWORD = os.getenv("DEALER_ADMIN_PASSWORD", "").strip()
 SESSION_SECONDS = max(900, int(os.getenv("DEALER_ADMIN_SESSION_SECONDS", "43200") or 43200))
 APP_BASE_URL = os.getenv("DEALER_APP_BASE_URL", "https://app.bertogden123.com").strip() or "https://app.bertogden123.com"
 TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID", "").strip()
@@ -708,6 +736,10 @@ def email_notifications_configured() -> bool:
     return bool(RESEND_API_KEY and BDC_NOTIFY_EMAIL_FROM)
 
 
+def admin_credentials_configured() -> bool:
+    return bool(ADMIN_USERNAME and ADMIN_PASSWORD)
+
+
 def get_notification_config() -> NotificationConfigOut:
     return NotificationConfigOut(
         sms_configured=sms_notifications_configured(),
@@ -734,12 +766,15 @@ def send_notification_test_sms(raw_phone_number: str) -> NotificationTestSmsOut:
     if not sms_target:
         raise HTTPException(status_code=400, detail="phone number must be a valid US or E.164 number")
     try:
-        send_twilio_sms(sms_target, build_test_notification_body())
+        sid = send_twilio_sms(sms_target, build_test_notification_body())
     except Exception as exc:
         raise HTTPException(status_code=400, detail=compact_error_text(exc)) from exc
     return NotificationTestSmsOut(
         phone_number=sms_target,
-        status=f"Test text sent to {sms_target}",
+        status=(
+            f"Twilio accepted a test text for {sms_target}. "
+            f"Delivery may still be pending carrier confirmation. Message SID: {sid}"
+        ),
     )
 
 
@@ -768,12 +803,15 @@ def send_notification_test_email(raw_email: str) -> NotificationTestEmailOut:
     if not email_target:
         raise HTTPException(status_code=400, detail="email is required")
     try:
-        send_resend_email(email_target, build_test_notification_email_subject(), build_test_notification_email_body())
+        email_id = send_resend_email(email_target, build_test_notification_email_subject(), build_test_notification_email_body())
     except Exception as exc:
         raise HTTPException(status_code=400, detail=compact_error_text(exc)) from exc
     return NotificationTestEmailOut(
         email=email_target,
-        status=f"Test email sent to {email_target}",
+        status=(
+            f"Resend accepted a test email for {email_target}. "
+            f"Delivery may still be pending mailbox provider confirmation. Email ID: {email_id}"
+        ),
     )
 
 
@@ -3992,6 +4030,11 @@ def health() -> Dict[str, str]:
 
 @app.post("/api/admin/login", response_model=AdminSessionOut)
 def admin_login(payload: AdminLoginIn) -> AdminSessionOut:
+    if not admin_credentials_configured():
+        raise HTTPException(
+            status_code=503,
+            detail="admin credentials are not configured on the server",
+        )
     if payload.username.strip() != ADMIN_USERNAME or payload.password != ADMIN_PASSWORD:
         raise HTTPException(status_code=403, detail="invalid admin credentials")
     return issue_session()

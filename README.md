@@ -14,6 +14,8 @@ Local app for:
 Backend:
 
 ```powershell
+Copy-Item backend\.env.example backend\.env
+# Edit backend\.env and set DEALER_ADMIN_USERNAME / DEALER_ADMIN_PASSWORD
 cd backend
 python -m pip install -r requirements.txt
 python -m uvicorn main:app --host 0.0.0.0 --port 8108
@@ -36,8 +38,8 @@ http://localhost:4183
 Admin login:
 
 ```text
-username: admin
-password: admin123
+The backend auto-loads backend/.env when present.
+Set DEALER_ADMIN_USERNAME and DEALER_ADMIN_PASSWORD there before signing in.
 ```
 
 ## Deploy To Render
@@ -64,10 +66,12 @@ Backend:
 Frontend:
 
 - `VITE_API_BASE`
+- `VITE_TRAFFIC_URL` (optional)
 
 ### Recommended values
 
 - `VITE_API_BASE=https://your-api-service.onrender.com`
+- `VITE_TRAFFIC_URL=https://traffic.yourdomain.com`
 - `DEALER_CORS_ORIGINS=https://your-frontend-service.onrender.com,https://yourdomain.com,https://www.yourdomain.com`
 
 The frontend also auto-detects these common production hosts without another code change:

@@ -48,6 +48,8 @@ services:
     envVars:
       - key: VITE_API_BASE
         sync: false
+      - key: VITE_TRAFFIC_URL
+        sync: false
     routes:
       - type: rewrite
         source: /*

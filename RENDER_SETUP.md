@@ -46,8 +46,8 @@ Backend env vars:
 - `PORT=10000`
 - `DEALER_DB_PATH=/var/data/dealership.db`
 - `DEALER_TIMEZONE=America/Chicago`
-- `DEALER_ADMIN_USERNAME=admin`
-- `DEALER_ADMIN_PASSWORD=change-this-to-a-real-password`
+- `DEALER_ADMIN_USERNAME=your-admin-username`
+- `DEALER_ADMIN_PASSWORD=set-a-long-random-password`
 - `DEALER_CORS_ORIGINS=https://app.yourdomain.com`
 - `DEALER_APP_BASE_URL=https://app.yourdomain.com`
 - `TWILIO_ACCOUNT_SID=...`
@@ -69,6 +69,7 @@ Frontend service:
 Frontend env vars:
 
 - `VITE_API_BASE=https://api.yourdomain.com`
+- `VITE_TRAFFIC_URL=https://traffic.yourdomain.com` (optional)
 
 The frontend can also auto-detect the API host for these production URLs:
 

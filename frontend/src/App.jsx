@@ -256,7 +256,7 @@ const CREDIT_TIERS = [
   { label: "700s", min: 700, max: 799 },
   { label: "800s", min: 800, max: 899 },
 ];
-const TRAFFIC_URL = "https://bokbbui-production.up.railway.app/";
+const TRAFFIC_URL = import.meta.env.VITE_TRAFFIC_URL || "https://bokbbui-production.up.railway.app/";
 const CALENDAR_WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 function currentMonth() {
