@@ -911,6 +911,12 @@ button.calendar-day__plus:hover:not(:disabled) {
   gap: 18px;
 }
 
+.service-notes-shell input,
+.service-notes-shell select,
+.service-notes-shell textarea {
+  font-size: 16px;
+}
+
 .traffic-notes-hero__controls,
 .traffic-notes-hero__actions {
   display: grid;
@@ -1032,6 +1038,36 @@ button.calendar-day__plus:hover:not(:disabled) {
   display: grid;
   grid-template-columns: minmax(0, 1.2fr) repeat(3, minmax(0, 1fr));
   gap: 12px;
+}
+
+.service-notes-kpis {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.service-notes-kpi {
+  padding: 14px 16px;
+  border-radius: 18px;
+  border: 1px solid rgba(210, 198, 182, 0.72);
+  background: rgba(255, 255, 255, 0.82);
+  display: grid;
+  gap: 8px;
+  box-shadow: var(--card-shadow);
+}
+
+.service-notes-kpi span {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.service-notes-kpi strong {
+  font-size: 1.05rem;
+  line-height: 1.2;
 }
 
 .traffic-franchise-toggle {
@@ -2036,6 +2072,33 @@ button.note-card__summary:hover:not(:disabled) {
 .note-actions__copy {
   display: grid;
   gap: 4px;
+}
+
+.note-actions__quick {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.note-action-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 46px;
+  padding: 0 16px;
+  border-radius: 14px;
+  border: 1px solid rgba(37, 48, 59, 0.12);
+  background: rgba(255, 255, 255, 0.88);
+  color: var(--deep);
+  font-weight: 700;
+  text-decoration: none;
+  box-shadow: 0 10px 20px rgba(37, 48, 59, 0.08);
+}
+
+.note-action-link:hover {
+  transform: translateY(-1px);
 }
 
 .note-actions__meta {
@@ -3355,6 +3418,10 @@ button.special-card:hover:not(:disabled) {
     font-size: 2.2rem;
   }
 
+  .service-notes-kpis {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .tabs {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -4558,6 +4625,19 @@ button.special-card:hover:not(:disabled) {
     border-radius: 18px;
   }
 
+  .service-notes-hero {
+    gap: 14px;
+  }
+
+  .service-notes-hero .admin-note {
+    display: none;
+  }
+
+  .traffic-focus-panel__headline {
+    grid-template-columns: 1fr;
+    gap: 10px;
+  }
+
   .hero h1 {
     font-size: 1.9rem;
   }
@@ -4799,6 +4879,61 @@ button.special-card:hover:not(:disabled) {
     grid-template-columns: 1.6rem minmax(0, 1fr) 2.2rem;
   }
 
+  .service-notes-kpis {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .service-notes-kpi,
+  .meta-item,
+  .note-copy__block {
+    padding: 12px;
+    border-radius: 16px;
+  }
+
+  .note-card__details {
+    padding: 0 14px 14px;
+    gap: 10px;
+  }
+
+  .note-copy__block--editor {
+    grid-template-rows: auto minmax(180px, 1fr);
+  }
+
+  .note-copy__block--editor textarea {
+    min-height: 180px;
+  }
+
+  .note-actions {
+    gap: 10px;
+  }
+
+  .note-actions__quick {
+    width: 100%;
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .note-actions__quick > * {
+    width: 100%;
+  }
+
+  .note-action-link {
+    min-height: 44px;
+  }
+
+  .traffic-franchise-toggle__buttons {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .traffic-franchise-toggle__button {
+    width: 100%;
+    padding: 11px 10px;
+    font-size: 0.86rem;
+  }
+
   .traffic-analysis-prompts {
     display: grid;
   }
@@ -4842,6 +4977,15 @@ button.special-card:hover:not(:disabled) {
   .tab {
     min-width: 136px;
     font-size: 0.86rem;
+  }
+
+  .service-notes-kpis,
+  .note-meta {
+    grid-template-columns: 1fr;
+  }
+
+  .traffic-franchise-toggle__buttons {
+    grid-template-columns: 1fr;
   }
 
   .calendar-board__weekdays,

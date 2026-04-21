@@ -140,6 +140,7 @@ const TRAFFIC_ANALYSIS_PROMPTS = [
   "Who owns the most appointments?",
 ];
 const FRESH_UP_STORAGE_KEY = "dealer_tool_fresh_up_form";
+const SERVICE_NOTES_PREFERENCES_KEY = "dealer_tool_service_notes_prefs";
 const FRESH_UP_DEFAULTS = {
   customerName: "",
   phone: "",
@@ -495,6 +496,23 @@ function readFreshUpDraft() {
   }
 }
 
+function readServiceNotesPreferences() {
+  const defaults = { salespersonId: "", brandFilter: "All" };
+  if (typeof window === "undefined") return defaults;
+  try {
+    const raw = window.localStorage.getItem(SERVICE_NOTES_PREFERENCES_KEY);
+    if (!raw) return defaults;
+    const parsed = JSON.parse(raw);
+    const brandFilter = ["All", "Kia", "Mazda"].includes(parsed?.brandFilter) ? parsed.brandFilter : "All";
+    return {
+      salespersonId: String(parsed?.salespersonId || "").trim(),
+      brandFilter,
+    };
+  } catch {
+    return defaults;
+  }
+}
+
 function freshUpSummaryText(form, salespersonName) {
   return [
     `Fresh Up - ${freshUpTimestampLabel()}`,
@@ -518,7 +536,9 @@ function readFreshUpLaunchContext() {
 function initialTabValue() {
   const context = readFreshUpLaunchContext();
   if (context.cardMode || context.tab === "freshUp") return "freshUp";
-  return "serviceCalendar";
+  const requestedTab = String(context.tab || "").trim();
+  if (requestedTab && TABS.some((item) => item.id === requestedTab)) return requestedTab;
+  return "serviceNotes";
 }
 
 function normalizeLookupText(value) {
@@ -542,6 +562,11 @@ function formatPhoneInput(value) {
   if (digits.length <= 3) return digits;
   if (digits.length <= 6) return `(${digits.slice(0, 3)}) ${digits.slice(3)}`;
   return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
+}
+
+function phoneHref(value) {
+  const digits = String(value || "").replace(/\D/g, "");
+  return digits ? `tel:${digits}` : "";
 }
 
 function freshUpCardUrl(salespersonId) {
@@ -1042,8 +1067,8 @@ export default function App() {
   const [daysOffMonth, setDaysOffMonth] = useState(currentMonth());
   const [trafficMonth, setTrafficMonth] = useState(currentMonth());
   const [selectedTrafficDate, setSelectedTrafficDate] = useState(todayDateValue());
-  const [selectedTrafficSalesId, setSelectedTrafficSalesId] = useState("");
-  const [selectedTrafficBrandFilter, setSelectedTrafficBrandFilter] = useState("All");
+  const [selectedTrafficSalesId, setSelectedTrafficSalesId] = useState(() => readServiceNotesPreferences().salespersonId);
+  const [selectedTrafficBrandFilter, setSelectedTrafficBrandFilter] = useState(() => readServiceNotesPreferences().brandFilter);
   const [expandedTrafficEntryId, setExpandedTrafficEntryId] = useState(null);
   const [salespeople, setSalespeople] = useState([]);
   const [bdcAgents, setBdcAgents] = useState([]);
@@ -1227,6 +1252,9 @@ export default function App() {
       ? serviceTrafficData.entries
       : serviceTrafficData.entries.filter((entry) => entry.brand === selectedTrafficBrandFilter)
   );
+  const visibleTrafficCount = visibleTrafficEntries.length;
+  const serviceNotesSavedCount = visibleTrafficEntries.filter((entry) => String(entry.sales_notes || "").trim()).length;
+  const serviceNotesPendingCount = Math.max(0, visibleTrafficCount - serviceNotesSavedCount);
   const trafficAnalysis = buildTrafficAnalysis(trafficAnalysisData.entries, trafficAnalysisData.counts_by_date);
   const trafficAnalysisMaxDayCount = Math.max(...trafficAnalysis.timeline.map((item) => item.count), 1);
   const trafficAnalysisInsights = trafficAnalysis.totalRows
@@ -1238,7 +1266,6 @@ export default function App() {
         `${trafficAnalysis.noteCoverage}% of the month already has saved salesperson notes, leaving ${trafficAnalysis.pendingCount} rows still open for follow-up.`,
       ]
     : [];
-  const visibleTrafficCount = visibleTrafficEntries.length;
   const selectedTrafficFilterLabel =
     selectedTrafficBrandFilter === "All" ? "All Franchises" : `${selectedTrafficBrandFilter} Only`;
   const selectedTrafficScheduleDay = serviceDayMap.get(selectedTrafficDate) || null;
@@ -1313,6 +1340,10 @@ export default function App() {
   const visibleTabIds = new Set(
     (tabVisibility.entries || []).filter((entry) => entry.visible).map((entry) => entry.tab_id)
   );
+  const defaultVisibleTabId =
+    (visibleTabIds.has("serviceNotes") && "serviceNotes") ||
+    TABS.find((item) => item.id !== "admin" && visibleTabIds.has(item.id))?.id ||
+    "serviceNotes";
   const tabsToShow = TABS.filter((item) => item.id === "admin" || adminSession || visibleTabIds.has(item.id));
   const latestBdcAssignment = lastAssignment || bdcLog.entries?.[0] || null;
   const latestBdcNotifications = [
@@ -1471,6 +1502,15 @@ export default function App() {
     }
     const data = await getNotificationConfig(adminToken);
     setNotificationConfig(data);
+  }
+
+  function applyTrafficSalespersonSelection(nextValue) {
+    setSelectedTrafficSalesId(nextValue);
+    if (!nextValue) return;
+    const matched = serviceEligible.find((person) => String(person.id) === String(nextValue));
+    if (matched && TRAFFIC_BRANDS.includes(matched.dealership)) {
+      setSelectedTrafficBrandFilter(matched.dealership);
+    }
   }
 
   async function refreshAgentLoopConfig() {
@@ -1974,9 +2014,9 @@ export default function App() {
 
   useEffect(() => {
     if (!adminSession && !freshUpCardMode && tab !== "admin" && !visibleTabIds.has(tab)) {
-      setTab("serviceCalendar");
+      setTab(defaultVisibleTabId);
     }
-  }, [adminSession, freshUpCardMode, tab, visibleTabIds]);
+  }, [adminSession, defaultVisibleTabId, freshUpCardMode, tab, visibleTabIds]);
 
   useEffect(() => {
     if (!selectedSpecialId && specials.length) {
@@ -1992,6 +2032,24 @@ export default function App() {
     if (typeof window === "undefined") return;
     window.localStorage.setItem(FRESH_UP_STORAGE_KEY, JSON.stringify(freshUpForm));
   }, [freshUpForm]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    window.localStorage.setItem(
+      SERVICE_NOTES_PREFERENCES_KEY,
+      JSON.stringify({
+        salespersonId: selectedTrafficSalesId,
+        brandFilter: selectedTrafficBrandFilter,
+      })
+    );
+  }, [selectedTrafficBrandFilter, selectedTrafficSalesId]);
+
+  useEffect(() => {
+    if (!selectedTrafficSalesId) return;
+    if (!serviceEligible.some((person) => String(person.id) === String(selectedTrafficSalesId))) {
+      setSelectedTrafficSalesId("");
+    }
+  }, [selectedTrafficSalesId, serviceEligible]);
 
   useEffect(() => {
     if (!freshUpLaunchContext.salespersonId || !salespeople.length) return;
@@ -2639,6 +2697,15 @@ export default function App() {
         sales_notes: entry.sales_notes,
       });
       patchTrafficEntry(entry.id, saved);
+      const currentIndex = visibleTrafficEntries.findIndex((item) => item.id === entry.id);
+      const trailingEntries = currentIndex >= 0 ? visibleTrafficEntries.slice(currentIndex + 1) : [];
+      const nextEntry =
+        trailingEntries.find((item) => !String(item.sales_notes || "").trim()) ||
+        trailingEntries[0] ||
+        null;
+      if (nextEntry) {
+        setExpandedTrafficEntryId(nextEntry.id);
+      }
     } catch (errorValue) {
       setError(errText(errorValue));
     } finally {
@@ -3182,15 +3249,15 @@ export default function App() {
         ) : null}
 
         {tab === "serviceNotes" ? (
-          <section className="stack">
-            <div className="panel traffic-notes-hero">
+          <section className="stack service-notes-shell">
+            <div className="panel traffic-notes-hero service-notes-hero">
               <div className="traffic-focus-panel__headline">
                 <div>
-                  <span className="eyebrow">{focusTrafficIsToday ? "Today's activity" : "Service drive activity"}</span>
+                  <span className="eyebrow">{focusTrafficIsToday ? "Today's note board" : "Service drive notes"}</span>
                   <h2>{longDateLabel(focusTrafficDate)}</h2>
                   <p className="admin-note">
-                    The selected date stays front and center here so the team immediately sees who is up for Kia and Mazda,
-                    how many traffic rows are on the board, and can start writing notes right away.
+                    Pick your date and name once, then move row by row. The mobile layout keeps the note entry flow tight
+                    so salespeople can update the board quickly from Safari or the installed app.
                   </p>
                 </div>
                 <div className="traffic-day-panel__count">{visibleTrafficCount} rows</div>
@@ -3200,8 +3267,8 @@ export default function App() {
                   <strong>{selectedTrafficSalesperson?.name || "Notes are open"}</strong>
                   <small>
                     {selectedTrafficHasAuthor
-                      ? "The selected name will be attached to each note you save on this date."
-                      : "Name tagging is optional. You can start typing and save notes without selecting anyone."}
+                      ? "Your selected name tag will be attached to each note you save."
+                      : "Pick your name to keep the board tagged cleanly, or leave it open if a manager is updating rows."}
                   </small>
                 </div>
                 <div className="traffic-team-card traffic-team-card--focus">
@@ -3217,6 +3284,25 @@ export default function App() {
                 <div className="traffic-summary-stat traffic-summary-stat--focus">
                   <span>{selectedTrafficFilterLabel}</span>
                   <strong>{visibleTrafficCount}</strong>
+                </div>
+              </div>
+
+              <div className="service-notes-kpis">
+                <div className="service-notes-kpi">
+                  <span>Saved</span>
+                  <strong>{serviceNotesSavedCount}</strong>
+                </div>
+                <div className="service-notes-kpi">
+                  <span>Pending</span>
+                  <strong>{serviceNotesPendingCount}</strong>
+                </div>
+                <div className="service-notes-kpi">
+                  <span>Name tag</span>
+                  <strong>
+                    {selectedTrafficSalesperson
+                      ? `${selectedTrafficSalesperson.name.split(" ")[0]} · ${selectedTrafficSalesperson.dealership}`
+                      : "Open"}
+                  </strong>
                 </div>
               </div>
 
@@ -3253,10 +3339,10 @@ export default function App() {
                   />
                 </label>
                 <label>
-                  <span>Name tag optional</span>
-                  <select value={selectedTrafficSalesId} onChange={(event) => setSelectedTrafficSalesId(event.target.value)}>
+                  <span>Salesperson tag</span>
+                  <select value={selectedTrafficSalesId} onChange={(event) => applyTrafficSalespersonSelection(event.target.value)}>
                     <option value="">No name tag</option>
-                    {activeSales.map((person) => (
+                    {serviceEligible.map((person) => (
                       <option key={`traffic-sales-${person.id}`} value={person.id}>
                         {person.name} - {person.dealership}
                       </option>
@@ -3264,6 +3350,15 @@ export default function App() {
                   </select>
                 </label>
                 <div className="traffic-notes-hero__actions">
+                  {selectedTrafficSalesStore ? (
+                    <button
+                      type="button"
+                      className="secondary"
+                      onClick={() => setSelectedTrafficBrandFilter(selectedTrafficSalesStore)}
+                    >
+                      Show My Store
+                    </button>
+                  ) : null}
                   <button
                     type="button"
                     className="secondary"
@@ -3289,6 +3384,7 @@ export default function App() {
                   const isExpanded = expandedTrafficEntryId === entry.id;
                   const vehicleLine = entry.model_make || "Model not entered";
                   const hasSavedNotes = Boolean(String(entry.sales_notes || "").trim());
+                  const customerPhoneLink = phoneHref(entry.customer_phone);
                   return (
                     <article
                       key={entry.id}
@@ -3388,12 +3484,13 @@ export default function App() {
                           <textarea
                             rows={5}
                             value={entry.sales_notes}
+                            placeholder="Quick summary, objections, appointment outcome, trade details, next step, or follow-up plan."
                             onChange={(event) => patchTrafficEntry(entry.id, { sales_notes: event.target.value })}
                           />
                         </label>
                       </div>
 
-                      <div className="note-actions">
+                      <div className="note-actions note-actions--service">
                         <div className="note-actions__copy">
                           <small>
                             {selectedTrafficHasAuthor
@@ -3406,16 +3503,23 @@ export default function App() {
                               : ""}
                           </small>
                           <small className="note-actions__meta">
-                            Latest note by: {entry.sales_note_salesperson_name || "No name tag saved"}
+                            Latest note by: {entry.sales_note_salesperson_name || "No name tag saved"} · Save moves you to the next row.
                           </small>
                         </div>
-                        <button
-                          type="button"
-                          onClick={() => saveTrafficSalesNotes(entry)}
-                          disabled={busy === `traffic-sales-${entry.id}`}
-                        >
-                          {busy === `traffic-sales-${entry.id}` ? "Saving..." : "Save Notes"}
-                        </button>
+                        <div className="note-actions__quick">
+                          {customerPhoneLink ? (
+                            <a className="note-action-link" href={customerPhoneLink}>
+                              Call Customer
+                            </a>
+                          ) : null}
+                          <button
+                            type="button"
+                            onClick={() => saveTrafficSalesNotes(entry)}
+                            disabled={busy === `traffic-sales-${entry.id}`}
+                          >
+                            {busy === `traffic-sales-${entry.id}` ? "Saving..." : "Save Note"}
+                          </button>
+                        </div>
                       </div>
                         </div>
                       ) : null}
