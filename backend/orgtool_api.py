@@ -820,6 +820,23 @@ def update_group(board_id: int, group_id: int, payload: GroupPatch) -> dict:
     return {"group": group}
 
 
+@app.delete("/api/boards/{board_id}/groups/{group_id}")
+def delete_group(board_id: int, group_id: int) -> dict:
+    store = read_store()
+    board = get_board(store, board_id)
+    group = next((entry for entry in board["groups"] if int(entry["id"]) == int(group_id)), None)
+    if not group:
+        raise HTTPException(status_code=404, detail="Group not found")
+
+    before_tasks = len(board["tasks"])
+    board["groups"] = [entry for entry in board["groups"] if int(entry["id"]) != int(group_id)]
+    board["tasks"] = [entry for entry in board["tasks"] if int(entry["group_id"]) != int(group_id)]
+    deleted_tasks = before_tasks - len(board["tasks"])
+
+    write_store(store)
+    return {"deleted": True, "group_id": group_id, "deleted_tasks": deleted_tasks}
+
+
 @app.post("/api/tasks")
 def create_task(payload: TaskCreate) -> dict:
     store = read_store()
