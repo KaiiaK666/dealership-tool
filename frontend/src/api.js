@@ -266,10 +266,16 @@ export const getBdcReport = (params = {}) =>
   })}`);
 export const getBdcSalesTracker = (params = {}) =>
   request(`/api/bdc-sales-tracker${qs({ month: params.month })}`);
-export const updateBdcSalesTrackerMonth = (payload) =>
-  request("/api/bdc-sales-tracker/month", { method: "POST", body: payload });
-export const updateBdcSalesTrackerAgentMetrics = (agentId, payload) =>
-  request(`/api/bdc-sales-tracker/agents/${encodeURIComponent(agentId)}/metrics`, { method: "POST", body: payload });
+export const updateBdcSalesTrackerMonth = (token, payload) =>
+  request("/api/bdc-sales-tracker/month", { method: "POST", body: payload, headers: adminHeaders(token) });
+export const updateBdcSalesTrackerRules = (token, payload) =>
+  request("/api/bdc-sales-tracker/rules", { method: "POST", body: payload, headers: adminHeaders(token) });
+export const updateBdcSalesTrackerAgentMetrics = (token, agentId, payload) =>
+  request(`/api/bdc-sales-tracker/agents/${encodeURIComponent(agentId)}/metrics`, {
+    method: "POST",
+    body: payload,
+    headers: adminHeaders(token),
+  });
 export const createBdcSalesTrackerEntry = (payload) =>
   request("/api/bdc-sales-tracker/entries", { method: "POST", body: payload });
 export const updateBdcSalesTrackerEntry = (entryId, payload) =>
@@ -282,5 +288,7 @@ export const updateBdcSalesTrackerDmsLogEntry = (entryId, payload) =>
   request(`/api/bdc-sales-tracker/dms-log/${encodeURIComponent(entryId)}`, { method: "PUT", body: payload });
 export const deleteBdcSalesTrackerDmsLogEntry = (entryId) =>
   request(`/api/bdc-sales-tracker/dms-log/${encodeURIComponent(entryId)}`, { method: "DELETE" });
+export const updateBdcSalesTrackerFocusNote = (payload) =>
+  request("/api/bdc-sales-tracker/focus-note", { method: "POST", body: payload });
 export const clearBdcHistory = (token) =>
   request("/api/admin/bdc/history", { method: "DELETE", headers: adminHeaders(token) });

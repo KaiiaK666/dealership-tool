@@ -102,6 +102,11 @@ TAB_VISIBILITY_IDS = (
     "specials",
 )
 BDC_SALES_TRACKER_DEFAULT_GOAL = 252.0
+BDC_SALES_TRACKER_DEFAULT_APPOINTMENT_SET_RATE_FLOOR = 0.20
+BDC_SALES_TRACKER_DEFAULT_APPOINTMENT_SET_RATE_TARGET = 0.30
+BDC_SALES_TRACKER_DEFAULT_SOLD_FROM_APPOINTMENTS_RATE_FLOOR = 0.10
+BDC_SALES_TRACKER_DEFAULT_SOLD_FROM_APPOINTMENTS_RATE_TARGET = 0.15
+BDC_SALES_TRACKER_DEFAULT_SOLD_FROM_APPOINTMENTS_RATE_CEILING = 0.18
 DEFAULT_CORS_ORIGINS = [
     "http://localhost:4174",
     "http://127.0.0.1:4174",
@@ -491,6 +496,15 @@ class BdcSalesTrackerMonthIn(BaseModel):
     goal: float = BDC_SALES_TRACKER_DEFAULT_GOAL
 
 
+class BdcSalesTrackerBenchmarksIn(BaseModel):
+    month: str
+    appointment_set_rate_floor: float = BDC_SALES_TRACKER_DEFAULT_APPOINTMENT_SET_RATE_FLOOR
+    appointment_set_rate_target: float = BDC_SALES_TRACKER_DEFAULT_APPOINTMENT_SET_RATE_TARGET
+    sold_from_appointments_rate_floor: float = BDC_SALES_TRACKER_DEFAULT_SOLD_FROM_APPOINTMENTS_RATE_FLOOR
+    sold_from_appointments_rate_target: float = BDC_SALES_TRACKER_DEFAULT_SOLD_FROM_APPOINTMENTS_RATE_TARGET
+    sold_from_appointments_rate_ceiling: float = BDC_SALES_TRACKER_DEFAULT_SOLD_FROM_APPOINTMENTS_RATE_CEILING
+
+
 class BdcSalesTrackerAgentMetricsIn(BaseModel):
     month: str
     total_leads: int = 0
@@ -539,11 +553,15 @@ class BdcSalesTrackerDmsLogEntryIn(BaseModel):
     month: str
     customer_name: str
     apt_set_under: str = ""
+    notes: str = ""
 
 
 class BdcSalesTrackerDmsLogEntryUpdateIn(BaseModel):
     customer_name: str
+    opportunity_id: str = ""
+    dms_number: str = ""
     apt_set_under: str = ""
+    notes: str = ""
     logged: bool = False
     logged_at: str = ""
 
@@ -552,7 +570,10 @@ class BdcSalesTrackerDmsLogEntryOut(BaseModel):
     id: int
     month: str
     customer_name: str
+    opportunity_id: str = ""
+    dms_number: str = ""
     apt_set_under: str = ""
+    notes: str = ""
     logged: bool = False
     logged_at: str = ""
     created_at: str
@@ -564,6 +585,21 @@ class BdcSalesTrackerDmsLogEntryOut(BaseModel):
 class BdcSalesTrackerDmsLogOut(BaseModel):
     current_entries: List[BdcSalesTrackerDmsLogEntryOut] = []
     log_entries: List[BdcSalesTrackerDmsLogEntryOut] = []
+
+
+class BdcSalesTrackerFocusNoteIn(BaseModel):
+    month: str
+    focus_key: str
+    focus_label: str = ""
+    notes: str = ""
+
+
+class BdcSalesTrackerFocusNoteOut(BaseModel):
+    focus_key: str
+    focus_label: str = ""
+    notes: str = ""
+    updated_at: str = ""
+    updated_ts: float = 0.0
 
 
 class BdcSalesTrackerAgentOut(BaseModel):
@@ -587,6 +623,14 @@ class BdcSalesTrackerAgentOut(BaseModel):
     entries: List[BdcSalesTrackerEntryOut] = []
 
 
+class BdcSalesTrackerBenchmarksOut(BaseModel):
+    appointment_set_rate_floor: float = BDC_SALES_TRACKER_DEFAULT_APPOINTMENT_SET_RATE_FLOOR
+    appointment_set_rate_target: float = BDC_SALES_TRACKER_DEFAULT_APPOINTMENT_SET_RATE_TARGET
+    sold_from_appointments_rate_floor: float = BDC_SALES_TRACKER_DEFAULT_SOLD_FROM_APPOINTMENTS_RATE_FLOOR
+    sold_from_appointments_rate_target: float = BDC_SALES_TRACKER_DEFAULT_SOLD_FROM_APPOINTMENTS_RATE_TARGET
+    sold_from_appointments_rate_ceiling: float = BDC_SALES_TRACKER_DEFAULT_SOLD_FROM_APPOINTMENTS_RATE_CEILING
+
+
 class BdcSalesTrackerSummaryOut(BaseModel):
     goal: float = BDC_SALES_TRACKER_DEFAULT_GOAL
     mtd_tracked: int = 0
@@ -603,8 +647,10 @@ class BdcSalesTrackerOut(BaseModel):
     month: str
     goal: float = BDC_SALES_TRACKER_DEFAULT_GOAL
     summary: BdcSalesTrackerSummaryOut
+    benchmarks: BdcSalesTrackerBenchmarksOut = BdcSalesTrackerBenchmarksOut()
     agents: List[BdcSalesTrackerAgentOut]
     dms_log: BdcSalesTrackerDmsLogOut = BdcSalesTrackerDmsLogOut()
+    focus_notes: List[BdcSalesTrackerFocusNoteOut] = []
 
 
 class TabVisibilityItem(BaseModel):
@@ -917,6 +963,37 @@ def parse_bdc_sales_tracker_dms_numbers(value: str) -> List[str]:
     if len(numbers) > 250:
         raise HTTPException(status_code=400, detail="too many DMS numbers in one paste")
     return numbers
+
+
+def normalize_tracker_rate(value: Any, field_name: str) -> float:
+    try:
+        rate = float(value)
+    except (TypeError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=f"{field_name} must be a number") from exc
+    if rate < 0 or rate > 1:
+        raise HTTPException(status_code=400, detail=f"{field_name} must be between 0 and 1")
+    return round(rate, 4)
+
+
+def parse_bdc_sales_tracker_log_identity(value: str) -> Tuple[str, str, str]:
+    raw = normalize_short_text(value, "customer_name", max_len=220)
+    if not raw:
+        raise HTTPException(status_code=400, detail="customer_name is required")
+    parts = [normalize_short_text(part, "customer_name", max_len=220) for part in raw.split("/")]
+    parts = [part for part in parts if part]
+    if len(parts) >= 3:
+        customer_name = normalize_short_text(parts[0], "customer_name", max_len=120)
+        opportunity_id = normalize_short_text(parts[1], "opportunity_id", max_len=80)
+        dms_number = normalize_short_text(parts[2], "dms_number", max_len=80)
+        return customer_name, opportunity_id, dms_number
+    return normalize_short_text(raw, "customer_name", max_len=120), "", ""
+
+
+def normalize_tracker_focus_key(value: str) -> str:
+    text = normalize_short_text(value, "focus_key", max_len=80).lower()
+    if not re.fullmatch(r"[a-z0-9_:-]+", text):
+        raise HTTPException(status_code=400, detail="focus_key must use letters, numbers, colons, underscores, or hyphens")
+    return text
 
 
 def normalize_dealership(value: str) -> str:
@@ -1747,10 +1824,40 @@ def init_db() -> None:
         CREATE TABLE IF NOT EXISTS bdc_sales_tracker_months (
             month_key TEXT PRIMARY KEY,
             goal REAL NOT NULL DEFAULT 252,
+            appointment_set_rate_floor REAL NOT NULL DEFAULT 0.2,
+            appointment_set_rate_target REAL NOT NULL DEFAULT 0.3,
+            sold_from_appointments_rate_floor REAL NOT NULL DEFAULT 0.1,
+            sold_from_appointments_rate_target REAL NOT NULL DEFAULT 0.15,
+            sold_from_appointments_rate_ceiling REAL NOT NULL DEFAULT 0.18,
             created_ts REAL NOT NULL,
             updated_ts REAL NOT NULL
         )
         """
+    )
+    ensure_column(
+        "bdc_sales_tracker_months",
+        "appointment_set_rate_floor",
+        f"REAL NOT NULL DEFAULT {BDC_SALES_TRACKER_DEFAULT_APPOINTMENT_SET_RATE_FLOOR}",
+    )
+    ensure_column(
+        "bdc_sales_tracker_months",
+        "appointment_set_rate_target",
+        f"REAL NOT NULL DEFAULT {BDC_SALES_TRACKER_DEFAULT_APPOINTMENT_SET_RATE_TARGET}",
+    )
+    ensure_column(
+        "bdc_sales_tracker_months",
+        "sold_from_appointments_rate_floor",
+        f"REAL NOT NULL DEFAULT {BDC_SALES_TRACKER_DEFAULT_SOLD_FROM_APPOINTMENTS_RATE_FLOOR}",
+    )
+    ensure_column(
+        "bdc_sales_tracker_months",
+        "sold_from_appointments_rate_target",
+        f"REAL NOT NULL DEFAULT {BDC_SALES_TRACKER_DEFAULT_SOLD_FROM_APPOINTMENTS_RATE_TARGET}",
+    )
+    ensure_column(
+        "bdc_sales_tracker_months",
+        "sold_from_appointments_rate_ceiling",
+        f"REAL NOT NULL DEFAULT {BDC_SALES_TRACKER_DEFAULT_SOLD_FROM_APPOINTMENTS_RATE_CEILING}",
     )
     db_execute(
         """
@@ -1800,7 +1907,10 @@ def init_db() -> None:
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             month_key TEXT NOT NULL,
             customer_name TEXT NOT NULL DEFAULT '',
+            opportunity_id TEXT NOT NULL DEFAULT '',
+            dms_number TEXT NOT NULL DEFAULT '',
             apt_set_under TEXT NOT NULL DEFAULT '',
+            notes TEXT NOT NULL DEFAULT '',
             logged INTEGER NOT NULL DEFAULT 0,
             logged_ts REAL,
             logged_at TEXT NOT NULL DEFAULT '',
@@ -1812,7 +1922,28 @@ def init_db() -> None:
         )
         """
     )
+    ensure_column("bdc_sales_tracker_dms_log", "opportunity_id", "TEXT NOT NULL DEFAULT ''")
+    ensure_column("bdc_sales_tracker_dms_log", "dms_number", "TEXT NOT NULL DEFAULT ''")
+    ensure_column("bdc_sales_tracker_dms_log", "notes", "TEXT NOT NULL DEFAULT ''")
     db_execute("CREATE INDEX IF NOT EXISTS idx_bdc_sales_tracker_dms_log_month ON bdc_sales_tracker_dms_log(month_key, logged, display_order, id)")
+    db_execute(
+        """
+        CREATE TABLE IF NOT EXISTS bdc_sales_tracker_focus_notes (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            month_key TEXT NOT NULL,
+            focus_key TEXT NOT NULL,
+            focus_label TEXT NOT NULL DEFAULT '',
+            notes TEXT NOT NULL DEFAULT '',
+            created_ts REAL NOT NULL,
+            updated_ts REAL NOT NULL,
+            updated_at TEXT NOT NULL DEFAULT '',
+            UNIQUE(month_key, focus_key)
+        )
+        """
+    )
+    db_execute(
+        "CREATE INDEX IF NOT EXISTS idx_bdc_sales_tracker_focus_notes_month ON bdc_sales_tracker_focus_notes(month_key, focus_key)"
+    )
     db_execute(
         """
         CREATE TABLE IF NOT EXISTS freshup_log (
@@ -2095,12 +2226,25 @@ def bdc_sales_tracker_dms_log_entry_out(row: Dict[str, Any]) -> BdcSalesTrackerD
         id=int(row.get("id") or 0),
         month=str(row.get("month_key") or ""),
         customer_name=str(row.get("customer_name") or ""),
+        opportunity_id=str(row.get("opportunity_id") or ""),
+        dms_number=str(row.get("dms_number") or ""),
         apt_set_under=str(row.get("apt_set_under") or ""),
+        notes=str(row.get("notes") or ""),
         logged=bool(int(row.get("logged") or 0)),
         logged_at=str(row.get("logged_at") or ""),
         created_at=str(row.get("created_at") or ""),
         updated_at=str(row.get("updated_at") or ""),
         created_ts=float(row.get("created_ts") or 0.0),
+        updated_ts=float(row.get("updated_ts") or 0.0),
+    )
+
+
+def bdc_sales_tracker_focus_note_out(row: Dict[str, Any]) -> BdcSalesTrackerFocusNoteOut:
+    return BdcSalesTrackerFocusNoteOut(
+        focus_key=str(row.get("focus_key") or ""),
+        focus_label=str(row.get("focus_label") or ""),
+        notes=str(row.get("notes") or ""),
+        updated_at=str(row.get("updated_at") or ""),
         updated_ts=float(row.get("updated_ts") or 0.0),
     )
 
@@ -2416,6 +2560,45 @@ def fetch_bdc_sales_tracker_goal(month_key: str) -> float:
     return float(row.get("goal") or BDC_SALES_TRACKER_DEFAULT_GOAL)
 
 
+def fetch_bdc_sales_tracker_benchmarks(month_key: str) -> BdcSalesTrackerBenchmarksOut:
+    row = db_query_one(
+        """
+        SELECT
+            appointment_set_rate_floor,
+            appointment_set_rate_target,
+            sold_from_appointments_rate_floor,
+            sold_from_appointments_rate_target,
+            sold_from_appointments_rate_ceiling
+        FROM bdc_sales_tracker_months
+        WHERE month_key = ?
+        """,
+        (month_key,),
+    )
+    return BdcSalesTrackerBenchmarksOut(
+        appointment_set_rate_floor=float(
+            row.get("appointment_set_rate_floor") if row else BDC_SALES_TRACKER_DEFAULT_APPOINTMENT_SET_RATE_FLOOR
+        ),
+        appointment_set_rate_target=float(
+            row.get("appointment_set_rate_target") if row else BDC_SALES_TRACKER_DEFAULT_APPOINTMENT_SET_RATE_TARGET
+        ),
+        sold_from_appointments_rate_floor=float(
+            row.get("sold_from_appointments_rate_floor")
+            if row
+            else BDC_SALES_TRACKER_DEFAULT_SOLD_FROM_APPOINTMENTS_RATE_FLOOR
+        ),
+        sold_from_appointments_rate_target=float(
+            row.get("sold_from_appointments_rate_target")
+            if row
+            else BDC_SALES_TRACKER_DEFAULT_SOLD_FROM_APPOINTMENTS_RATE_TARGET
+        ),
+        sold_from_appointments_rate_ceiling=float(
+            row.get("sold_from_appointments_rate_ceiling")
+            if row
+            else BDC_SALES_TRACKER_DEFAULT_SOLD_FROM_APPOINTMENTS_RATE_CEILING
+        ),
+    )
+
+
 def upsert_bdc_sales_tracker_month(payload: BdcSalesTrackerMonthIn) -> BdcSalesTrackerOut:
     month_key = parse_month_key(payload.month)
     goal = normalize_tracker_goal(payload.goal)
@@ -2433,6 +2616,67 @@ def upsert_bdc_sales_tracker_month(payload: BdcSalesTrackerMonthIn) -> BdcSalesT
     return fetch_bdc_sales_tracker(month_key)
 
 
+def upsert_bdc_sales_tracker_benchmarks(payload: BdcSalesTrackerBenchmarksIn) -> BdcSalesTrackerOut:
+    month_key = parse_month_key(payload.month)
+    appointment_set_rate_floor = normalize_tracker_rate(
+        payload.appointment_set_rate_floor, "appointment_set_rate_floor"
+    )
+    appointment_set_rate_target = normalize_tracker_rate(
+        payload.appointment_set_rate_target, "appointment_set_rate_target"
+    )
+    sold_from_appointments_rate_floor = normalize_tracker_rate(
+        payload.sold_from_appointments_rate_floor, "sold_from_appointments_rate_floor"
+    )
+    sold_from_appointments_rate_target = normalize_tracker_rate(
+        payload.sold_from_appointments_rate_target, "sold_from_appointments_rate_target"
+    )
+    sold_from_appointments_rate_ceiling = normalize_tracker_rate(
+        payload.sold_from_appointments_rate_ceiling, "sold_from_appointments_rate_ceiling"
+    )
+    if appointment_set_rate_floor > appointment_set_rate_target:
+        raise HTTPException(status_code=400, detail="appointment set floor cannot be above the target")
+    if sold_from_appointments_rate_floor > sold_from_appointments_rate_target:
+        raise HTTPException(status_code=400, detail="sold from appointments floor cannot be above the target")
+    if sold_from_appointments_rate_target > sold_from_appointments_rate_ceiling:
+        raise HTTPException(status_code=400, detail="sold from appointments target cannot be above the ceiling")
+    now_ts = time.time()
+    db_execute(
+        """
+        INSERT INTO bdc_sales_tracker_months (
+            month_key,
+            goal,
+            appointment_set_rate_floor,
+            appointment_set_rate_target,
+            sold_from_appointments_rate_floor,
+            sold_from_appointments_rate_target,
+            sold_from_appointments_rate_ceiling,
+            created_ts,
+            updated_ts
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(month_key) DO UPDATE
+        SET appointment_set_rate_floor = excluded.appointment_set_rate_floor,
+            appointment_set_rate_target = excluded.appointment_set_rate_target,
+            sold_from_appointments_rate_floor = excluded.sold_from_appointments_rate_floor,
+            sold_from_appointments_rate_target = excluded.sold_from_appointments_rate_target,
+            sold_from_appointments_rate_ceiling = excluded.sold_from_appointments_rate_ceiling,
+            updated_ts = excluded.updated_ts
+        """,
+        (
+            month_key,
+            fetch_bdc_sales_tracker_goal(month_key),
+            appointment_set_rate_floor,
+            appointment_set_rate_target,
+            sold_from_appointments_rate_floor,
+            sold_from_appointments_rate_target,
+            sold_from_appointments_rate_ceiling,
+            now_ts,
+            now_ts,
+        ),
+    )
+    return fetch_bdc_sales_tracker(month_key)
+
+
 def get_bdc_sales_tracker_entry_row(entry_id: int) -> Optional[Dict[str, Any]]:
     return db_query_one("SELECT * FROM bdc_sales_tracker_entries WHERE id = ?", (int(entry_id),))
 
@@ -2441,9 +2685,34 @@ def get_bdc_sales_tracker_dms_log_row(entry_id: int) -> Optional[Dict[str, Any]]
     return db_query_one("SELECT * FROM bdc_sales_tracker_dms_log WHERE id = ?", (int(entry_id),))
 
 
+def upsert_bdc_sales_tracker_focus_note(payload: BdcSalesTrackerFocusNoteIn) -> BdcSalesTrackerOut:
+    month_key = parse_month_key(payload.month)
+    focus_key = normalize_tracker_focus_key(payload.focus_key)
+    focus_label = normalize_short_text(payload.focus_label, "focus_label", max_len=120)
+    notes = normalize_notes(payload.notes, "notes", max_len=3000)
+    now_ts = time.time()
+    now_at = now_iso()
+    db_execute(
+        """
+        INSERT INTO bdc_sales_tracker_focus_notes (
+            month_key, focus_key, focus_label, notes, created_ts, updated_ts, updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(month_key, focus_key) DO UPDATE
+        SET focus_label = excluded.focus_label,
+            notes = excluded.notes,
+            updated_ts = excluded.updated_ts,
+            updated_at = excluded.updated_at
+        """,
+        (month_key, focus_key, focus_label, notes, now_ts, now_ts, now_at),
+    )
+    return fetch_bdc_sales_tracker(month_key)
+
+
 def fetch_bdc_sales_tracker(month_key: str) -> BdcSalesTrackerOut:
     month_key = parse_month_key(month_key)
     goal = fetch_bdc_sales_tracker_goal(month_key)
+    benchmarks = fetch_bdc_sales_tracker_benchmarks(month_key)
     working_days = tracker_working_days(month_key)
     days_worked = tracker_days_worked(month_key)
     days_left = max(working_days - days_worked, 0)
@@ -2479,6 +2748,15 @@ def fetch_bdc_sales_tracker(month_key: str) -> BdcSalesTrackerOut:
         FROM bdc_sales_tracker_dms_log
         WHERE month_key = ?
         ORDER BY logged ASC, CASE WHEN logged = 0 THEN display_order ELSE 0 END ASC, logged_ts DESC, id DESC
+        """,
+        (month_key,),
+    )
+    focus_note_rows = db_query_all(
+        """
+        SELECT *
+        FROM bdc_sales_tracker_focus_notes
+        WHERE month_key = ?
+        ORDER BY focus_label COLLATE NOCASE ASC, focus_key ASC
         """,
         (month_key,),
     )
@@ -2570,11 +2848,13 @@ def fetch_bdc_sales_tracker(month_key: str) -> BdcSalesTrackerOut:
             should_be_at_sold=should_be_at_sold,
             behind_by=should_be_at_sold - mtd_tracked,
         ),
+        benchmarks=benchmarks,
         agents=agents,
         dms_log=BdcSalesTrackerDmsLogOut(
             current_entries=[bdc_sales_tracker_dms_log_entry_out(row) for row in dms_log_rows if not bool(int(row.get("logged") or 0))],
             log_entries=[bdc_sales_tracker_dms_log_entry_out(row) for row in dms_log_rows if bool(int(row.get("logged") or 0))],
         ),
+        focus_notes=[bdc_sales_tracker_focus_note_out(row) for row in focus_note_rows],
     )
 
 
@@ -2738,21 +3018,33 @@ def delete_bdc_sales_tracker_entry(entry_id: int) -> BdcSalesTrackerOut:
 
 def create_bdc_sales_tracker_dms_log_entry(payload: BdcSalesTrackerDmsLogEntryIn) -> BdcSalesTrackerOut:
     month_key = parse_month_key(payload.month)
-    customer_name = normalize_short_text(payload.customer_name, "customer_name", max_len=220)
+    customer_name, opportunity_id, dms_number = parse_bdc_sales_tracker_log_identity(payload.customer_name)
     apt_set_under = normalize_short_text(payload.apt_set_under, "apt_set_under", max_len=120)
-    if not customer_name:
-        raise HTTPException(status_code=400, detail="customer_name is required")
+    notes = normalize_notes(payload.notes, "notes", max_len=1000)
     now_ts = time.time()
     now_at = now_local_input_value()
     db_insert(
         """
         INSERT INTO bdc_sales_tracker_dms_log (
-            month_key, customer_name, apt_set_under, logged, logged_ts, logged_at,
+            month_key, customer_name, opportunity_id, dms_number, apt_set_under, notes, logged, logged_ts, logged_at,
             display_order, created_ts, created_at, updated_ts, updated_at
         )
-        VALUES (?, ?, ?, 1, ?, ?, 0, ?, ?, ?, ?)
+        VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, 0, ?, ?, ?, ?)
         """,
-        (month_key, customer_name, apt_set_under, now_ts, now_at, now_ts, now_at, now_ts, now_at),
+        (
+            month_key,
+            customer_name,
+            opportunity_id,
+            dms_number,
+            apt_set_under,
+            notes,
+            now_ts,
+            now_at,
+            now_ts,
+            now_at,
+            now_ts,
+            now_at,
+        ),
     )
     return fetch_bdc_sales_tracker(month_key)
 
@@ -2761,8 +3053,11 @@ def update_bdc_sales_tracker_dms_log_entry(entry_id: int, payload: BdcSalesTrack
     row = get_bdc_sales_tracker_dms_log_row(entry_id)
     if not row:
         raise HTTPException(status_code=404, detail="DMS log row not found")
-    customer_name = normalize_short_text(payload.customer_name, "customer_name", max_len=220)
+    customer_name = normalize_short_text(payload.customer_name, "customer_name", max_len=120)
+    opportunity_id = normalize_short_text(payload.opportunity_id, "opportunity_id", max_len=80)
+    dms_number = normalize_short_text(payload.dms_number, "dms_number", max_len=80)
     apt_set_under = normalize_short_text(payload.apt_set_under, "apt_set_under", max_len=120)
+    notes = normalize_notes(payload.notes, "notes", max_len=1000)
     if not customer_name:
         raise HTTPException(status_code=400, detail="customer_name is required")
     logged = bool(payload.logged)
@@ -2785,7 +3080,10 @@ def update_bdc_sales_tracker_dms_log_entry(entry_id: int, payload: BdcSalesTrack
         """
         UPDATE bdc_sales_tracker_dms_log
         SET customer_name = ?,
+            opportunity_id = ?,
+            dms_number = ?,
             apt_set_under = ?,
+            notes = ?,
             logged = ?,
             logged_ts = ?,
             logged_at = ?,
@@ -2793,7 +3091,19 @@ def update_bdc_sales_tracker_dms_log_entry(entry_id: int, payload: BdcSalesTrack
             updated_at = ?
         WHERE id = ?
         """,
-        (customer_name, apt_set_under, 1 if logged else 0, logged_ts, logged_at, now_ts, now_at, int(entry_id)),
+        (
+            customer_name,
+            opportunity_id,
+            dms_number,
+            apt_set_under,
+            notes,
+            1 if logged else 0,
+            logged_ts,
+            logged_at,
+            now_ts,
+            now_at,
+            int(entry_id),
+        ),
     )
     return fetch_bdc_sales_tracker(str(row.get("month_key") or ""))
 
@@ -6300,15 +6610,30 @@ def get_bdc_sales_tracker_public(month: str) -> BdcSalesTrackerOut:
 
 
 @app.post("/api/bdc-sales-tracker/month", response_model=BdcSalesTrackerOut)
-def post_bdc_sales_tracker_month(payload: BdcSalesTrackerMonthIn) -> BdcSalesTrackerOut:
+def post_bdc_sales_tracker_month(
+    payload: BdcSalesTrackerMonthIn,
+    x_admin_token: Optional[str] = Header(default=None),
+) -> BdcSalesTrackerOut:
+    require_admin(x_admin_token)
     return upsert_bdc_sales_tracker_month(payload)
+
+
+@app.post("/api/bdc-sales-tracker/rules", response_model=BdcSalesTrackerOut)
+def post_bdc_sales_tracker_rules(
+    payload: BdcSalesTrackerBenchmarksIn,
+    x_admin_token: Optional[str] = Header(default=None),
+) -> BdcSalesTrackerOut:
+    require_admin(x_admin_token)
+    return upsert_bdc_sales_tracker_benchmarks(payload)
 
 
 @app.post("/api/bdc-sales-tracker/agents/{agent_id}/metrics", response_model=BdcSalesTrackerOut)
 def post_bdc_sales_tracker_agent_metrics(
     agent_id: int,
     payload: BdcSalesTrackerAgentMetricsIn,
+    x_admin_token: Optional[str] = Header(default=None),
 ) -> BdcSalesTrackerOut:
+    require_admin(x_admin_token)
     return update_bdc_sales_tracker_agent_metrics(agent_id, payload)
 
 
@@ -6346,6 +6671,11 @@ def put_bdc_sales_tracker_dms_log_entry(
 @app.delete("/api/bdc-sales-tracker/dms-log/{entry_id}", response_model=BdcSalesTrackerOut)
 def delete_bdc_sales_tracker_dms_log_entry_route(entry_id: int) -> BdcSalesTrackerOut:
     return delete_bdc_sales_tracker_dms_log_entry(entry_id)
+
+
+@app.post("/api/bdc-sales-tracker/focus-note", response_model=BdcSalesTrackerOut)
+def post_bdc_sales_tracker_focus_note(payload: BdcSalesTrackerFocusNoteIn) -> BdcSalesTrackerOut:
+    return upsert_bdc_sales_tracker_focus_note(payload)
 
 
 @app.delete("/api/admin/bdc/history", response_model=BdcHistoryClearOut)

@@ -1530,7 +1530,7 @@ th {
 }
 
 .bdc-sales-tracker-hero {
-  grid-template-columns: minmax(0, 1.2fr) minmax(280px, 0.8fr);
+  grid-template-columns: minmax(0, 1.2fr) minmax(380px, 0.9fr);
   align-items: end;
 }
 
@@ -1583,8 +1583,12 @@ th {
 }
 
 .bdc-sales-tracker-hero__controls {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: minmax(160px, 1fr) minmax(170px, 1fr) auto;
   align-items: end;
+}
+
+.bdc-sales-tracker-hero__controls label {
+  min-width: 0;
 }
 
 .bdc-sales-tracker-hero__controls button {
@@ -1594,7 +1598,7 @@ th {
 .bdc-sales-kpi-grid {
   display: grid;
   gap: 14px;
-  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
 .bdc-sales-kpi {
@@ -1606,6 +1610,10 @@ th {
   border: 1px solid rgba(31, 37, 43, 0.08);
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.95), rgba(247, 241, 232, 0.88));
   box-shadow: var(--card-shadow);
+}
+
+.bdc-sales-kpi--goal {
+  grid-column: span 2;
 }
 
 .bdc-sales-kpi--primary {
@@ -1655,6 +1663,66 @@ th {
   font-size: clamp(1.9rem, 2.3vw, 2.6rem);
   line-height: 0.95;
   letter-spacing: -0.05em;
+}
+
+.bdc-sales-kpi__triples,
+.bdc-sales-kpi__stats,
+.bdc-sales-goal-bars {
+  display: grid;
+  gap: 10px;
+}
+
+.bdc-sales-kpi__triples {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.bdc-sales-kpi__triples span,
+.bdc-sales-kpi__stats span {
+  display: grid;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.bdc-sales-kpi__triples b {
+  font-size: 1.15rem;
+  color: #172033;
+}
+
+.bdc-sales-goal-bars__row {
+  display: grid;
+  gap: 10px;
+  grid-template-columns: 64px minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.bdc-sales-goal-bars__row span,
+.bdc-sales-goal-bars__row strong {
+  font-size: 0.92rem;
+}
+
+.bdc-sales-goal-bars__track {
+  height: 12px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(23, 32, 51, 0.08);
+}
+
+.bdc-sales-goal-bars__fill {
+  height: 100%;
+  border-radius: 999px;
+}
+
+.bdc-sales-goal-bars__fill.is-goal {
+  background: linear-gradient(90deg, #1f2f46, #6a88aa);
+}
+
+.bdc-sales-goal-bars__fill.is-current {
+  background: linear-gradient(90deg, #209774, #6fca92);
+}
+
+.bdc-sales-goal-bars__fill.is-projection {
+  background: linear-gradient(90deg, #c76536, #f19f58);
 }
 
 .bdc-sales-insights-panel {
@@ -1896,6 +1964,33 @@ th {
   gap: 16px;
 }
 
+.bdc-sales-focus-panel,
+.bdc-sales-rules-panel {
+  display: grid;
+  gap: 16px;
+}
+
+.bdc-sales-focus-panel__form,
+.bdc-sales-rules-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.bdc-sales-focus-panel__form {
+  grid-template-columns: minmax(190px, 0.7fr) minmax(0, 1.5fr) auto;
+  align-items: end;
+}
+
+.bdc-sales-focus-panel__notes textarea {
+  min-height: 108px;
+  resize: vertical;
+}
+
+.bdc-sales-rules-grid {
+  grid-template-columns: repeat(5, minmax(0, 1fr)) auto;
+  align-items: end;
+}
+
 .bdc-sales-agent-grid {
   display: grid;
   gap: 18px;
@@ -1971,6 +2066,10 @@ th {
 
 .bdc-sales-metrics-grid {
   grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.bdc-sales-metrics-grid--static {
+  align-items: stretch;
 }
 
 .bdc-sales-metrics-card {
@@ -2161,7 +2260,7 @@ th {
 .bdc-dms-log-layout {
   display: grid;
   gap: 18px;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: 1fr;
 }
 
 .bdc-dms-log-panel,
@@ -2173,8 +2272,16 @@ th {
 }
 
 .bdc-dms-log-create {
-  grid-template-columns: minmax(0, 1.3fr) minmax(0, 0.9fr) auto;
+  grid-template-columns: minmax(0, 1.45fr) minmax(200px, 0.9fr) minmax(0, 1.1fr) auto;
   align-items: end;
+}
+
+.bdc-dms-log-reopen-label {
+  color: #7e8794;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.72rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
 }
 
 .bdc-dms-log-list {
@@ -2182,6 +2289,8 @@ th {
 }
 
 .bdc-dms-log-entry {
+  grid-template-columns: minmax(0, 1.1fr) 120px 120px 160px minmax(0, 1fr) auto;
+  align-items: end;
   padding: 16px;
   border-radius: 20px;
   border: 1px solid rgba(123, 110, 91, 0.16);
@@ -2197,15 +2306,16 @@ th {
 
 .bdc-dms-log-entry__actions {
   display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
+  gap: 8px;
+  flex-wrap: nowrap;
   justify-content: flex-end;
+  align-items: center;
 }
 
 .bdc-dms-log-history-row {
   display: grid;
   gap: 8px;
-  grid-template-columns: 172px minmax(0, 1.1fr) minmax(0, 0.82fr) auto;
+  grid-template-columns: 150px minmax(0, 1fr) 120px 120px 160px minmax(0, 1fr) auto;
   align-items: center;
   padding: 8px 10px;
   border-radius: 14px;
@@ -5366,6 +5476,17 @@ button.special-card:hover:not(:disabled) {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
+  .bdc-sales-kpi--goal {
+    grid-column: 1 / -1;
+  }
+
+  .bdc-sales-focus-panel__form,
+  .bdc-sales-rules-grid,
+  .bdc-dms-log-create,
+  .bdc-dms-log-entry {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .bdc-sales-entry-grid,
   .bdc-sales-entry-grid--create {
     grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -5376,7 +5497,7 @@ button.special-card:hover:not(:disabled) {
   }
 
   .bdc-dms-log-history-row {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     align-items: start;
   }
 
@@ -5500,6 +5621,8 @@ button.special-card:hover:not(:disabled) {
   .bdc-sales-kpi-grid,
   .bdc-sales-insights-grid,
   .bdc-sales-tracker-hero__controls,
+  .bdc-sales-focus-panel__form,
+  .bdc-sales-rules-grid,
   .bdc-sales-metrics-grid,
   .bdc-sales-entry-grid,
   .bdc-sales-entry-grid--create,
@@ -5539,6 +5662,11 @@ button.special-card:hover:not(:disabled) {
 
   .bdc-sales-entry__actions {
     display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .bdc-sales-kpi__triples,
+  .bdc-dms-log-entry {
     grid-template-columns: 1fr;
   }
 
