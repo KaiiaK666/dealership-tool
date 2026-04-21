@@ -75,6 +75,10 @@ TWILIO_FROM_NUMBER = os.getenv("TWILIO_FROM_NUMBER", "").strip()
 RESEND_API_KEY = os.getenv("RESEND_API_KEY", "").strip()
 BDC_NOTIFY_EMAIL_FROM = os.getenv("BDC_NOTIFY_EMAIL_FROM", "").strip()
 BDC_NOTIFY_EMAIL_REPLY_TO = os.getenv("BDC_NOTIFY_EMAIL_REPLY_TO", "").strip()
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
+OPENAI_AGENT_MODEL = os.getenv("OPENAI_AGENT_MODEL", "gpt-5.4-mini").strip() or "gpt-5.4-mini"
+OPENAI_AGENT_REASONING_EFFORT = os.getenv("OPENAI_AGENT_REASONING_EFFORT", "low").strip() or "low"
+OPENAI_AGENT_MAX_STEPS = max(2, min(10, int(os.getenv("OPENAI_AGENT_MAX_STEPS", "6") or 6)))
 DEALERSHIPS = ("Kia", "Mazda", "Outlet")
 SERVICE_BRANDS = ("Kia", "Mazda")
 QUOTE_BRANDS = ("Kia New", "Mazda New", "Used")
@@ -116,6 +120,33 @@ EXTRA_CORS_ORIGINS = [
     if origin.strip()
 ]
 CORS_ORIGINS = list(dict.fromkeys([*DEFAULT_CORS_ORIGINS, *EXTRA_CORS_ORIGINS]))
+AGENT_LOOP_STATUSES = ("queued", "running", "completed", "blocked", "failed", "canceled")
+AGENT_LOOP_PRESETS = (
+    {
+        "key": "executive_daily_brief",
+        "label": "Executive Daily Brief",
+        "description": "Review BDC, freshups, service traffic, and staffing signals across the dealership.",
+        "starter_objective": "Create a concise executive brief that surfaces the biggest opportunities, risks, and next actions across the dealership today.",
+    },
+    {
+        "key": "bdc_recovery",
+        "label": "BDC Recovery Loop",
+        "description": "Inspect BDC assignments, distribution fairness, and follow-up gaps.",
+        "starter_objective": "Analyze recent BDC activity, identify missed opportunities or uneven distribution, and recommend concrete follow-up actions.",
+    },
+    {
+        "key": "service_drive_followup",
+        "label": "Service Drive Follow-Up",
+        "description": "Find service-drive customers who still need notes, follow-up, or manager attention.",
+        "starter_objective": "Review current service-drive traffic and notes, then surface customers and rows that still need follow-up today.",
+    },
+    {
+        "key": "freshup_conversion",
+        "label": "Freshup Conversion Loop",
+        "description": "Analyze freshup logs and tap-page analytics for handoff and conversion gaps.",
+        "starter_objective": "Review freshup volume and analytics, identify drop-off points, and recommend changes that should improve showroom conversion.",
+    },
+)
 
 app = FastAPI(title="Dealership Tool")
 app.add_middleware(
@@ -131,6 +162,8 @@ app.mount("/orgtool", orgtool_app)
 db_lock = threading.Lock()
 db_conn: Optional[sqlite3.Connection] = None
 admin_sessions: Dict[str, Dict[str, Any]] = {}
+agent_run_threads: Dict[int, threading.Thread] = {}
+agent_run_threads_lock = threading.Lock()
 
 
 class AdminLoginIn(BaseModel):
@@ -626,6 +659,68 @@ class SpecialOut(BaseModel):
 
 class SpecialsListOut(BaseModel):
     entries: List[SpecialOut]
+
+
+class AgentLoopPresetOut(BaseModel):
+    key: str
+    label: str
+    description: str
+    starter_objective: str
+
+
+class AgentLoopConfigOut(BaseModel):
+    provider: str
+    configured: bool
+    model: str
+    reasoning_effort: str
+    max_steps: int
+    presets: List[AgentLoopPresetOut]
+
+
+class AgentLoopRunIn(BaseModel):
+    preset_key: str
+    objective: str = ""
+
+
+class AgentLoopEventOut(BaseModel):
+    id: int
+    run_id: int
+    step_index: int
+    event_type: str
+    title: str
+    content: str
+    payload: Dict[str, Any] = {}
+    created_at: str
+    created_ts: float
+
+
+class AgentLoopRunOut(BaseModel):
+    id: int
+    preset_key: str
+    preset_label: str
+    objective: str
+    status: str
+    created_at: str
+    created_ts: float
+    started_at: Optional[str] = None
+    finished_at: Optional[str] = None
+    model: str
+    reasoning_effort: str
+    total_steps: int
+    summary: str = ""
+    latest_thinking: str = ""
+    high_priority_actions: List[str] = []
+    observations: List[str] = []
+    error_message: str = ""
+
+
+class AgentLoopRunDetailOut(AgentLoopRunOut):
+    events: List[AgentLoopEventOut]
+
+
+class AgentLoopRunListOut(BaseModel):
+    total: int
+    entries: List[AgentLoopRunOut]
 
 
 def now_local() -> datetime:
@@ -1637,6 +1732,47 @@ def init_db() -> None:
         )
         """
     )
+    db_execute(
+        """
+        CREATE TABLE IF NOT EXISTS agent_loop_runs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            preset_key TEXT NOT NULL,
+            preset_label TEXT NOT NULL,
+            objective TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'queued',
+            created_ts REAL NOT NULL,
+            created_at TEXT NOT NULL,
+            started_ts REAL,
+            started_at TEXT NOT NULL DEFAULT '',
+            finished_ts REAL,
+            finished_at TEXT NOT NULL DEFAULT '',
+            model TEXT NOT NULL,
+            reasoning_effort TEXT NOT NULL DEFAULT 'low',
+            total_steps INTEGER NOT NULL DEFAULT 0,
+            summary TEXT NOT NULL DEFAULT '',
+            latest_thinking TEXT NOT NULL DEFAULT '',
+            high_priority_actions_json TEXT NOT NULL DEFAULT '[]',
+            observations_json TEXT NOT NULL DEFAULT '[]',
+            error_message TEXT NOT NULL DEFAULT ''
+        )
+        """
+    )
+    db_execute(
+        """
+        CREATE TABLE IF NOT EXISTS agent_loop_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            run_id INTEGER NOT NULL,
+            step_index INTEGER NOT NULL DEFAULT 0,
+            event_type TEXT NOT NULL,
+            title TEXT NOT NULL DEFAULT '',
+            content TEXT NOT NULL DEFAULT '',
+            payload_json TEXT NOT NULL DEFAULT '',
+            created_ts REAL NOT NULL,
+            created_at TEXT NOT NULL
+        )
+        """
+    )
+    db_execute("CREATE INDEX IF NOT EXISTS idx_agent_loop_events_run_id ON agent_loop_events(run_id, id)")
 
 
 def prune_sessions() -> None:
@@ -3223,6 +3359,894 @@ def update_marketplace_template(payload: MarketplaceTemplateIn) -> MarketplaceTe
     return fetch_marketplace_template()
 
 
+def normalize_agent_reasoning_effort(value: str) -> str:
+    text = str(value or "").strip().lower()
+    if text in {"none", "low", "medium", "high", "xhigh"}:
+        return text
+    return "low"
+
+
+def openai_agent_configured() -> bool:
+    return bool(OPENAI_API_KEY)
+
+
+def trim_agent_text(value: Any, *, max_len: int = 4000) -> str:
+    text = str(value or "").replace("\r\n", "\n").strip()
+    if len(text) > max_len:
+        return f"{text[: max_len - 3]}..."
+    return text
+
+
+def normalize_agent_string_list(value: Any, *, max_items: int = 8, max_len: int = 280) -> List[str]:
+    items: List[str] = []
+    for raw_item in value if isinstance(value, list) else []:
+        text = trim_agent_text(raw_item, max_len=max_len)
+        if text:
+            items.append(text)
+        if len(items) >= max_items:
+            break
+    return items
+
+
+def safe_json_dumps(value: Any, default: str = "{}") -> str:
+    try:
+        return json.dumps(value, ensure_ascii=True)
+    except Exception:
+        return default
+
+
+def safe_json_loads(value: str, default: Any) -> Any:
+    try:
+        return json.loads(str(value or "").strip())
+    except Exception:
+        return default
+
+
+def agent_loop_presets_out() -> List[AgentLoopPresetOut]:
+    return [AgentLoopPresetOut(**preset) for preset in AGENT_LOOP_PRESETS]
+
+
+def get_agent_loop_config() -> AgentLoopConfigOut:
+    return AgentLoopConfigOut(
+        provider="OpenAI",
+        configured=openai_agent_configured(),
+        model=OPENAI_AGENT_MODEL,
+        reasoning_effort=normalize_agent_reasoning_effort(OPENAI_AGENT_REASONING_EFFORT),
+        max_steps=OPENAI_AGENT_MAX_STEPS,
+        presets=agent_loop_presets_out(),
+    )
+
+
+def get_agent_loop_preset(preset_key: str) -> Dict[str, str]:
+    normalized = str(preset_key or "").strip()
+    for preset in AGENT_LOOP_PRESETS:
+        if preset["key"] == normalized:
+            return preset
+    raise HTTPException(status_code=400, detail="unknown agent loop preset")
+
+
+def agent_loop_event_out(row: Dict[str, Any]) -> AgentLoopEventOut:
+    payload = safe_json_loads(str(row.get("payload_json") or ""), {})
+    if not isinstance(payload, dict):
+        payload = {}
+    return AgentLoopEventOut(
+        id=int(row.get("id") or 0),
+        run_id=int(row.get("run_id") or 0),
+        step_index=int(row.get("step_index") or 0),
+        event_type=str(row.get("event_type") or ""),
+        title=str(row.get("title") or ""),
+        content=str(row.get("content") or ""),
+        payload=payload,
+        created_at=str(row.get("created_at") or ""),
+        created_ts=float(row.get("created_ts") or 0.0),
+    )
+
+
+def agent_loop_run_out(row: Dict[str, Any]) -> AgentLoopRunOut:
+    actions = safe_json_loads(str(row.get("high_priority_actions_json") or "[]"), [])
+    observations = safe_json_loads(str(row.get("observations_json") or "[]"), [])
+    return AgentLoopRunOut(
+        id=int(row.get("id") or 0),
+        preset_key=str(row.get("preset_key") or ""),
+        preset_label=str(row.get("preset_label") or ""),
+        objective=str(row.get("objective") or ""),
+        status=str(row.get("status") or "queued"),
+        created_at=str(row.get("created_at") or ""),
+        created_ts=float(row.get("created_ts") or 0.0),
+        started_at=str(row.get("started_at") or "").strip() or None,
+        finished_at=str(row.get("finished_at") or "").strip() or None,
+        model=str(row.get("model") or OPENAI_AGENT_MODEL),
+        reasoning_effort=str(row.get("reasoning_effort") or normalize_agent_reasoning_effort(OPENAI_AGENT_REASONING_EFFORT)),
+        total_steps=int(row.get("total_steps") or 0),
+        summary=str(row.get("summary") or ""),
+        latest_thinking=str(row.get("latest_thinking") or ""),
+        high_priority_actions=normalize_agent_string_list(actions),
+        observations=normalize_agent_string_list(observations),
+        error_message=str(row.get("error_message") or ""),
+    )
+
+
+def get_agent_loop_run_row(run_id: int) -> Optional[Dict[str, Any]]:
+    return db_query_one("SELECT * FROM agent_loop_runs WHERE id = ?", (int(run_id),))
+
+
+def fetch_agent_loop_runs(limit: int = 20) -> AgentLoopRunListOut:
+    safe_limit = max(1, min(int(limit or 20), 50))
+    count_row = db_query_one("SELECT COUNT(*) AS count FROM agent_loop_runs") or {}
+    rows = db_query_all(
+        "SELECT * FROM agent_loop_runs ORDER BY created_ts DESC, id DESC LIMIT ?",
+        (safe_limit,),
+    )
+    return AgentLoopRunListOut(
+        total=int(count_row.get("count") or 0),
+        entries=[agent_loop_run_out(row) for row in rows],
+    )
+
+
+def fetch_agent_loop_detail(run_id: int, event_limit: int = 120) -> AgentLoopRunDetailOut:
+    row = get_agent_loop_run_row(run_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="agent loop run not found")
+    safe_limit = max(1, min(int(event_limit or 120), 200))
+    event_rows = db_query_all(
+        """
+        SELECT *
+        FROM agent_loop_events
+        WHERE run_id = ?
+        ORDER BY id DESC
+        LIMIT ?
+        """,
+        (int(run_id), safe_limit),
+    )
+    event_rows.reverse()
+    return AgentLoopRunDetailOut(
+        **agent_loop_run_out(row).model_dump(),
+        events=[agent_loop_event_out(event_row) for event_row in event_rows],
+    )
+
+
+def record_agent_loop_event(
+    run_id: int,
+    step_index: int,
+    event_type: str,
+    title: str,
+    *,
+    content: str = "",
+    payload: Optional[Dict[str, Any]] = None,
+) -> None:
+    created_ts = time.time()
+    db_insert(
+        """
+        INSERT INTO agent_loop_events (
+            run_id, step_index, event_type, title, content, payload_json, created_ts, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            int(run_id),
+            int(step_index),
+            trim_agent_text(event_type, max_len=80) or "note",
+            trim_agent_text(title, max_len=200) or "Agent loop event",
+            trim_agent_text(content, max_len=12000),
+            safe_json_dumps(payload or {}, default="{}"),
+            created_ts,
+            now_iso(),
+        ),
+    )
+
+
+def update_agent_loop_run(
+    run_id: int,
+    *,
+    status: Optional[str] = None,
+    set_started: bool = False,
+    set_finished: bool = False,
+    total_steps: Optional[int] = None,
+    summary: Optional[str] = None,
+    latest_thinking: Optional[str] = None,
+    high_priority_actions: Optional[List[str]] = None,
+    observations: Optional[List[str]] = None,
+    error_message: Optional[str] = None,
+) -> None:
+    assignments: List[str] = []
+    params: List[Any] = []
+    if status is not None:
+        assignments.append("status = ?")
+        params.append(status)
+    if set_started:
+        now_value = now_iso()
+        assignments.extend(["started_ts = ?", "started_at = ?"])
+        params.extend([time.time(), now_value])
+    if set_finished:
+        now_value = now_iso()
+        assignments.extend(["finished_ts = ?", "finished_at = ?"])
+        params.extend([time.time(), now_value])
+    if total_steps is not None:
+        assignments.append("total_steps = ?")
+        params.append(max(0, int(total_steps)))
+    if summary is not None:
+        assignments.append("summary = ?")
+        params.append(trim_agent_text(summary, max_len=8000))
+    if latest_thinking is not None:
+        assignments.append("latest_thinking = ?")
+        params.append(trim_agent_text(latest_thinking, max_len=4000))
+    if high_priority_actions is not None:
+        assignments.append("high_priority_actions_json = ?")
+        params.append(safe_json_dumps(normalize_agent_string_list(high_priority_actions), default="[]"))
+    if observations is not None:
+        assignments.append("observations_json = ?")
+        params.append(safe_json_dumps(normalize_agent_string_list(observations), default="[]"))
+    if error_message is not None:
+        assignments.append("error_message = ?")
+        params.append(trim_agent_text(error_message, max_len=2000))
+    if not assignments:
+        return
+    params.append(int(run_id))
+    db_execute(f"UPDATE agent_loop_runs SET {', '.join(assignments)} WHERE id = ?", tuple(params))
+
+
+def agent_loop_is_stopped(run_id: int) -> bool:
+    row = get_agent_loop_run_row(run_id)
+    status = str(row.get("status") or "") if row else ""
+    return status in {"canceled", "failed", "completed", "blocked"}
+
+
+def parse_agent_json_response(text: str) -> Dict[str, Any]:
+    raw = str(text or "").strip()
+    if raw.startswith("```"):
+        first_newline = raw.find("\n")
+        last_fence = raw.rfind("```")
+        if first_newline >= 0 and last_fence > first_newline:
+            raw = raw[first_newline + 1 : last_fence].strip()
+    try:
+        parsed = json.loads(raw)
+        if isinstance(parsed, dict):
+            return parsed
+    except Exception:
+        pass
+    first_brace = raw.find("{")
+    last_brace = raw.rfind("}")
+    if first_brace >= 0 and last_brace > first_brace:
+        candidate = raw[first_brace : last_brace + 1]
+        parsed = json.loads(candidate)
+        if isinstance(parsed, dict):
+            return parsed
+    raise ValueError("model did not return valid JSON")
+
+
+def extract_openai_response_text(payload: Dict[str, Any]) -> str:
+    output_text = trim_agent_text(payload.get("output_text"), max_len=12000)
+    if output_text:
+        return output_text
+    parts: List[str] = []
+    for item in payload.get("output", []):
+        if not isinstance(item, dict):
+            continue
+        if item.get("type") == "message":
+            for content in item.get("content", []):
+                if not isinstance(content, dict):
+                    continue
+                text_value = content.get("text")
+                if isinstance(text_value, str) and text_value.strip():
+                    parts.append(text_value.strip())
+                elif isinstance(text_value, dict):
+                    candidate = trim_agent_text(text_value.get("value"), max_len=12000)
+                    if candidate:
+                        parts.append(candidate)
+    if parts:
+        return "\n".join(parts)
+    raise RuntimeError("OpenAI response did not include output text")
+
+
+def request_openai_agent(messages: List[Dict[str, str]]) -> str:
+    if not openai_agent_configured():
+        raise RuntimeError("OPENAI_API_KEY is not configured")
+    payload: Dict[str, Any] = {
+        "model": OPENAI_AGENT_MODEL,
+        "input": messages,
+    }
+    effort = normalize_agent_reasoning_effort(OPENAI_AGENT_REASONING_EFFORT)
+    if effort:
+        payload["reasoning"] = {"effort": effort}
+    request = urllib.request.Request(
+        "https://api.openai.com/v1/responses",
+        data=json.dumps(payload).encode("utf-8"),
+        method="POST",
+    )
+    request.add_header("Authorization", f"Bearer {OPENAI_API_KEY}")
+    request.add_header("Content-Type", "application/json")
+    try:
+        with urllib.request.urlopen(request, timeout=90) as response:
+            data = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="ignore")
+        raise RuntimeError(f"OpenAI HTTP {exc.code}: {detail or exc.reason}") from exc
+    except Exception as exc:
+        raise RuntimeError(f"OpenAI request failed: {compact_error_text(exc)}") from exc
+    return extract_openai_response_text(data)
+
+
+def call_agent_decision(messages: List[Dict[str, str]]) -> Tuple[Dict[str, Any], str]:
+    raw_text = request_openai_agent(messages)
+    try:
+        return parse_agent_json_response(raw_text), raw_text
+    except Exception:
+        repair_messages = messages + [
+            {"role": "assistant", "content": raw_text},
+            {
+                "role": "user",
+                "content": "Return the same answer again as strict JSON only. No markdown fences, no prose, and no explanation outside the JSON object.",
+            },
+        ]
+        repaired_text = request_openai_agent(repair_messages)
+        return parse_agent_json_response(repaired_text), repaired_text
+
+
+def agent_date_range(days: int) -> Tuple[str, str]:
+    safe_days = max(1, min(int(days or 1), 365))
+    end_date = now_local().date()
+    start_date = end_date - timedelta(days=safe_days - 1)
+    return start_date.isoformat(), end_date.isoformat()
+
+
+def agent_int_arg(args: Dict[str, Any], key: str, default: int, minimum: int, maximum: int) -> int:
+    try:
+        value = int(args.get(key) if key in args else default)
+    except Exception:
+        value = default
+    return max(minimum, min(maximum, value))
+
+
+def agent_optional_int_arg(args: Dict[str, Any], key: str) -> Optional[int]:
+    raw = args.get(key)
+    if raw in (None, ""):
+        return None
+    try:
+        return int(raw)
+    except Exception:
+        raise HTTPException(status_code=400, detail=f"{key} must be an integer")
+
+
+def agent_optional_month_arg(args: Dict[str, Any], key: str = "month") -> Optional[str]:
+    raw = str(args.get(key) or "").strip()
+    if not raw:
+        return None
+    return parse_month_key(raw)
+
+
+def agent_optional_date_arg(args: Dict[str, Any], key: str) -> Optional[str]:
+    raw = str(args.get(key) or "").strip()
+    if not raw:
+        return None
+    return parse_iso_date(raw, key).isoformat()
+
+
+def build_agent_overview_tool_output() -> Dict[str, Any]:
+    today_value = now_local().date().isoformat()
+    month_value = now_local().strftime("%Y-%m")
+    active_by_store = db_query_all(
+        """
+        SELECT dealership, COUNT(*) AS count
+        FROM salespeople
+        WHERE active = 1
+        GROUP BY dealership
+        ORDER BY dealership ASC
+        """
+    )
+    notify_row = db_query_one(
+        """
+        SELECT
+            SUM(CASE WHEN active = 1 THEN 1 ELSE 0 END) AS active_salespeople,
+            SUM(CASE WHEN active = 1 AND notify_sms = 1 THEN 1 ELSE 0 END) AS sms_enabled,
+            SUM(CASE WHEN active = 1 AND notify_email = 1 THEN 1 ELSE 0 END) AS email_enabled
+        FROM salespeople
+        """
+    ) or {}
+    bdc_start, bdc_end = agent_date_range(14)
+    bdc_report = fetch_bdc_report(start_date=bdc_start, end_date=bdc_end).model_dump()
+    bdc_report["rows"] = bdc_report.get("rows", [])[:6]
+    freshup_summary = fetch_freshup_analytics(days=14).model_dump()
+    freshup_summary["recent"] = freshup_summary.get("recent", [])[:8]
+    traffic_month = fetch_service_drive_traffic(month_key=month_value).model_dump()
+    traffic_today = fetch_service_drive_traffic(month_key=month_value, traffic_date=today_value).model_dump()
+    missing_service_notes = db_query_one(
+        """
+        SELECT COUNT(*) AS count
+        FROM service_drive_notes
+        WHERE appointment_date >= ? AND TRIM(COALESCE(sales_notes, '')) = ''
+        """,
+        (today_value,),
+    ) or {}
+    missing_traffic_notes = db_query_one(
+        """
+        SELECT COUNT(*) AS count
+        FROM service_drive_traffic_entries
+        WHERE traffic_date >= ? AND TRIM(COALESCE(sales_notes, '')) = ''
+        """,
+        (today_value,),
+    ) or {}
+    busiest_days = sorted(
+        [
+            {"date": day, "count": int(count or 0)}
+            for day, count in (traffic_month.get("counts_by_date") or {}).items()
+        ],
+        key=lambda item: (-item["count"], item["date"]),
+    )[:6]
+    return {
+        "timestamp": now_iso(),
+        "month": month_value,
+        "today": today_value,
+        "distribution_mode": get_bdc_distribution_mode(),
+        "notifications": get_notification_config().model_dump(),
+        "staffing": {
+            "active_salespeople": int(notify_row.get("active_salespeople") or 0),
+            "sms_enabled": int(notify_row.get("sms_enabled") or 0),
+            "email_enabled": int(notify_row.get("email_enabled") or 0),
+            "active_by_store": [
+                {"dealership": str(row.get("dealership") or ""), "count": int(row.get("count") or 0)}
+                for row in active_by_store
+            ],
+        },
+        "bdc_last_14_days": bdc_report,
+        "freshups_last_14_days": freshup_summary,
+        "traffic_month": {
+            "month": traffic_month.get("month"),
+            "total": int(traffic_month.get("total") or 0),
+            "busiest_days": busiest_days,
+        },
+        "traffic_today": {
+            "selected_date": traffic_today.get("selected_date"),
+            "total": int(traffic_today.get("total") or 0),
+            "entries": (traffic_today.get("entries") or [])[:8],
+        },
+        "follow_up_gaps": {
+            "service_notes_missing_sales_notes": int(missing_service_notes.get("count") or 0),
+            "traffic_rows_missing_sales_notes": int(missing_traffic_notes.get("count") or 0),
+        },
+    }
+
+
+def build_agent_sales_team_tool_output(args: Dict[str, Any]) -> Dict[str, Any]:
+    include_inactive = bool(args.get("include_inactive"))
+    rows = db_query_all(
+        """
+        SELECT id, name, dealership, active, phone_number, email, notify_sms, notify_email
+        FROM salespeople
+        {where_sql}
+        ORDER BY active DESC, dealership ASC, name ASC, id ASC
+        """.format(where_sql="" if include_inactive else "WHERE active = 1")
+    )
+    bdc_rows = db_query_all(
+        """
+        SELECT id, name, active
+        FROM bdc_agents
+        ORDER BY active DESC, name ASC, id ASC
+        """
+    )
+    return {
+        "salespeople": [
+            {
+                "id": int(row.get("id") or 0),
+                "name": str(row.get("name") or ""),
+                "dealership": str(row.get("dealership") or ""),
+                "active": bool(int(row.get("active") or 0)),
+                "phone_number": str(row.get("phone_number") or ""),
+                "email": str(row.get("email") or ""),
+                "notify_sms": bool(int(row.get("notify_sms") or 0)),
+                "notify_email": bool(int(row.get("notify_email") or 0)),
+            }
+            for row in rows[:20]
+        ],
+        "bdc_agents": [
+            {
+                "id": int(row.get("id") or 0),
+                "name": str(row.get("name") or ""),
+                "active": bool(int(row.get("active") or 0)),
+            }
+            for row in bdc_rows[:20]
+        ],
+    }
+
+
+def build_agent_bdc_report_tool_output(args: Dict[str, Any]) -> Dict[str, Any]:
+    days = agent_int_arg(args, "days", 30, 1, 90)
+    start_date, end_date = agent_date_range(days)
+    lead_store = normalize_optional_dealership(args.get("lead_store"))
+    salesperson_id = agent_optional_int_arg(args, "salesperson_id")
+    data = fetch_bdc_report(
+        salesperson_id=salesperson_id,
+        lead_store=lead_store,
+        start_date=start_date,
+        end_date=end_date,
+    ).model_dump()
+    data["rows"] = data.get("rows", [])[:12]
+    data["days"] = days
+    return data
+
+
+def build_agent_bdc_log_tool_output(args: Dict[str, Any]) -> Dict[str, Any]:
+    days = agent_int_arg(args, "days", 14, 1, 60)
+    limit = agent_int_arg(args, "limit", 12, 1, 25)
+    start_date, end_date = agent_date_range(days)
+    lead_store = normalize_optional_dealership(args.get("lead_store"))
+    salesperson_id = agent_optional_int_arg(args, "salesperson_id")
+    data = fetch_bdc_log(
+        salesperson_id=salesperson_id,
+        lead_store=lead_store,
+        start_date=start_date,
+        end_date=end_date,
+        limit=limit,
+    ).model_dump()
+    data["days"] = days
+    return data
+
+
+def build_agent_freshup_log_tool_output(args: Dict[str, Any]) -> Dict[str, Any]:
+    limit = agent_int_arg(args, "limit", 12, 1, 25)
+    salesperson_id = agent_optional_int_arg(args, "salesperson_id")
+    return fetch_freshup_log(salesperson_id=salesperson_id, limit=limit).model_dump()
+
+
+def build_agent_freshup_analytics_tool_output(args: Dict[str, Any]) -> Dict[str, Any]:
+    days = agent_int_arg(args, "days", 30, 1, 180)
+    salesperson_id = agent_optional_int_arg(args, "salesperson_id")
+    data = fetch_freshup_analytics(days=days, salesperson_id=salesperson_id).model_dump()
+    data["recent"] = data.get("recent", [])[:12]
+    return data
+
+
+def build_agent_service_notes_tool_output(args: Dict[str, Any]) -> Dict[str, Any]:
+    limit = agent_int_arg(args, "limit", 12, 1, 25)
+    salesperson_id = agent_optional_int_arg(args, "salesperson_id")
+    brand = str(args.get("brand") or "").strip() or None
+    start_date = agent_optional_date_arg(args, "start_date")
+    end_date = agent_optional_date_arg(args, "end_date")
+    if not start_date or not end_date:
+        start_date, end_date = agent_date_range(agent_int_arg(args, "days", 14, 1, 60))
+    data = fetch_service_notes(
+        salesperson_id=salesperson_id,
+        start_date=start_date,
+        end_date=end_date,
+        brand=brand,
+        limit=limit,
+    ).model_dump()
+    return data
+
+
+def build_agent_service_traffic_tool_output(args: Dict[str, Any]) -> Dict[str, Any]:
+    month_value = agent_optional_month_arg(args, "month")
+    traffic_date = agent_optional_date_arg(args, "traffic_date")
+    data = fetch_service_drive_traffic(month_key=month_value, traffic_date=traffic_date).model_dump()
+    counts_by_date = data.get("counts_by_date") or {}
+    busiest_days = sorted(
+        [{"date": day, "count": int(count or 0)} for day, count in counts_by_date.items()],
+        key=lambda item: (-item["count"], item["date"]),
+    )[:8]
+    data["busiest_days"] = busiest_days
+    data["entries"] = data.get("entries", [])[:12]
+    data.pop("counts_by_date", None)
+    return data
+
+
+def build_agent_quote_rates_tool_output() -> Dict[str, Any]:
+    return {"entries": [entry.model_dump() for entry in fetch_quote_rates()]}
+
+
+def build_agent_marketplace_template_tool_output() -> Dict[str, Any]:
+    return fetch_marketplace_template().model_dump()
+
+
+def execute_agent_tool_call(tool_name: str, args: Dict[str, Any]) -> Dict[str, Any]:
+    normalized_args = args if isinstance(args, dict) else {}
+    if tool_name == "get_overview":
+        return build_agent_overview_tool_output()
+    if tool_name == "get_sales_team":
+        return build_agent_sales_team_tool_output(normalized_args)
+    if tool_name == "get_bdc_report":
+        return build_agent_bdc_report_tool_output(normalized_args)
+    if tool_name == "get_bdc_log":
+        return build_agent_bdc_log_tool_output(normalized_args)
+    if tool_name == "get_freshup_log":
+        return build_agent_freshup_log_tool_output(normalized_args)
+    if tool_name == "get_freshup_analytics":
+        return build_agent_freshup_analytics_tool_output(normalized_args)
+    if tool_name == "get_service_notes":
+        return build_agent_service_notes_tool_output(normalized_args)
+    if tool_name == "get_service_drive_traffic":
+        return build_agent_service_traffic_tool_output(normalized_args)
+    if tool_name == "get_quote_rates":
+        return build_agent_quote_rates_tool_output()
+    if tool_name == "get_marketplace_template":
+        return build_agent_marketplace_template_tool_output()
+    raise HTTPException(status_code=400, detail=f"unknown agent tool: {tool_name}")
+
+
+def agent_tool_catalog_text() -> str:
+    return "\n".join(
+        [
+            "- get_overview {}: cross-system dealership snapshot with staffing, BDC, freshup, and service-drive signals.",
+            "- get_sales_team { include_inactive?: boolean }: sales roster and BDC-agent notification setup.",
+            "- get_bdc_report { days?: int, lead_store?: 'Kia'|'Mazda'|'Outlet', salesperson_id?: int }: BDC summary and fairness view.",
+            "- get_bdc_log { days?: int, limit?: int, lead_store?: 'Kia'|'Mazda'|'Outlet', salesperson_id?: int }: recent BDC assignments.",
+            "- get_freshup_log { limit?: int, salesperson_id?: int }: newest freshups.",
+            "- get_freshup_analytics { days?: int, salesperson_id?: int }: tap-page analytics and conversions.",
+            "- get_service_notes { days?: int, start_date?: 'YYYY-MM-DD', end_date?: 'YYYY-MM-DD', brand?: 'Kia'|'Mazda', salesperson_id?: int, limit?: int }: service appointment notes.",
+            "- get_service_drive_traffic { month?: 'YYYY-MM', traffic_date?: 'YYYY-MM-DD' }: traffic rows and busiest days.",
+            "- get_quote_rates {}: current quote-rate tiers.",
+            "- get_marketplace_template {}: current marketplace template wording.",
+        ]
+    )
+
+
+def build_agent_loop_messages(run_row: Dict[str, Any]) -> List[Dict[str, str]]:
+    preset = get_agent_loop_preset(str(run_row.get("preset_key") or ""))
+    instructions = (
+        "You are the internal operations agent for a dealership management dashboard. "
+        "Work in bounded loops. Never invent metrics or store activity. "
+        "Prefer the smallest number of tool calls that can answer the objective. "
+        "You may request at most 2 tool calls in a step. "
+        "If the available data is enough, finish with concrete next actions. "
+        "If the objective is blocked by missing setup or missing data, return status blocked. "
+        "Return JSON only with this exact shape: "
+        "{"
+        "\"status\":\"continue|complete|blocked\","
+        "\"thinking\":\"short operational reasoning\","
+        "\"tool_calls\":[{\"tool\":\"tool_name\",\"reason\":\"why\",\"args\":{}}],"
+        "\"final_summary\":\"filled when complete or blocked\","
+        "\"high_priority_actions\":[\"action 1\"],"
+        "\"observations\":[\"observation 1\"]"
+        "}. "
+        "When status is continue, keep final_summary short or empty. "
+        "When status is complete or blocked, tool_calls must be empty."
+    )
+    user_prompt = (
+        f"Preset: {preset['label']}\n"
+        f"Preset description: {preset['description']}\n"
+        f"Objective: {str(run_row.get('objective') or '').strip()}\n"
+        f"Current local time: {now_iso()}\n"
+        f"Timezone: {RULES_TIMEZONE}\n"
+        "Available tools:\n"
+        f"{agent_tool_catalog_text()}\n\n"
+        "Start the loop. If you need a broad snapshot first, call get_overview."
+    )
+    return [
+        {"role": "developer", "content": instructions},
+        {"role": "user", "content": user_prompt},
+    ]
+
+
+def finalize_agent_loop_run(
+    run_id: int,
+    parsed: Dict[str, Any],
+    *,
+    step_index: int,
+    blocked: bool = False,
+) -> None:
+    summary = trim_agent_text(parsed.get("final_summary") or parsed.get("thinking") or "Agent loop finished.")
+    thinking = trim_agent_text(parsed.get("thinking"), max_len=4000)
+    actions = normalize_agent_string_list(parsed.get("high_priority_actions"))
+    observations = normalize_agent_string_list(parsed.get("observations"))
+    update_agent_loop_run(
+        run_id,
+        status="blocked" if blocked else "completed",
+        set_finished=True,
+        total_steps=step_index,
+        summary=summary,
+        latest_thinking=thinking,
+        high_priority_actions=actions,
+        observations=observations,
+        error_message="",
+    )
+    record_agent_loop_event(
+        run_id,
+        step_index,
+        "final",
+        "Loop finished",
+        content=summary,
+        payload={
+            "status": "blocked" if blocked else "completed",
+            "high_priority_actions": actions,
+            "observations": observations,
+        },
+    )
+
+
+def run_agent_loop_worker(run_id: int) -> None:
+    try:
+        run_row = get_agent_loop_run_row(run_id)
+        if not run_row:
+            return
+        update_agent_loop_run(
+            run_id,
+            status="running",
+            set_started=True,
+            latest_thinking="Starting agent loop.",
+        )
+        record_agent_loop_event(
+            run_id,
+            0,
+            "status",
+            "Loop started",
+            content=f"{run_row.get('preset_label') or 'Agent loop'} started with model {OPENAI_AGENT_MODEL}.",
+        )
+        messages = build_agent_loop_messages(run_row)
+        final_parsed: Optional[Dict[str, Any]] = None
+        final_step = 0
+        for step_index in range(1, OPENAI_AGENT_MAX_STEPS + 1):
+            if agent_loop_is_stopped(run_id):
+                return
+            parsed, raw_text = call_agent_decision(messages)
+            status = str(parsed.get("status") or "continue").strip().lower()
+            if status not in {"continue", "complete", "blocked"}:
+                status = "continue"
+            thinking = trim_agent_text(parsed.get("thinking"), max_len=4000)
+            tool_calls = parsed.get("tool_calls") if isinstance(parsed.get("tool_calls"), list) else []
+            normalized_tool_calls: List[Dict[str, Any]] = []
+            for tool_call in tool_calls[:2]:
+                if not isinstance(tool_call, dict):
+                    continue
+                tool_name = trim_agent_text(tool_call.get("tool"), max_len=80)
+                if not tool_name:
+                    continue
+                normalized_tool_calls.append(
+                    {
+                        "tool": tool_name,
+                        "reason": trim_agent_text(tool_call.get("reason"), max_len=240),
+                        "args": tool_call.get("args") if isinstance(tool_call.get("args"), dict) else {},
+                    }
+                )
+            update_agent_loop_run(
+                run_id,
+                total_steps=step_index,
+                latest_thinking=thinking or f"Processed step {step_index}.",
+            )
+            record_agent_loop_event(
+                run_id,
+                step_index,
+                "analysis",
+                f"Loop step {step_index}",
+                content=thinking or trim_agent_text(raw_text, max_len=1200),
+                payload={"status": status, "tool_calls": normalized_tool_calls},
+            )
+            messages.append({"role": "assistant", "content": raw_text})
+            if status in {"complete", "blocked"} and not normalized_tool_calls:
+                finalize_agent_loop_run(run_id, parsed, step_index=step_index, blocked=status == "blocked")
+                return
+            if not normalized_tool_calls:
+                final_parsed = parsed
+                final_step = step_index
+                break
+            tool_result_messages: List[str] = []
+            for tool_call in normalized_tool_calls:
+                if agent_loop_is_stopped(run_id):
+                    return
+                record_agent_loop_event(
+                    run_id,
+                    step_index,
+                    "tool_call",
+                    tool_call["tool"],
+                    content=tool_call.get("reason") or f"Calling {tool_call['tool']}.",
+                    payload={"args": tool_call.get("args") or {}},
+                )
+                try:
+                    tool_result = execute_agent_tool_call(tool_call["tool"], tool_call.get("args") or {})
+                except Exception as exc:
+                    tool_result = {"error": compact_error_text(exc)}
+                record_agent_loop_event(
+                    run_id,
+                    step_index,
+                    "tool_result",
+                    tool_call["tool"],
+                    content=trim_agent_text(json.dumps(tool_result, ensure_ascii=True, indent=2), max_len=3000),
+                    payload=tool_result if isinstance(tool_result, dict) else {"result": tool_result},
+                )
+                tool_result_messages.append(
+                    f"Tool `{tool_call['tool']}` result:\n{json.dumps(tool_result, ensure_ascii=True, indent=2)}"
+                )
+            messages.append(
+                {
+                    "role": "user",
+                    "content": (
+                        "Here are the tool results from the last step. Continue the loop and either call more tools or finish.\n\n"
+                        + "\n\n".join(tool_result_messages)
+                    ),
+                }
+            )
+        if final_parsed is None:
+            messages.append(
+                {
+                    "role": "user",
+                    "content": "You have reached the tool-step limit. Return a final JSON answer now with no further tool calls.",
+                }
+            )
+            final_parsed, _ = call_agent_decision(messages)
+            final_step = OPENAI_AGENT_MAX_STEPS
+        finalize_agent_loop_run(
+            run_id,
+            final_parsed,
+            step_index=max(1, final_step),
+            blocked=str(final_parsed.get("status") or "").strip().lower() == "blocked",
+        )
+    except Exception as exc:
+        error_text = compact_error_text(exc)
+        update_agent_loop_run(
+            run_id,
+            status="failed",
+            set_finished=True,
+            error_message=error_text,
+            latest_thinking="Agent loop failed.",
+        )
+        record_agent_loop_event(run_id, 0, "error", "Loop failed", content=error_text)
+    finally:
+        with agent_run_threads_lock:
+            agent_run_threads.pop(int(run_id), None)
+
+
+def start_agent_loop_worker(run_id: int) -> None:
+    thread = threading.Thread(target=run_agent_loop_worker, args=(int(run_id),), daemon=True)
+    with agent_run_threads_lock:
+        existing = agent_run_threads.get(int(run_id))
+        if existing and existing.is_alive():
+            return
+        agent_run_threads[int(run_id)] = thread
+    thread.start()
+
+
+def create_agent_loop_run(payload: AgentLoopRunIn) -> AgentLoopRunDetailOut:
+    if not openai_agent_configured():
+        raise HTTPException(status_code=400, detail="OPENAI_API_KEY is not configured")
+    preset = get_agent_loop_preset(payload.preset_key)
+    objective = trim_agent_text(
+        normalize_notes(payload.objective or preset["starter_objective"], "objective", max_len=2000),
+        max_len=2000,
+    )
+    created_ts = time.time()
+    created_id = db_insert(
+        """
+        INSERT INTO agent_loop_runs (
+            preset_key, preset_label, objective, status, created_ts, created_at,
+            model, reasoning_effort, total_steps, summary, latest_thinking,
+            high_priority_actions_json, observations_json, error_message
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, '', '', '[]', '[]', '')
+        """,
+        (
+            preset["key"],
+            preset["label"],
+            objective,
+            "queued",
+            created_ts,
+            now_iso(),
+            OPENAI_AGENT_MODEL,
+            normalize_agent_reasoning_effort(OPENAI_AGENT_REASONING_EFFORT),
+        ),
+    )
+    record_agent_loop_event(
+        created_id,
+        0,
+        "queued",
+        "Loop queued",
+        content=f"{preset['label']} queued with objective: {objective}",
+    )
+    start_agent_loop_worker(created_id)
+    return fetch_agent_loop_detail(created_id)
+
+
+def cancel_agent_loop_run(run_id: int) -> AgentLoopRunDetailOut:
+    row = get_agent_loop_run_row(run_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="agent loop run not found")
+    current_status = str(row.get("status") or "queued")
+    if current_status in {"completed", "blocked", "failed", "canceled"}:
+        return fetch_agent_loop_detail(run_id)
+    update_agent_loop_run(
+        run_id,
+        status="canceled",
+        set_finished=True,
+        latest_thinking="Loop canceled by admin.",
+    )
+    record_agent_loop_event(run_id, int(row.get("total_steps") or 0), "canceled", "Loop canceled", content="Admin canceled this loop.")
+    return fetch_agent_loop_detail(run_id)
+
+
 def reynolds_text(row: Dict[str, Any], key: str) -> str:
     return str(row.get(key) or "").strip()
 
@@ -4115,6 +5139,48 @@ def admin_session(x_admin_token: Optional[str] = Header(default=None)) -> AdminS
         username=str(session.get("username") or ADMIN_USERNAME),
         expires_ts=float(session.get("expires_ts") or 0.0),
     )
+
+
+@app.get("/api/admin/agent-loops/config", response_model=AgentLoopConfigOut)
+def get_admin_agent_loops_config(x_admin_token: Optional[str] = Header(default=None)) -> AgentLoopConfigOut:
+    require_admin(x_admin_token)
+    return get_agent_loop_config()
+
+
+@app.get("/api/admin/agent-loops/runs", response_model=AgentLoopRunListOut)
+def get_admin_agent_loop_runs(
+    limit: int = 20,
+    x_admin_token: Optional[str] = Header(default=None),
+) -> AgentLoopRunListOut:
+    require_admin(x_admin_token)
+    return fetch_agent_loop_runs(limit=limit)
+
+
+@app.get("/api/admin/agent-loops/runs/{run_id}", response_model=AgentLoopRunDetailOut)
+def get_admin_agent_loop_run(
+    run_id: int,
+    x_admin_token: Optional[str] = Header(default=None),
+) -> AgentLoopRunDetailOut:
+    require_admin(x_admin_token)
+    return fetch_agent_loop_detail(run_id)
+
+
+@app.post("/api/admin/agent-loops/runs", response_model=AgentLoopRunDetailOut)
+def post_admin_agent_loop_run(
+    payload: AgentLoopRunIn,
+    x_admin_token: Optional[str] = Header(default=None),
+) -> AgentLoopRunDetailOut:
+    require_admin(x_admin_token)
+    return create_agent_loop_run(payload)
+
+
+@app.post("/api/admin/agent-loops/runs/{run_id}/cancel", response_model=AgentLoopRunDetailOut)
+def post_admin_agent_loop_cancel(
+    run_id: int,
+    x_admin_token: Optional[str] = Header(default=None),
+) -> AgentLoopRunDetailOut:
+    require_admin(x_admin_token)
+    return cancel_agent_loop_run(run_id)
 
 
 @app.get("/api/salespeople", response_model=List[SalespersonOut])

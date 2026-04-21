@@ -105,6 +105,19 @@ function adminHeaders(token) {
 export const apiBase = API_BASE;
 export const adminLogin = (payload) => request("/api/admin/login", { method: "POST", body: payload });
 export const getAdminSession = (token) => request("/api/admin/session", { headers: adminHeaders(token) });
+export const getAgentLoopConfig = (token) =>
+  request("/api/admin/agent-loops/config", { headers: adminHeaders(token) });
+export const getAgentLoopRuns = (token, params = {}) =>
+  request(`/api/admin/agent-loops/runs${qs({ limit: params.limit })}`, { headers: adminHeaders(token) });
+export const getAgentLoopRun = (token, runId) =>
+  request(`/api/admin/agent-loops/runs/${encodeURIComponent(runId)}`, { headers: adminHeaders(token) });
+export const createAgentLoopRun = (token, payload) =>
+  request("/api/admin/agent-loops/runs", { method: "POST", body: payload, headers: adminHeaders(token), timeout: 120000 });
+export const cancelAgentLoopRun = (token, runId) =>
+  request(`/api/admin/agent-loops/runs/${encodeURIComponent(runId)}/cancel`, {
+    method: "POST",
+    headers: adminHeaders(token),
+  });
 export const getSalespeople = (params = {}) => request(`/api/salespeople${qs({ include_inactive: params.includeInactive })}`);
 export const getAdminSalespeople = (token, params = {}) =>
   request(`/api/admin/salespeople${qs({ include_inactive: params.includeInactive })}`, { headers: adminHeaders(token) });

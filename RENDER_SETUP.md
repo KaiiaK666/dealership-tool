@@ -56,6 +56,10 @@ Backend env vars:
 - `RESEND_API_KEY=...`
 - `BDC_NOTIFY_EMAIL_FROM=BDC Alerts <alerts@yourdomain.com>`
 - `BDC_NOTIFY_EMAIL_REPLY_TO=sales@yourdomain.com` (optional)
+- `OPENAI_API_KEY=...` for Agent Loops
+- `OPENAI_AGENT_MODEL=gpt-5.4-mini` (optional)
+- `OPENAI_AGENT_REASONING_EFFORT=low` (optional)
+- `OPENAI_AGENT_MAX_STEPS=6` (optional)
 
 Frontend service:
 
@@ -160,6 +164,28 @@ After deploy:
 3. Use the BDC assignment board normally
 
 The last assignment card will show whether text/email was sent or skipped.
+
+## 5.2 Agent Loops
+
+The admin app now includes `Admin > Agent Loops`, which runs bounded AI loops against live dealership data and stores a trace for each run.
+
+Required backend env var:
+
+- `OPENAI_API_KEY`
+
+Optional tuning vars:
+
+- `OPENAI_AGENT_MODEL` defaults to `gpt-5.4-mini`
+- `OPENAI_AGENT_REASONING_EFFORT` defaults to `low`
+- `OPENAI_AGENT_MAX_STEPS` defaults to `6`
+
+After saving the env vars and redeploying:
+
+1. Open `Admin > Agent Loops`
+2. Pick a preset
+3. Adjust the objective
+4. Start the run
+5. Watch the stored event timeline and final actions in the same panel
 
 ## 6. Registrar DNS
 

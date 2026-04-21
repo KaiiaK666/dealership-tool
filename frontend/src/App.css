@@ -65,7 +65,7 @@ button:disabled {
   box-shadow: none;
 }
 
-button:not(.tab):not(.subtab):not(.person-row):not(.days-off-day):not(.special-card):not(.calendar-day__plus):not(.traffic-day-tile):not(.note-card__summary) {
+button:not(.tab):not(.subtab):not(.person-row):not(.days-off-day):not(.special-card):not(.calendar-day__plus):not(.traffic-day-tile):not(.note-card__summary):not(.agent-run-card) {
   border-radius: 14px;
   padding: 12px 18px;
   font-weight: 600;
@@ -74,7 +74,7 @@ button:not(.tab):not(.subtab):not(.person-row):not(.days-off-day):not(.special-c
   box-shadow: 0 10px 24px rgba(196, 102, 52, 0.22);
 }
 
-button:not(.tab):not(.subtab):not(.person-row):not(.days-off-day):not(.special-card):not(.calendar-day__plus):not(.traffic-day-tile):not(.note-card__summary):hover:not(:disabled) {
+button:not(.tab):not(.subtab):not(.person-row):not(.days-off-day):not(.special-card):not(.calendar-day__plus):not(.traffic-day-tile):not(.note-card__summary):not(.agent-run-card):hover:not(:disabled) {
   transform: translateY(-1px);
 }
 
@@ -2910,6 +2910,156 @@ button.special-card:hover:not(:disabled) {
   font-weight: 700;
 }
 
+.agent-loop-grid {
+  align-items: start;
+}
+
+.agent-loop-panel,
+.agent-loop-detail {
+  display: grid;
+  gap: 16px;
+}
+
+.agent-run-list,
+.agent-loop-events {
+  display: grid;
+  gap: 12px;
+}
+
+.agent-run-card {
+  width: 100%;
+  display: grid;
+  gap: 8px;
+  padding: 16px;
+  text-align: left;
+  border-radius: 18px;
+  border: 1px solid rgba(210, 198, 182, 0.78);
+  background: rgba(255, 255, 255, 0.84);
+  color: var(--ink);
+  box-shadow: var(--card-shadow);
+}
+
+.agent-run-card:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.agent-run-card.is-active {
+  border-color: rgba(196, 102, 52, 0.5);
+  box-shadow: 0 12px 28px rgba(196, 102, 52, 0.14);
+}
+
+.agent-run-card__top,
+.agent-event-card__top,
+.agent-loop-detail__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.agent-run-card p,
+.agent-event-card p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.6;
+}
+
+.agent-run-card small,
+.agent-event-card small {
+  color: var(--muted);
+}
+
+.agent-status-pill {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 7px 11px;
+  border-radius: 999px;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  border: 1px solid rgba(37, 48, 59, 0.12);
+  background: rgba(37, 48, 59, 0.08);
+  color: var(--deep);
+}
+
+.agent-status-pill.success {
+  border-color: rgba(23, 121, 105, 0.25);
+  background: rgba(236, 250, 247, 0.92);
+  color: var(--success);
+}
+
+.agent-status-pill.error {
+  border-color: rgba(195, 74, 49, 0.22);
+  background: rgba(255, 241, 237, 0.92);
+  color: var(--danger);
+}
+
+.agent-loop-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.metric-card,
+.agent-event-card {
+  padding: 16px;
+  border-radius: 20px;
+  border: 1px solid rgba(210, 198, 182, 0.72);
+  background: rgba(255, 255, 255, 0.8);
+  box-shadow: var(--card-shadow);
+}
+
+.metric-card {
+  display: grid;
+  gap: 8px;
+}
+
+.metric-card span {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+.metric-card strong {
+  font-size: 1rem;
+}
+
+.agent-loop-summary {
+  gap: 8px;
+}
+
+.agent-loop-detail__lists {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.agent-event-card details {
+  margin-top: 12px;
+}
+
+.agent-event-card summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.agent-event-card pre {
+  margin: 12px 0 0;
+  padding: 14px;
+  border-radius: 16px;
+  background: rgba(248, 244, 238, 0.96);
+  border: 1px solid rgba(210, 198, 182, 0.72);
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-size: 0.84rem;
+}
+
 .fresh-up-hero,
 .fresh-up-card,
 .fresh-up-playbook {
@@ -3105,6 +3255,8 @@ button.special-card:hover:not(:disabled) {
   .marketplace-admin__layout,
   .marketplace-admin__two-up,
   .marketplace-helper-actions,
+  .agent-loop-metrics,
+  .agent-loop-detail__lists,
   .marketplace-grid,
   .marketplace-template-grid,
   .note-admin-grid,
@@ -3170,6 +3322,8 @@ button.special-card:hover:not(:disabled) {
   .marketplace-admin__layout,
   .marketplace-admin__two-up,
   .marketplace-helper-actions,
+  .agent-loop-metrics,
+  .agent-loop-detail__lists,
   .note-admin-grid,
   .traffic-entry-grid,
   .traffic-toolbar__controls,
@@ -3215,7 +3369,10 @@ button.special-card:hover:not(:disabled) {
   .admin-danger-zone,
   .fresh-up-card__header,
   .marketplace-admin__header,
-  .marketplace-admin__section-head {
+  .marketplace-admin__section-head,
+  .agent-loop-detail__header,
+  .agent-event-card__top,
+  .agent-run-card__top {
     flex-direction: column;
     align-items: flex-start;
   }

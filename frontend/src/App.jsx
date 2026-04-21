@@ -3,7 +3,9 @@ import {
   apiBase,
   adminLogin,
   assignBdcLead,
+  cancelAgentLoopRun,
   clearBdcHistory,
+  createAgentLoopRun,
   createFreshUpAnalytics,
   createFreshUpLog,
   createBdcAgent,
@@ -13,6 +15,9 @@ import {
   createTrafficPdf,
   deleteServiceDriveTrafficDay,
   generateServiceDrive,
+  getAgentLoopConfig,
+  getAgentLoopRun,
+  getAgentLoopRuns,
   getAdminSalespeople,
   getAdminDaysOff,
   getAdminSession,
@@ -92,6 +97,7 @@ const ADMIN_SECTIONS = [
   { id: "bdcDistribution", label: "Lead Distribution Type" },
   { id: "tabs", label: "Tab Visibility" },
   { id: "freshupLinks", label: "Freshup Links" },
+  { id: "agentLoops", label: "Agent Loops" },
   { id: "marketplace", label: "Marketplace" },
   { id: "quoteRates", label: "Quote Rates" },
   { id: "specials", label: "Specials" },
@@ -1010,6 +1016,24 @@ function TrafficDayPicker({ cells, countsByDate, selectedDate, today, onSelect, 
   );
 }
 
+function agentLoopStatusLabel(status) {
+  const key = String(status || "").toLowerCase();
+  if (key === "queued") return "Queued";
+  if (key === "running") return "Running";
+  if (key === "completed") return "Completed";
+  if (key === "blocked") return "Blocked";
+  if (key === "failed") return "Failed";
+  if (key === "canceled") return "Canceled";
+  return status || "Unknown";
+}
+
+function agentLoopStatusTone(status) {
+  const key = String(status || "").toLowerCase();
+  if (key === "completed") return "success";
+  if (key === "failed" || key === "blocked" || key === "canceled") return "error";
+  return "";
+}
+
 export default function App() {
   const [tab, setTab] = useState(() => initialTabValue());
   const [adminSection, setAdminSection] = useState("staff");
@@ -1055,7 +1079,20 @@ export default function App() {
   const [lastAssignment, setLastAssignment] = useState(null);
   const [adminToken, setAdminToken] = useState(() => localStorage.getItem("dealer_tool_admin") || "");
   const [adminSession, setAdminSession] = useState(null);
-  const [login, setLogin] = useState({ username: "admin", password: "admin123" });
+  const [login, setLogin] = useState({ username: "", password: "" });
+  const [agentLoopConfig, setAgentLoopConfig] = useState({
+    provider: "OpenAI",
+    configured: false,
+    model: "gpt-5.4-mini",
+    reasoning_effort: "low",
+    max_steps: 6,
+    presets: [],
+  });
+  const [agentLoopRuns, setAgentLoopRuns] = useState({ total: 0, entries: [] });
+  const [selectedAgentRunId, setSelectedAgentRunId] = useState(null);
+  const [selectedAgentRun, setSelectedAgentRun] = useState(null);
+  const [agentLoopForm, setAgentLoopForm] = useState({ presetKey: "executive_daily_brief", objective: "" });
+  const [agentLoopFeedback, setAgentLoopFeedback] = useState(null);
   const [salesForm, setSalesForm] = useState(() => emptySalesForm());
   const [bdcForm, setBdcForm] = useState({ name: "", active: true });
   const [notificationConfig, setNotificationConfig] = useState({
@@ -1095,6 +1132,7 @@ export default function App() {
     marketplaceTemplate: false,
     freshUpLinks: false,
     freshUpAnalytics: false,
+    agentLoops: false,
   });
   const [quoteRates, setQuoteRates] = useState([]);
   const [quoteRateDraft, setQuoteRateDraft] = useState({});
@@ -1281,6 +1319,10 @@ export default function App() {
     latestBdcAssignment?.notification_sms_status,
     latestBdcAssignment?.notification_email_status,
   ].filter(Boolean);
+  const agentLoopPresets = agentLoopConfig.presets || [];
+  const selectedAgentLoopPreset =
+    agentLoopPresets.find((item) => item.key === agentLoopForm.presetKey) || agentLoopPresets[0] || null;
+  const selectedAgentLoopIsActive = ["queued", "running"].includes(String(selectedAgentRun?.status || "").toLowerCase());
 
   async function loadAll(nextMonth = month, nextFilters = filters) {
     const [sales, bdc, service, log, report, distribution, undoSettings, tabs] = await Promise.all([
@@ -1429,6 +1471,96 @@ export default function App() {
     }
     const data = await getNotificationConfig(adminToken);
     setNotificationConfig(data);
+  }
+
+  async function refreshAgentLoopConfig() {
+    const data = await getAgentLoopConfig(adminToken);
+    setAgentLoopConfig(data);
+    setResourceLoadState((current) => ({ ...current, agentLoops: true }));
+    setAgentLoopForm((current) => {
+      const presets = data.presets || [];
+      const fallbackPreset = presets[0]?.key || current.presetKey || "executive_daily_brief";
+      const resolvedPreset = presets.find((item) => item.key === current.presetKey) || presets[0] || null;
+      return {
+        presetKey: resolvedPreset?.key || fallbackPreset,
+        objective: current.objective || resolvedPreset?.starter_objective || "",
+      };
+    });
+  }
+
+  async function refreshAgentLoopRuns({ preserveSelection = true } = {}) {
+    const data = await getAgentLoopRuns(adminToken, { limit: 18 });
+    const entries = data.entries || [];
+    setAgentLoopRuns(data);
+    setSelectedAgentRunId((current) => {
+      if (preserveSelection && current && entries.some((item) => item.id === current)) return current;
+      return entries[0]?.id ?? null;
+    });
+    if (!entries.length) {
+      setSelectedAgentRun(null);
+    }
+  }
+
+  async function refreshSelectedAgentLoop(runId = selectedAgentRunId) {
+    if (!runId) {
+      setSelectedAgentRun(null);
+      return;
+    }
+    const detail = await getAgentLoopRun(adminToken, runId);
+    setSelectedAgentRun(detail);
+    setSelectedAgentRunId(detail.id);
+  }
+
+  function applyAgentLoopPreset(nextKey) {
+    const preset =
+      agentLoopPresets.find((item) => item.key === nextKey) ||
+      agentLoopConfig.presets?.find((item) => item.key === nextKey) ||
+      null;
+    setAgentLoopForm({
+      presetKey: nextKey,
+      objective: preset?.starter_objective || "",
+    });
+  }
+
+  async function submitAgentLoop(event) {
+    event.preventDefault();
+    setBusy("agent-loop-run");
+    setAgentLoopFeedback(null);
+    setError("");
+    try {
+      const created = await createAgentLoopRun(adminToken, {
+        preset_key: agentLoopForm.presetKey,
+        objective: agentLoopForm.objective,
+      });
+      setSelectedAgentRun(created);
+      setSelectedAgentRunId(created.id);
+      setAgentLoopFeedback({
+        kind: "success",
+        message: `${created.preset_label} started. The loop will keep updating below while it runs.`,
+      });
+      await refreshAgentLoopRuns({ preserveSelection: true });
+    } catch (errorValue) {
+      setAgentLoopFeedback({ kind: "error", message: errText(errorValue) });
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function cancelCurrentAgentLoop() {
+    if (!selectedAgentRunId) return;
+    setBusy("agent-loop-cancel");
+    setAgentLoopFeedback(null);
+    setError("");
+    try {
+      const canceled = await cancelAgentLoopRun(adminToken, selectedAgentRunId);
+      setSelectedAgentRun(canceled);
+      setAgentLoopFeedback({ kind: "success", message: "The loop was canceled." });
+      await refreshAgentLoopRuns({ preserveSelection: true });
+    } catch (errorValue) {
+      setAgentLoopFeedback({ kind: "error", message: errText(errorValue) });
+    } finally {
+      setBusy("");
+    }
   }
 
   async function submitSmsTest(event) {
@@ -1719,6 +1851,67 @@ export default function App() {
       active = false;
     };
   }, [adminSection, adminSession, adminToken, resourceLoadState.freshUpAnalytics, tab]);
+
+  useEffect(() => {
+    if (resourceLoadState.agentLoops) return;
+    if (!(tab === "admin" && adminSection === "agentLoops" && adminSession)) return;
+    let active = true;
+    const run = async () => {
+      try {
+        const [configData, runsData] = await Promise.all([
+          getAgentLoopConfig(adminToken),
+          getAgentLoopRuns(adminToken, { limit: 18 }),
+        ]);
+        if (!active) return;
+        setAgentLoopConfig(configData);
+        setAgentLoopRuns(runsData);
+        setResourceLoadState((current) => ({ ...current, agentLoops: true }));
+        const presets = configData.presets || [];
+        setAgentLoopForm((current) => {
+          const resolvedPreset = presets.find((item) => item.key === current.presetKey) || presets[0] || null;
+          return {
+            presetKey: resolvedPreset?.key || current.presetKey || "executive_daily_brief",
+            objective: current.objective || resolvedPreset?.starter_objective || "",
+          };
+        });
+        setSelectedAgentRunId((current) => current || runsData.entries?.[0]?.id || null);
+      } catch (errorValue) {
+        if (active) setError(errText(errorValue));
+      }
+    };
+    run();
+    return () => {
+      active = false;
+    };
+  }, [adminSection, adminSession, adminToken, resourceLoadState.agentLoops, tab]);
+
+  useEffect(() => {
+    if (!(tab === "admin" && adminSection === "agentLoops" && adminSession && selectedAgentRunId)) return;
+    let active = true;
+    const run = async () => {
+      try {
+        const detail = await getAgentLoopRun(adminToken, selectedAgentRunId);
+        if (active) setSelectedAgentRun(detail);
+      } catch (errorValue) {
+        if (active) setError(errText(errorValue));
+      }
+    };
+    run();
+    return () => {
+      active = false;
+    };
+  }, [adminSection, adminSession, adminToken, selectedAgentRunId, tab]);
+
+  useEffect(() => {
+    if (!(tab === "admin" && adminSection === "agentLoops" && adminSession && selectedAgentRunId && selectedAgentLoopIsActive)) {
+      return undefined;
+    }
+    const intervalId = window.setInterval(() => {
+      refreshAgentLoopRuns({ preserveSelection: true }).catch(() => {});
+      refreshSelectedAgentLoop(selectedAgentRunId).catch(() => {});
+    }, 4000);
+    return () => window.clearInterval(intervalId);
+  }, [adminSection, adminSession, selectedAgentLoopIsActive, selectedAgentRunId, tab]);
 
   useEffect(() => {
     if (!freshUpCardMode) return;
@@ -5921,6 +6114,243 @@ export default function App() {
                         )})
                       ) : (
                         <div className="empty">No traffic rows have been entered for this day.</div>
+                      )}
+                    </div>
+                  </>
+                ) : null}
+
+                {adminSection === "agentLoops" ? (
+                  <>
+                    <div className="admin-grid agent-loop-grid">
+                      <div className="panel agent-loop-panel">
+                        <span className="eyebrow">Agent orchestration</span>
+                        <h3>Run bounded operator loops against live store data</h3>
+                        <p className="admin-note">
+                          These loops use OpenAI to inspect BDC, freshups, service traffic, notes, quote rates, and the marketplace template.
+                          Every run stays bounded, persists its own event history, and can be reviewed or canceled from here.
+                        </p>
+                        <div className={`notice ${agentLoopConfig.configured ? "success" : "error"}`}>
+                          {agentLoopConfig.configured
+                            ? `${agentLoopConfig.provider} is configured with ${agentLoopConfig.model} at ${agentLoopConfig.reasoning_effort} reasoning. Each run gets up to ${agentLoopConfig.max_steps} tool steps.`
+                            : "Set OPENAI_API_KEY on the backend before running agent loops."}
+                        </div>
+                        <form className="form" onSubmit={submitAgentLoop}>
+                          <label>
+                            <span>Preset</span>
+                            <select
+                              value={agentLoopForm.presetKey}
+                              onChange={(event) => applyAgentLoopPreset(event.target.value)}
+                            >
+                              {agentLoopPresets.map((preset) => (
+                                <option key={preset.key} value={preset.key}>
+                                  {preset.label}
+                                </option>
+                              ))}
+                            </select>
+                          </label>
+                          {selectedAgentLoopPreset ? (
+                            <div className="asset-card">
+                              <strong>{selectedAgentLoopPreset.label}</strong>
+                              <p>{selectedAgentLoopPreset.description}</p>
+                            </div>
+                          ) : null}
+                          <label>
+                            <span>Objective</span>
+                            <textarea
+                              rows={6}
+                              value={agentLoopForm.objective}
+                              onChange={(event) =>
+                                setAgentLoopForm((current) => ({ ...current, objective: event.target.value }))
+                              }
+                              placeholder="Tell the loop exactly what to analyze or optimize."
+                            />
+                          </label>
+                          <div className="controls">
+                            <button type="submit" disabled={busy === "agent-loop-run" || !agentLoopConfig.configured}>
+                              {busy === "agent-loop-run" ? "Starting..." : "Run Agent Loop"}
+                            </button>
+                            <button
+                              type="button"
+                              className="secondary"
+                              onClick={async () => {
+                                try {
+                                  await refreshAgentLoopConfig();
+                                  await refreshAgentLoopRuns({ preserveSelection: true });
+                                  if (selectedAgentRunId) await refreshSelectedAgentLoop(selectedAgentRunId);
+                                } catch (errorValue) {
+                                  setError(errText(errorValue));
+                                }
+                              }}
+                            >
+                              Refresh
+                            </button>
+                            {selectedAgentLoopIsActive ? (
+                              <button
+                                type="button"
+                                className="secondary"
+                                onClick={cancelCurrentAgentLoop}
+                                disabled={busy === "agent-loop-cancel"}
+                              >
+                                {busy === "agent-loop-cancel" ? "Canceling..." : "Cancel Selected Run"}
+                              </button>
+                            ) : null}
+                          </div>
+                        </form>
+                        {agentLoopFeedback ? (
+                          <div className={`notice ${agentLoopFeedback.kind}`}>{agentLoopFeedback.message}</div>
+                        ) : null}
+                      </div>
+
+                      <div className="panel agent-loop-panel">
+                        <div className="row">
+                          <div>
+                            <span className="eyebrow">Run history</span>
+                            <h3>Latest agent loops</h3>
+                          </div>
+                          <small>{agentLoopRuns.total} total recorded</small>
+                        </div>
+                        <div className="agent-run-list">
+                          {agentLoopRuns.entries.length ? (
+                            agentLoopRuns.entries.map((run) => (
+                              <button
+                                key={`agent-run-${run.id}`}
+                                type="button"
+                                className={`agent-run-card ${selectedAgentRunId === run.id ? "is-active" : ""}`}
+                                onClick={() => setSelectedAgentRunId(run.id)}
+                              >
+                                <div className="agent-run-card__top">
+                                  <strong>{run.preset_label}</strong>
+                                  <span className={`agent-status-pill ${agentLoopStatusTone(run.status)}`}>
+                                    {agentLoopStatusLabel(run.status)}
+                                  </span>
+                                </div>
+                                <small>
+                                  {dateTimeLabel(run.created_at)} · {run.total_steps} steps
+                                </small>
+                                <p>{run.objective}</p>
+                              </button>
+                            ))
+                          ) : (
+                            <div className="empty">No agent loops have been run yet.</div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="panel agent-loop-detail">
+                      {selectedAgentRun ? (
+                        <>
+                          <div className="agent-loop-detail__header">
+                            <div>
+                              <span className="eyebrow">Selected run</span>
+                              <h3>{selectedAgentRun.preset_label}</h3>
+                              <p className="admin-note">{selectedAgentRun.objective}</p>
+                            </div>
+                            <span className={`agent-status-pill ${agentLoopStatusTone(selectedAgentRun.status)}`}>
+                              {agentLoopStatusLabel(selectedAgentRun.status)}
+                            </span>
+                          </div>
+
+                          <div className="agent-loop-metrics">
+                            <div className="metric-card">
+                              <span>Created</span>
+                              <strong>{dateTimeLabel(selectedAgentRun.created_at)}</strong>
+                            </div>
+                            <div className="metric-card">
+                              <span>Model</span>
+                              <strong>{selectedAgentRun.model}</strong>
+                            </div>
+                            <div className="metric-card">
+                              <span>Reasoning</span>
+                              <strong>{selectedAgentRun.reasoning_effort}</strong>
+                            </div>
+                            <div className="metric-card">
+                              <span>Steps</span>
+                              <strong>{selectedAgentRun.total_steps}</strong>
+                            </div>
+                          </div>
+
+                          {selectedAgentRun.summary ? (
+                            <div className="marketplace-callout agent-loop-summary">
+                              <strong>Summary</strong>
+                              <span>{selectedAgentRun.summary}</span>
+                            </div>
+                          ) : null}
+
+                          {selectedAgentRun.latest_thinking ? (
+                            <div className="asset-card">
+                              <strong>Latest thinking</strong>
+                              <p>{selectedAgentRun.latest_thinking}</p>
+                            </div>
+                          ) : null}
+
+                          {selectedAgentRun.error_message ? (
+                            <div className="notice error">{selectedAgentRun.error_message}</div>
+                          ) : null}
+
+                          <div className="agent-loop-detail__lists">
+                            <div>
+                              <span className="eyebrow">High priority actions</span>
+                              {selectedAgentRun.high_priority_actions.length ? (
+                                <ul className="feature-list">
+                                  {selectedAgentRun.high_priority_actions.map((item, index) => (
+                                    <li key={`agent-action-${index}`}>{item}</li>
+                                  ))}
+                                </ul>
+                              ) : (
+                                <p className="admin-note">No final actions have been recorded yet.</p>
+                              )}
+                            </div>
+                            <div>
+                              <span className="eyebrow">Observations</span>
+                              {selectedAgentRun.observations.length ? (
+                                <ul className="feature-list">
+                                  {selectedAgentRun.observations.map((item, index) => (
+                                    <li key={`agent-observation-${index}`}>{item}</li>
+                                  ))}
+                                </ul>
+                              ) : (
+                                <p className="admin-note">No extra observations were saved on this run.</p>
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="agent-loop-events">
+                            <div className="row">
+                              <div>
+                                <span className="eyebrow">Event timeline</span>
+                                <h4>Stored loop trace</h4>
+                              </div>
+                              <small>{selectedAgentRun.events.length} events loaded</small>
+                            </div>
+                            {selectedAgentRun.events.length ? (
+                              selectedAgentRun.events.map((event) => (
+                                <article key={`agent-event-${event.id}`} className="agent-event-card">
+                                  <div className="agent-event-card__top">
+                                    <div>
+                                      <strong>{event.title}</strong>
+                                      <small>
+                                        Step {event.step_index} · {dateTimeLabel(event.created_at)}
+                                      </small>
+                                    </div>
+                                    <span className="eyebrow">{event.event_type}</span>
+                                  </div>
+                                  {event.content ? <p>{event.content}</p> : null}
+                                  {Object.keys(event.payload || {}).length ? (
+                                    <details>
+                                      <summary>Payload</summary>
+                                      <pre>{JSON.stringify(event.payload, null, 2)}</pre>
+                                    </details>
+                                  ) : null}
+                                </article>
+                              ))
+                            ) : (
+                              <div className="empty">No events were recorded for this run yet.</div>
+                            )}
+                          </div>
+                        </>
+                      ) : (
+                        <div className="empty">Pick a run from the history to inspect the loop trace.</div>
                       )}
                     </div>
                   </>

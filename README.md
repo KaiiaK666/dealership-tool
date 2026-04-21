@@ -62,6 +62,10 @@ Backend:
 - `DEALER_ADMIN_USERNAME`
 - `DEALER_ADMIN_PASSWORD`
 - `DEALER_CORS_ORIGINS`
+- `OPENAI_API_KEY` for Agent Loops
+- `OPENAI_AGENT_MODEL` optional, defaults to `gpt-5.4-mini`
+- `OPENAI_AGENT_REASONING_EFFORT` optional, defaults to `low`
+- `OPENAI_AGENT_MAX_STEPS` optional, defaults to `6`
 
 Frontend:
 
@@ -73,6 +77,9 @@ Frontend:
 - `VITE_API_BASE=https://your-api-service.onrender.com`
 - `VITE_TRAFFIC_URL=https://traffic.yourdomain.com`
 - `DEALER_CORS_ORIGINS=https://your-frontend-service.onrender.com,https://yourdomain.com,https://www.yourdomain.com`
+- `OPENAI_AGENT_MODEL=gpt-5.4-mini`
+- `OPENAI_AGENT_REASONING_EFFORT=low`
+- `OPENAI_AGENT_MAX_STEPS=6`
 
 The frontend also auto-detects these common production hosts without another code change:
 
