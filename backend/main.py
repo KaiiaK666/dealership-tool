@@ -2473,9 +2473,39 @@ def latest_special_feed_import_ts(source_key: str) -> float:
     return float((row or {}).get("imported_ts") or 0.0)
 
 
+def special_source_requires_refresh(source_key: str) -> bool:
+    rows = db_query_all(
+        """
+        SELECT badge, subtitle, note
+        FROM special_feed_entries
+        WHERE source_key = ?
+        ORDER BY id DESC
+        LIMIT 12
+        """,
+        (source_key,),
+    )
+    if not rows:
+        return True
+    if source_key == "mazda_new":
+        for row in rows:
+            badge = collapse_whitespace(str(row.get("badge") or "")).lower()
+            subtitle = collapse_whitespace(str(row.get("subtitle") or "")).lower()
+            note = collapse_whitespace(str(row.get("note") or "")).lower()
+            if "new pick" in badge or "inventory" in subtitle or "inventory" in note:
+                return True
+    return False
+
+
 def maybe_auto_refresh_special_sources() -> None:
     now_ts = time.time()
     for source_key in ("kia_new", "mazda_new", "used_srp"):
+        if special_source_requires_refresh(source_key):
+            try:
+                import_auto_vehicle_special_source(source_key)
+            except Exception:
+                continue
+            else:
+                continue
         imported_ts = latest_special_feed_import_ts(source_key)
         if imported_ts and (now_ts - imported_ts) < SPECIALS_AUTO_REFRESH_SECONDS:
             continue
