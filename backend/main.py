@@ -112,14 +112,13 @@ BDC_SALES_TRACKER_DEFAULT_SOLD_FROM_APPOINTMENTS_RATE_FLOOR = 0.10
 BDC_SALES_TRACKER_DEFAULT_SOLD_FROM_APPOINTMENTS_RATE_TARGET = 0.15
 BDC_SALES_TRACKER_DEFAULT_SOLD_FROM_APPOINTMENTS_RATE_CEILING = 0.18
 SPECIALS_KIA_NEW_URL = "https://www.bertogdenmissionkia.com/new-specials/"
-SPECIALS_MAZDA_NEW_URL = "https://www.bertogdenmissionmazda.com/new-vehicles/"
+SPECIALS_MAZDA_NEW_URL = "https://www.bertogdenmissionmazda.com/new-specials/"
 SPECIALS_AUTO_OUTLET_URL = "https://www.bertogdenmissionautooutlet.com/"
 SPECIALS_KIA_JIRA_ID = "OGDENMIKIA"
+SPECIALS_MAZDA_JIRA_ID = "OGDENMISSI"
 SPECIALS_KIA_OFFERS_JS_URL = "https://d2dhakgqu1upap.cloudfront.net/specials/offers.js"
 SPECIALS_KIA_DEFAULT_PAGE_ID = "66e84f5a02b762a019f35dfb"
-SPECIALS_MAZDA_ALGOLIA_APP_ID = "1WNYBZLEEN"
-SPECIALS_MAZDA_ALGOLIA_SEARCH_KEY = "e2acb682178e9dcc22d18ecb2ff7d9e4"
-SPECIALS_MAZDA_ALGOLIA_INVENTORY_INDEX = "bertogdenmazdamission_production_inventory"
+SPECIALS_MAZDA_DEFAULT_PAGE_ID = "66e8435502b762a019df98a5"
 SPECIALS_AUTO_OUTLET_ALGOLIA_APP_ID = "EHWUW84XVK"
 SPECIALS_AUTO_OUTLET_ALGOLIA_SEARCH_KEY = "fb58227032e79f03b9b820cbaea7f8fb"
 SPECIALS_AUTO_OUTLET_ALGOLIA_INVENTORY_INDEX = "bertogdenpreownedmission-wpml0422_production_inventory"
@@ -133,7 +132,7 @@ SPECIALS_SOURCE_DEFINITIONS: Dict[str, Dict[str, str]] = {
     "mazda_new": {
         "label": "Mazda Monthly Specials",
         "default_url": SPECIALS_MAZDA_NEW_URL,
-        "category": "new_inventory",
+        "category": "new_specials",
     },
     "used_srp": {
         "label": "Mission Auto Outlet Top Picks",
@@ -2038,7 +2037,7 @@ def format_currency_short(value: float) -> str:
 def extract_special_end_label(*values: Any) -> str:
     for value in values:
         text = str(value or "")
-        match = re.search(r"\b(\d{2}/\d{2}/\d{4})\b", text)
+        match = re.search(r"\b(\d{1,2}/\d{1,2}/\d{4})\b", text)
         if match:
             return match.group(1)
     return ""
@@ -2073,10 +2072,34 @@ def summarize_kia_special_terms(disclaimer: str) -> Tuple[str, str, str, str]:
     return summary_line, chip_line, note_line, score_label
 
 
-def kia_specials_feed_url(page_id: str, source_url: str) -> str:
+def summarize_mazda_special_terms(disclaimer: str) -> Tuple[str, str, str, str]:
+    text = collapse_whitespace(disclaimer)
+    apr_match = re.search(r"(\d+(?:\.\d+)?)%\s*(?:Annual Percentage Rate\s*\(APR\)|APR)", text, re.IGNORECASE)
+    term_match = re.search(r"(\d+)\s*months?\s+at\s+\$([\d,.]+)\s*per month per \$1000 financed", text, re.IGNORECASE)
+    end_label = extract_special_end_label(text)
+
+    apr_text = ""
+    if apr_match and term_match:
+        apr_text = f"{apr_match.group(1)}% APR / {term_match.group(1)} mos"
+    elif apr_match:
+        apr_text = f"{apr_match.group(1)}% APR"
+
+    summary_line = apr_text or "Official Mazda monthly special"
+    chip_line = f"Ends {end_label}" if end_label else "Mazda monthly special"
+    note_line = "Image tile shows the live APR or lease offer from the Mazda specials page."
+    score_label = apr_text or "Mazda special"
+    return summary_line, chip_line, note_line, score_label
+
+
+def extract_special_page_id(page_html: str) -> str:
+    match = re.search(r'class=["\']nepenthe-new-specials["\'][^>]*data-pageid=["\']([^"\']+)["\']', page_html, re.IGNORECASE)
+    return match.group(1).strip() if match else ""
+
+
+def manufacturer_specials_feed_url(*, jira_id: str, page_id: str, source_url: str) -> str:
     params = urllib.parse.urlencode(
         {
-            "jira_id": SPECIALS_KIA_JIRA_ID,
+            "jira_id": jira_id,
             "type": "new_car",
             "time": datetime.utcnow().isoformat() + "Z",
             "url": source_url,
@@ -2086,15 +2109,21 @@ def kia_specials_feed_url(page_id: str, source_url: str) -> str:
     return f"{SPECIALS_KIA_OFFERS_JS_URL}?{params}"
 
 
+def kia_specials_feed_url(page_id: str, source_url: str) -> str:
+    return manufacturer_specials_feed_url(jira_id=SPECIALS_KIA_JIRA_ID, page_id=page_id, source_url=source_url)
+
+
+def mazda_specials_feed_url(page_id: str, source_url: str) -> str:
+    return manufacturer_specials_feed_url(jira_id=SPECIALS_MAZDA_JIRA_ID, page_id=page_id, source_url=source_url)
+
+
 def build_kia_special_import(source_url: str) -> VehicleSpecialImportIn:
     candidate_page_ids = [SPECIALS_KIA_DEFAULT_PAGE_ID]
     try:
         page_html = browser_fetch_text(source_url)
-        page_match = re.search(r'class=["\']nepenthe-new-specials["\'][^>]*data-pageid=["\']([^"\']+)["\']', page_html, re.IGNORECASE)
-        if page_match:
-            page_id = page_match.group(1).strip()
-            if page_id and page_id not in candidate_page_ids:
-                candidate_page_ids.insert(0, page_id)
+        page_id = extract_special_page_id(page_html)
+        if page_id and page_id not in candidate_page_ids:
+            candidate_page_ids.insert(0, page_id)
     except HTTPException:
         page_html = ""
 
@@ -2175,124 +2204,98 @@ def build_kia_special_import(source_url: str) -> VehicleSpecialImportIn:
     return VehicleSpecialImportIn(source_key="kia_new", source_url=source_url, entries=entries)
 
 
-def extract_mvn_algolia_settings(page_html: str) -> Dict[str, Any]:
-    match = re.search(r"var mvnAlgSettings = (\{.*?\});", page_html, re.DOTALL)
-    if not match:
-        raise HTTPException(status_code=502, detail="Could not find the Mazda inventory search settings on the page")
-    try:
-        parsed = json.loads(match.group(1))
-    except json.JSONDecodeError as exc:
-        raise HTTPException(status_code=502, detail="Mazda inventory settings returned invalid JSON") from exc
-    if not isinstance(parsed, dict):
-        raise HTTPException(status_code=502, detail="Mazda inventory settings returned an unexpected payload")
-    return parsed
-
-
 def build_mazda_special_import(source_url: str) -> VehicleSpecialImportIn:
-    app_id = SPECIALS_MAZDA_ALGOLIA_APP_ID
-    api_key = SPECIALS_MAZDA_ALGOLIA_SEARCH_KEY
-    inventory_index = SPECIALS_MAZDA_ALGOLIA_INVENTORY_INDEX
+    candidate_page_ids = [SPECIALS_MAZDA_DEFAULT_PAGE_ID]
     try:
         page_html = browser_fetch_text(source_url)
-        settings = extract_mvn_algolia_settings(page_html)
-        page_app_id = str(settings.get("appId") or "").strip()
-        page_api_key = str(settings.get("apiKeySearch") or "").strip()
-        page_inventory_index = str(settings.get("inventoryIndex") or "").strip()
-        if page_app_id and page_api_key and page_inventory_index:
-            app_id = page_app_id
-            api_key = page_api_key
-            inventory_index = page_inventory_index
+        page_id = extract_special_page_id(page_html)
+        if page_id and page_id not in candidate_page_ids:
+            candidate_page_ids.insert(0, page_id)
     except HTTPException:
-        pass
-    if not app_id or not api_key or not inventory_index:
-        raise HTTPException(status_code=502, detail="Mazda inventory search settings are missing required values")
+        page_html = ""
 
-    algolia_url = f"https://{app_id}-dsn.algolia.net/1/indexes/{inventory_index}/query"
-    algolia_headers = {
-        "X-Algolia-Application-Id": app_id,
-        "X-Algolia-API-Key": api_key,
-        "Content-Type": "application/json",
-        "Origin": "https://www.bertogdenmissionmazda.com",
-        "Referer": source_url,
-    }
-    algolia_payload = {
-        "query": "",
-        "hitsPerPage": 36,
-        "filters": "type:New",
-    }
-    result = browser_fetch_json(algolia_url, method="POST", headers=algolia_headers, json_payload=algolia_payload)
-    hits = result.get("hits") or []
-    if not hits:
-        raise HTTPException(status_code=502, detail="Mazda inventory search returned no vehicles")
-
-    candidates: List[Tuple[float, float, Dict[str, Any]]] = []
-    for hit in hits:
-        if not isinstance(hit, dict):
+    feed: Dict[str, Any] = {}
+    last_error: Optional[HTTPException] = None
+    for page_id in candidate_page_ids:
+        try:
+            feed = browser_fetch_json(mazda_specials_feed_url(page_id, source_url))
+            if feed.get("groups"):
+                break
+        except HTTPException as exc:
+            last_error = exc
             continue
-        title = collapse_whitespace(
-            " ".join(
-                [
-                    str(hit.get("year") or "").strip(),
-                    str(hit.get("make") or "").strip(),
-                    str(hit.get("model") or "").strip(),
-                    str(hit.get("trim") or "").strip(),
-                ]
-            )
-        )
-        link_url = str(hit.get("link") or "").strip()
-        image_url = str(hit.get("thumbnail") or "").strip()
-        if not title or not link_url or not image_url:
-            continue
-        msrp_value = numeric_token_from_text(str(hit.get("msrp") or ""))
-        our_price_value = numeric_token_from_text(str(hit.get("our_price") or ""))
-        savings_value = max(0.0, msrp_value - our_price_value) if msrp_value and our_price_value else 0.0
-        savings_pct = (savings_value / msrp_value) if msrp_value else 0.0
-        candidates.append((savings_value, savings_pct, hit))
+    if not feed.get("groups"):
+        if last_error:
+            raise last_error
+        raise HTTPException(status_code=502, detail="Mazda specials feed returned no groups")
 
-    if not candidates:
-        raise HTTPException(status_code=502, detail="Mazda inventory search returned no usable vehicles")
-
-    candidates.sort(key=lambda item: (-item[0], -item[1], numeric_token_from_text(str(item[2].get("our_price") or ""))))
     entries: List[VehicleSpecialImportEntryIn] = []
-    for savings_value, _, hit in candidates[:16]:
-        title = collapse_whitespace(
-            " ".join(
-                [
-                    str(hit.get("year") or "").strip(),
-                    str(hit.get("make") or "").strip(),
-                    str(hit.get("model") or "").strip(),
-                    str(hit.get("trim") or "").strip(),
-                ]
+    seen_links: set[str] = set()
+    now_ts = time.time()
+    groups = feed.get("groups") or []
+    for group in groups:
+        for special in group.get("specials") or []:
+            if special.get("deleted") or not special.get("enabled", True):
+                continue
+            dates = special.get("dates") or {}
+            start_at = parse_remote_iso_datetime(dates.get("start"))
+            end_at = parse_remote_iso_datetime(dates.get("end"))
+            if start_at and start_at.timestamp() > now_ts:
+                continue
+            if end_at and end_at.timestamp() < now_ts:
+                continue
+
+            car = special.get("car") or {}
+            title = collapse_whitespace(
+                " ".join(
+                    [
+                        str(car.get("year") or "").strip(),
+                        str(car.get("make") or "").strip(),
+                        str(car.get("model") or "").strip(),
+                        str(car.get("trim") or "").strip(),
+                    ]
+                )
             )
-        )
-        ext_color = collapse_whitespace(hit.get("ext_color") or "")
-        int_color = collapse_whitespace(hit.get("int_color") or "")
-        drivetrain = collapse_whitespace(hit.get("drivetrain") or "")
-        subtitle_parts = [part for part in (ext_color, int_color, drivetrain) if part]
-        price_value = numeric_token_from_text(str(hit.get("our_price") or ""))
-        msrp_value = numeric_token_from_text(str(hit.get("msrp") or ""))
-        mileage_value = numeric_token_from_text(str(hit.get("miles") or ""))
-        payment_text = f"Save {format_currency_short(savings_value)} vs MSRP" if savings_value > 0 else "Current new-inventory pick"
-        note_parts = []
-        if msrp_value:
-            note_parts.append(f"MSRP {format_currency_short(msrp_value)}")
-        stock_number = collapse_whitespace(hit.get("stock") or "")
-        if stock_number:
-            note_parts.append(f"Stock {stock_number}")
-        entries.append(
-            VehicleSpecialImportEntryIn(
-                badge="Mazda New Pick",
-                title=title,
-                subtitle=" • ".join(subtitle_parts) if subtitle_parts else "Live Mazda new-inventory highlight",
-                price_text=f"Bert Ogden Price {format_currency_short(price_value)}" if price_value else "",
-                payment_text=payment_text,
-                mileage_text=f"{int(mileage_value):,} miles" if mileage_value else "",
-                note=" • ".join(note_parts) if note_parts else "Imported from the live Mazda new inventory feed.",
-                score_label=payment_text if savings_value > 0 else "Live pick",
-                image_url=str(hit.get("thumbnail") or "").strip(),
-                link_url=str(hit.get("link") or "").strip(),
+            if not title:
+                continue
+
+            button_url = ""
+            for button in special.get("buttons") or []:
+                candidate = str(button.get("url") or "").strip()
+                if candidate.startswith("http"):
+                    button_url = candidate
+                    break
+
+            image_url = str(special.get("image") or special.get("header_image") or "").strip()
+            if not image_url:
+                continue
+
+            dedupe_key = f"{title.lower()}::{button_url.lower()}"
+            if dedupe_key in seen_links:
+                continue
+            seen_links.add(dedupe_key)
+
+            disclaimer = collapse_whitespace(special.get("disclaimer") or "")
+            summary_line, chip_line, note_line, score_label = summarize_mazda_special_terms(disclaimer)
+            evergreen = special.get("evergreen") or {}
+            entries.append(
+                VehicleSpecialImportEntryIn(
+                    badge="Mazda Monthly Special",
+                    title=title,
+                    subtitle=collapse_whitespace(
+                        evergreen.get("description") or special.get("description") or "Live Mazda lease and APR special"
+                    ),
+                    price_text=summary_line,
+                    payment_text=chip_line,
+                    mileage_text="",
+                    note=note_line,
+                    score_label=score_label,
+                    image_url=image_url,
+                    link_url=button_url or source_url,
+                )
             )
-        )
+    if not entries:
+        raise HTTPException(status_code=502, detail="Mazda specials feed returned no active offers")
     return VehicleSpecialImportIn(source_key="mazda_new", source_url=source_url, entries=entries)
 
 
