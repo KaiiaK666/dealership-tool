@@ -3903,6 +3903,78 @@ def find_matching_bdc_sales_tracker_entry(
     return None
 
 
+def find_bdc_sales_tracker_entry_by_dms(
+    month_key: str,
+    dms_number: str,
+    exclude_entry_id: Optional[int] = None,
+) -> Optional[Dict[str, Any]]:
+    if not dms_number:
+        return None
+    params: List[Any] = [month_key, dms_number]
+    exclude_sql = ""
+    if exclude_entry_id is not None:
+        exclude_sql = " AND id != ?"
+        params.append(int(exclude_entry_id))
+    return db_query_one(
+        f"""
+        SELECT *
+        FROM bdc_sales_tracker_entries
+        WHERE month_key = ? AND LOWER(dms_number) = LOWER(?) {exclude_sql}
+        ORDER BY updated_ts DESC, id DESC
+        LIMIT 1
+        """,
+        tuple(params),
+    )
+
+
+def find_bdc_sales_tracker_dms_log_by_dms(
+    month_key: str,
+    dms_number: str,
+    exclude_log_id: Optional[int] = None,
+) -> Optional[Dict[str, Any]]:
+    if not dms_number:
+        return None
+    params: List[Any] = [month_key, dms_number]
+    exclude_sql = ""
+    if exclude_log_id is not None:
+        exclude_sql = " AND id != ?"
+        params.append(int(exclude_log_id))
+    return db_query_one(
+        f"""
+        SELECT *
+        FROM bdc_sales_tracker_dms_log
+        WHERE month_key = ? AND LOWER(dms_number) = LOWER(?) {exclude_sql}
+        ORDER BY updated_ts DESC, id DESC
+        LIMIT 1
+        """,
+        tuple(params),
+    )
+
+
+def ensure_unique_bdc_sales_tracker_dms(
+    month_key: str,
+    dms_number: str,
+    *,
+    exclude_entry_id: Optional[int] = None,
+    exclude_log_id: Optional[int] = None,
+) -> None:
+    dms_value = normalize_short_text(dms_number, "dms_number", max_len=80)
+    if not dms_value:
+        return
+    existing_entry = find_bdc_sales_tracker_entry_by_dms(month_key, dms_value, exclude_entry_id=exclude_entry_id)
+    if existing_entry:
+        raise HTTPException(
+            status_code=400,
+            detail=f"DMS number {dms_value} is already tracked under {str(existing_entry.get('agent_name') or 'another agent')}",
+        )
+    existing_log = find_bdc_sales_tracker_dms_log_by_dms(month_key, dms_value, exclude_log_id=exclude_log_id)
+    if existing_log:
+        raise HTTPException(
+            status_code=400,
+            detail=f"DMS number {dms_value} is already logged under {str(existing_log.get('apt_set_under') or 'the DMS log')}",
+        )
+
+
 def upsert_bdc_sales_tracker_focus_note(payload: BdcSalesTrackerFocusNoteIn) -> BdcSalesTrackerOut:
     month_key = parse_month_key(payload.month)
     focus_key = normalize_tracker_focus_key(payload.focus_key)
@@ -4159,6 +4231,8 @@ def create_bdc_sales_tracker_entry(payload: BdcSalesTrackerEntryIn) -> BdcSalesT
     ) or {}
     display_order = int(order_row.get("max_order") or -1) + 1
     rows_to_insert = dms_numbers or [""]
+    for dms_number in rows_to_insert:
+        ensure_unique_bdc_sales_tracker_dms(month_key, dms_number)
     for index, dms_number in enumerate(rows_to_insert):
         db_insert(
             """
@@ -4199,6 +4273,7 @@ def update_bdc_sales_tracker_entry(entry_id: int, payload: BdcSalesTrackerEntryU
     notes = normalize_notes(payload.notes, "notes", max_len=1000)
     if not dms_number and not profile_name and not customer_phone and not notes:
         raise HTTPException(status_code=400, detail="enter a customer, phone, DMS number, or note")
+    ensure_unique_bdc_sales_tracker_dms(str(row.get("month_key") or ""), dms_number, exclude_entry_id=int(entry_id))
     sold = bool(payload.sold)
     now_ts = time.time()
     now_at = now_iso()
@@ -4255,6 +4330,7 @@ def create_bdc_sales_tracker_dms_log_entry(payload: BdcSalesTrackerDmsLogEntryIn
     customer_name, opportunity_id, dms_number = parse_bdc_sales_tracker_log_identity(payload.customer_name)
     apt_set_under = normalize_short_text(payload.apt_set_under, "apt_set_under", max_len=120)
     notes = normalize_notes(payload.notes, "notes", max_len=1000)
+    ensure_unique_bdc_sales_tracker_dms(month_key, dms_number)
     now_ts = time.time()
     now_at = now_local_input_value()
     db_insert(
@@ -4309,6 +4385,7 @@ def update_bdc_sales_tracker_dms_log_entry(entry_id: int, payload: BdcSalesTrack
     notes = normalize_notes(payload.notes, "notes", max_len=1000)
     if not customer_name:
         raise HTTPException(status_code=400, detail="customer_name is required")
+    ensure_unique_bdc_sales_tracker_dms(str(row.get("month_key") or ""), dms_number, exclude_log_id=int(entry_id))
     logged = bool(payload.logged)
     now_ts = time.time()
     now_at = now_local_input_value()
@@ -4374,6 +4451,13 @@ def mark_bdc_sales_tracker_dms_log_entry_sold(entry_id: int) -> BdcSalesTrackerO
         raise HTTPException(status_code=400, detail="Apt Set Under must match an active BDC agent before marking sold")
 
     tracker_notes = merge_bdc_sales_tracker_notes(f"Opp ID {opportunity_id}" if opportunity_id else "", notes)
+    if dms_number:
+        global_entry = find_bdc_sales_tracker_entry_by_dms(month_key, dms_number)
+        if global_entry and int(global_entry.get("agent_id") or 0) != int(agent_id):
+            raise HTTPException(
+                status_code=400,
+                detail=f"DMS number {dms_number} is already tracked under {str(global_entry.get('agent_name') or 'another agent')}",
+            )
     existing_entry = find_matching_bdc_sales_tracker_entry(month_key, int(agent_id), customer_name, dms_number)
     tracker_now_ts = time.time()
     tracker_now_at = now_iso()

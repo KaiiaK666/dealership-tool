@@ -5446,14 +5446,14 @@ export default function App() {
                   </span>
                   <span className="bdc-sales-meta-chip">
                     {selectedTrackerAgent
-                      ? `${selectedTrackerPendingCount} pending / ${selectedTrackerConfirmedCount} green confirmed`
+                      ? `${selectedTrackerPendingCount} pending / ${selectedTrackerConfirmedCount} apt sold`
                       : "Tracker narrows to one agent at a time"}
                   </span>
                   <span className="bdc-sales-meta-chip">
                     {trackerDaysWorked} worked / {trackerDaysLeft} left
                   </span>
                   <span className="bdc-sales-meta-chip">
-                    {selectedTrackerIsKai ? "Kai can open DMS Log too" : "Agents only need Tracker"}
+                    {selectedTrackerIsKai ? "Kai can open DMS Log too" : "Only Kai sees DMS Log"}
                   </span>
                   <span className="bdc-sales-meta-chip">Each month starts a new sheet</span>
                 </div>
@@ -5528,29 +5528,33 @@ export default function App() {
                     )}
                   </div>
                 </div>
-                <div className="bdc-sales-workspace-panel__stats">
-                  <span>
-                    <b>{selectedTrackerExpectedCount}</b>
-                    Expected
-                  </span>
-                  <span>
-                    <b>{selectedTrackerPendingCount}</b>
-                    Pending
-                  </span>
-                  <span>
-                    <b>{selectedTrackerConfirmedCount}</b>
-                    Green
-                  </span>
-                  <span>
-                    <b>{selectedTrackerActualSold}</b>
-                    Apt sold
-                  </span>
-                </div>
+                {selectedTrackerAgent ? (
+                  <div className="bdc-sales-workspace-panel__stats">
+                    <span>
+                      <b>{selectedTrackerExpectedCount}</b>
+                      Expected
+                    </span>
+                    <span>
+                      <b>{selectedTrackerPendingCount}</b>
+                      Pending
+                    </span>
+                    <span>
+                      <b>{selectedTrackerConfirmedCount}</b>
+                      Apt sold
+                    </span>
+                    <span>
+                      <b>{selectedTrackerActualSold}</b>
+                      Manual sold
+                    </span>
+                  </div>
+                ) : null}
               </div>
             </div>
 
             {bdcSalesTrackerView === "tracker" ? (
               <>
+                {selectedTrackerAgent ? (
+                  <>
                 <div className={`panel bdc-sales-workspace-panel ${selectedTrackerAgent ? "is-agent-selected" : "is-team-view"}`}>
                   <div className="bdc-sales-workspace-panel__header">
                     <div>
@@ -5616,11 +5620,11 @@ export default function App() {
                             </span>
                             <span>
                               <b>{selectedTrackerConfirmedCount}</b>
-                              Green
+                              Apt sold
                             </span>
                             <span>
                               <b>{selectedTrackerActualSold}</b>
-                              Apt sold
+                              Manual sold
                             </span>
                           </div>
                         ) : null}
@@ -5644,7 +5648,7 @@ export default function App() {
                                 : "Add customer, phone, optional DMS, and note"}
                             </span>
                             <span className="bdc-sales-entry-sheet__chip is-pending">
-                              Grey rows are expected sales. Only admin turns them green after Reynolds confirms payroll.
+                              Grey rows are expected sales. Green rows are the apt sold rows once Reynolds confirms payroll.
                             </span>
                           </div>
                           <div className="bdc-sales-workspace-panel__quick-grid">
@@ -5730,7 +5734,7 @@ export default function App() {
                         <span className="eyebrow">Tracker worksheet</span>
                         <h3>{selectedTrackerAgent.agent_name}'s expected sales sheet</h3>
                         <p className="admin-note">
-                          Grey rows are what the agent believes should turn into a sale. Green rows are the ones already matched
+                          Grey rows are what the agent believes should turn into a sale. Green rows are the apt sold rows already matched
                           in Reynolds by admin for payroll.
                         </p>
                       </div>
@@ -5749,11 +5753,11 @@ export default function App() {
                         <strong>{selectedTrackerPendingCount}</strong>
                       </div>
                       <div className="bdc-sales-agent-card__summary-stat">
-                        <span>Green confirmed</span>
+                        <span>Apt sold (green)</span>
                         <strong>{selectedTrackerConfirmedCount}</strong>
                       </div>
                       <div className="bdc-sales-agent-card__summary-stat">
-                        <span>Actual apt sold</span>
+                        <span>Manual sold report</span>
                         <strong>{selectedTrackerActualSold}</strong>
                       </div>
                     </div>
@@ -5807,7 +5811,7 @@ export default function App() {
                             />
                           </label>
                           <label>
-                            <span>Apt Sold</span>
+                            <span>Manual sold report</span>
                             <input
                               type="number"
                               inputMode="numeric"
@@ -5899,7 +5903,7 @@ export default function App() {
                           </small>
                         </div>
                         <div className="bdc-sales-metrics-card">
-                          <span>Apt Sold</span>
+                          <span>Manual sold report</span>
                           <strong>{selectedTrackerActualSold}</strong>
                           <small className={`bdc-sales-rate ${trackerBenchmarkTone(selectedTrackerAgent.actual_sold_rate, trackerBenchmarks.sold_from_appointments_rate_floor)}`}>
                             {formatPercent(selectedTrackerAgent.actual_sold_rate || 0)} sold from appointments set
@@ -6176,6 +6180,8 @@ export default function App() {
                     </div>
                   </details>
                 ) : null}
+                  </>
+                ) : null}
 
                 <div className="panel bdc-sales-leaderboard-panel">
                   <div className="bdc-sales-summary-panel__header">
@@ -6213,11 +6219,11 @@ export default function App() {
                             <div className="bdc-sales-leaderboard__totals">
                               <span>
                                 <b>{Number(agent.actual_sold || 0)}</b>
-                                Apt sold
+                                Manual sold
                               </span>
                               <span>
                                 <b>{Number(agent.sold_count || 0)}</b>
-                                Green
+                                Apt sold
                               </span>
                               <span>
                                 <b>{pendingCount}</b>
@@ -6231,7 +6237,7 @@ export default function App() {
                             <div className="bdc-sales-leaderboard__visuals">
                               <div className="bdc-sales-leaderboard__rail">
                                 <div className="bdc-sales-leaderboard__rail-top">
-                                  <span>Appointment sold vs leader</span>
+                                  <span>Manual sold vs leader</span>
                                   <strong>{Number(agent.actual_sold || 0)}</strong>
                                 </div>
                                 <div className="bdc-sales-progress-rail__track">
@@ -6257,7 +6263,7 @@ export default function App() {
                                   />
                                 </div>
                                 <small>
-                                  {Number(agent.sold_count || 0)} green / {pendingCount} pending
+                                  {Number(agent.sold_count || 0)} apt sold / {pendingCount} pending
                                 </small>
                               </div>
                             </div>
