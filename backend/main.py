@@ -6,7 +6,9 @@ import io
 import os
 import re
 import secrets
+import shutil
 import sqlite3
+import subprocess
 import threading
 import time
 import urllib.error
@@ -17,10 +19,10 @@ from typing import Any, Dict, List, Optional, Tuple
 from zoneinfo import ZoneInfo
 
 from curl_cffi import requests as curl_requests
-from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from orgtool_api import app as orgtool_app
 
@@ -62,7 +64,27 @@ UPLOADS_ROOT = os.path.join(DATA_ROOT, "uploads")
 TRAFFIC_PDF_ROOT = os.path.join(UPLOADS_ROOT, "traffic-pdfs")
 SPECIALS_ROOT = os.path.join(UPLOADS_ROOT, "specials")
 TRAFFIC_OFFER_ROOT = os.path.join(UPLOADS_ROOT, "traffic-offers")
-for path in (DATA_ROOT, UPLOADS_ROOT, TRAFFIC_PDF_ROOT, SPECIALS_ROOT, TRAFFIC_OFFER_ROOT):
+SALES_ANALYTICS_ROOT = os.path.join(DATA_ROOT, "sales-analytics")
+SALES_ANALYTICS_UPLOADS_ROOT = os.path.join(UPLOADS_ROOT, "sales-analytics")
+SALES_ANALYTICS_LATEST_PATH = os.path.join(SALES_ANALYTICS_ROOT, "latest.json")
+SALES_ANALYTICS_HISTORY_PATH = os.path.join(SALES_ANALYTICS_ROOT, "history.json")
+SALES_ANALYTICS_STATUS_PATH = os.path.join(SALES_ANALYTICS_ROOT, "status.json")
+SALES_ACTIVITY_RUNNER_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "sales-activity-runner")
+SALES_ACTIVITY_RUNNER_ENTRY = os.path.join(SALES_ACTIVITY_RUNNER_DIR, "run-sales-activity-report.mjs")
+SALES_ACTIVITY_RUNNER_BATCH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "Run BDC Activity Report Sales.bat")
+SALES_ACTIVITY_SCHEDULE_DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
+SALES_ACTIVITY_SCHEDULE_TIMES = ["10:00 AM", "12:00 PM", "2:00 PM", "4:00 PM", "6:00 PM", "8:00 PM"]
+SALES_ACTIVITY_SCHEDULE_LABEL = f"Monday to Saturday at {', '.join(SALES_ACTIVITY_SCHEDULE_TIMES)}"
+LOCAL_TRIGGER_HOSTS = {"127.0.0.1", "::1", "localhost"}
+for path in (
+    DATA_ROOT,
+    UPLOADS_ROOT,
+    TRAFFIC_PDF_ROOT,
+    SPECIALS_ROOT,
+    TRAFFIC_OFFER_ROOT,
+    SALES_ANALYTICS_ROOT,
+    SALES_ANALYTICS_UPLOADS_ROOT,
+):
     if path:
         os.makedirs(path, exist_ok=True)
 RULES_TIMEZONE = os.getenv("DEALER_TIMEZONE", "America/Chicago").strip() or "America/Chicago"
@@ -96,6 +118,7 @@ TAB_VISIBILITY_IDS = (
     "trafficAnalysis",
     "bdc",
     "bdcSalesTracker",
+    "salesAnalytics",
     "reports",
     "traffic",
     "freshUp",
@@ -558,6 +581,7 @@ class BdcSalesTrackerEntryIn(BaseModel):
     dms_number: str = ""
     dms_numbers_text: str = ""
     profile_name: str = ""
+    customer_phone: str = ""
     notes: str = ""
     sold: bool = False
 
@@ -565,6 +589,7 @@ class BdcSalesTrackerEntryIn(BaseModel):
 class BdcSalesTrackerEntryUpdateIn(BaseModel):
     dms_number: str = ""
     profile_name: str = ""
+    customer_phone: str = ""
     notes: str = ""
     sold: bool = False
 
@@ -576,6 +601,7 @@ class BdcSalesTrackerEntryOut(BaseModel):
     agent_name: str
     dms_number: str = ""
     profile_name: str = ""
+    customer_phone: str = ""
     notes: str = ""
     sold: bool = False
     sold_at: str = ""
@@ -707,6 +733,107 @@ class TabVisibilityOut(BaseModel):
 
 class TabVisibilityIn(BaseModel):
     entries: List[TabVisibilityItem]
+
+
+class SalesAnalyticsRowOut(BaseModel):
+    rep: str = ""
+    appt_created: int = 0
+    calls_cti: int = 0
+    emails_sent: int = 0
+    texts_sent: int = 0
+    low_activity: bool = False
+    rank: int = 0
+
+
+class SalesAnalyticsTotalsOut(BaseModel):
+    reps: int = 0
+    appointments_created: int = 0
+    calls_cti: int = 0
+    emails_sent: int = 0
+    texts_sent: int = 0
+    zero_call_reps: int = 0
+
+
+class SalesAnalyticsAveragesOut(BaseModel):
+    appointments_created: float = 0.0
+    calls_cti: float = 0.0
+    emails_sent: float = 0.0
+    texts_sent: float = 0.0
+
+
+class SalesAnalyticsHighlightOut(BaseModel):
+    rep: str = ""
+    appt_created: int = 0
+    calls_cti: int = 0
+    emails_sent: int = 0
+    texts_sent: int = 0
+    low_activity: bool = False
+    rank: int = 0
+
+
+class SalesAnalyticsDeliveryOut(BaseModel):
+    chat_name: str = "Me"
+    whatsapp_status: str = "unknown"
+    sent_at: str = ""
+    error_message: str = ""
+
+
+class SalesAnalyticsRunOut(BaseModel):
+    run_id: str = ""
+    report_name: str = "BDC Activity Report Sales"
+    crm_url: str = ""
+    dealership: str = ""
+    role_name: str = ""
+    generated_at: str = ""
+    generated_ts: float = 0.0
+    screenshot_url: str = ""
+    status: str = "unknown"
+    error_message: str = ""
+    totals: SalesAnalyticsTotalsOut = Field(default_factory=SalesAnalyticsTotalsOut)
+    averages: SalesAnalyticsAveragesOut = Field(default_factory=SalesAnalyticsAveragesOut)
+    top_calls_rep: SalesAnalyticsHighlightOut = Field(default_factory=SalesAnalyticsHighlightOut)
+    lowest_calls_rep: SalesAnalyticsHighlightOut = Field(default_factory=SalesAnalyticsHighlightOut)
+    low_performers: List[SalesAnalyticsHighlightOut] = Field(default_factory=list)
+    rows: List[SalesAnalyticsRowOut] = Field(default_factory=list)
+    delivery: SalesAnalyticsDeliveryOut = Field(default_factory=SalesAnalyticsDeliveryOut)
+
+
+class SalesAnalyticsStatusOut(BaseModel):
+    report_name: str = "BDC Activity Report Sales"
+    schedule_label: str = SALES_ACTIVITY_SCHEDULE_LABEL
+    schedule_days: List[str] = Field(default_factory=lambda: list(SALES_ACTIVITY_SCHEDULE_DAYS))
+    schedule_times: List[str] = Field(default_factory=lambda: list(SALES_ACTIVITY_SCHEDULE_TIMES))
+    chat_name: str = "Me"
+    state: str = "idle"
+    started_at: str = ""
+    finished_at: str = ""
+    last_success_at: str = ""
+    last_run_id: str = ""
+    last_error: str = ""
+    message: str = ""
+
+
+class SalesAnalyticsConfigOut(BaseModel):
+    report_name: str = "BDC Activity Report Sales"
+    schedule_label: str = SALES_ACTIVITY_SCHEDULE_LABEL
+    schedule_days: List[str] = Field(default_factory=lambda: list(SALES_ACTIVITY_SCHEDULE_DAYS))
+    schedule_times: List[str] = Field(default_factory=lambda: list(SALES_ACTIVITY_SCHEDULE_TIMES))
+    chat_name: str = "Me"
+    runner_ready: bool = False
+    can_trigger: bool = False
+
+
+class SalesAnalyticsDashboardOut(BaseModel):
+    config: SalesAnalyticsConfigOut = Field(default_factory=SalesAnalyticsConfigOut)
+    status: SalesAnalyticsStatusOut = Field(default_factory=SalesAnalyticsStatusOut)
+    latest: Optional[SalesAnalyticsRunOut] = None
+    history: List[SalesAnalyticsRunOut] = Field(default_factory=list)
+
+
+class SalesAnalyticsTriggerOut(BaseModel):
+    started: bool = False
+    message: str = ""
+    status: SalesAnalyticsStatusOut = Field(default_factory=SalesAnalyticsStatusOut)
 
 
 class ServiceDriveNoteIn(BaseModel):
@@ -1872,6 +1999,161 @@ def set_meta(key: str, value: str) -> None:
     )
 
 
+def read_json_file(file_path: str, fallback: Any) -> Any:
+    try:
+        with open(file_path, "r", encoding="utf-8") as handle:
+            return json.load(handle)
+    except (OSError, json.JSONDecodeError):
+        return fallback
+
+
+def write_json_file(file_path: str, payload: Any) -> None:
+    os.makedirs(os.path.dirname(file_path), exist_ok=True)
+    with open(file_path, "w", encoding="utf-8") as handle:
+        json.dump(payload, handle, indent=2)
+        handle.write("\n")
+
+
+def has_admin_session(token: Optional[str]) -> bool:
+    try:
+        require_admin(token)
+        return True
+    except HTTPException:
+        return False
+
+
+def is_local_request(request: Request) -> bool:
+    host = str(getattr(request.client, "host", "") or "").strip().lower()
+    return host in LOCAL_TRIGGER_HOSTS
+
+
+def sales_analytics_runner_ready() -> bool:
+    return bool(
+        shutil.which("node")
+        and os.path.exists(SALES_ACTIVITY_RUNNER_ENTRY)
+        and os.path.exists(os.path.join(SALES_ACTIVITY_RUNNER_DIR, ".env"))
+        and os.path.exists(os.path.join(SALES_ACTIVITY_RUNNER_DIR, "node_modules", "playwright"))
+    )
+
+
+def read_sales_analytics_status() -> SalesAnalyticsStatusOut:
+    raw = read_json_file(SALES_ANALYTICS_STATUS_PATH, {})
+    if not isinstance(raw, dict):
+        raw = {}
+    return SalesAnalyticsStatusOut.model_validate(raw)
+
+
+def read_sales_analytics_latest() -> Optional[SalesAnalyticsRunOut]:
+    raw = read_json_file(SALES_ANALYTICS_LATEST_PATH, None)
+    if not isinstance(raw, dict):
+        return None
+    return SalesAnalyticsRunOut.model_validate(raw)
+
+
+def read_sales_analytics_history(limit: int = 18) -> List[SalesAnalyticsRunOut]:
+    raw = read_json_file(SALES_ANALYTICS_HISTORY_PATH, [])
+    if not isinstance(raw, list):
+        return []
+    runs: List[SalesAnalyticsRunOut] = []
+    for entry in raw:
+        if isinstance(entry, dict):
+            runs.append(SalesAnalyticsRunOut.model_validate(entry))
+        if len(runs) >= max(1, limit):
+            break
+    return runs
+
+
+def build_sales_analytics_config(can_trigger: bool = False) -> SalesAnalyticsConfigOut:
+    latest = read_sales_analytics_latest()
+    status = read_sales_analytics_status()
+    chat_name = (
+        str((latest.delivery.chat_name if latest else "") or status.chat_name or "Me").strip() or "Me"
+    )
+    report_name = (
+        str((latest.report_name if latest else "") or status.report_name or "BDC Activity Report Sales").strip()
+        or "BDC Activity Report Sales"
+    )
+    return SalesAnalyticsConfigOut(
+        report_name=report_name,
+        schedule_label=SALES_ACTIVITY_SCHEDULE_LABEL,
+        schedule_days=list(SALES_ACTIVITY_SCHEDULE_DAYS),
+        schedule_times=list(SALES_ACTIVITY_SCHEDULE_TIMES),
+        chat_name=chat_name,
+        runner_ready=sales_analytics_runner_ready(),
+        can_trigger=can_trigger,
+    )
+
+
+def fetch_sales_analytics_dashboard(limit: int = 18, can_trigger: bool = False) -> SalesAnalyticsDashboardOut:
+    latest = read_sales_analytics_latest()
+    history = read_sales_analytics_history(limit=limit)
+    if latest and not any(item.run_id == latest.run_id for item in history):
+        history = [latest, *history][: max(1, limit)]
+    return SalesAnalyticsDashboardOut(
+        config=build_sales_analytics_config(can_trigger=can_trigger),
+        status=read_sales_analytics_status(),
+        latest=latest,
+        history=history,
+    )
+
+
+def trigger_sales_analytics_runner() -> SalesAnalyticsTriggerOut:
+    current_status = read_sales_analytics_status()
+    if str(current_status.state or "").lower() == "running":
+        return SalesAnalyticsTriggerOut(
+            started=False,
+            message="A sales activity scrape is already running.",
+            status=current_status,
+        )
+
+    node_path = shutil.which("node")
+    if not node_path:
+        raise HTTPException(status_code=500, detail="Node.js is not installed or not available on PATH.")
+    if not os.path.exists(SALES_ACTIVITY_RUNNER_ENTRY):
+        raise HTTPException(status_code=500, detail="The sales activity runner is missing from this workspace.")
+    if not os.path.exists(os.path.join(SALES_ACTIVITY_RUNNER_DIR, ".env")):
+        raise HTTPException(
+            status_code=500,
+            detail="Create sales-activity-runner/.env before starting the sales activity scraper.",
+        )
+
+    started_at = f"{datetime.utcnow().isoformat()}Z"
+    next_status = current_status.model_dump()
+    next_status.update(
+        {
+            "report_name": build_sales_analytics_config().report_name,
+            "schedule_label": SALES_ACTIVITY_SCHEDULE_LABEL,
+            "schedule_days": list(SALES_ACTIVITY_SCHEDULE_DAYS),
+            "schedule_times": list(SALES_ACTIVITY_SCHEDULE_TIMES),
+            "state": "running",
+            "started_at": started_at,
+            "finished_at": "",
+            "last_error": "",
+            "message": "Sales activity scrape started from the dashboard.",
+        }
+    )
+    write_json_file(SALES_ANALYTICS_STATUS_PATH, next_status)
+
+    creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    try:
+        subprocess.Popen(
+            [node_path, SALES_ACTIVITY_RUNNER_ENTRY],
+            cwd=SALES_ACTIVITY_RUNNER_DIR,
+            env=os.environ.copy(),
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            creationflags=creation_flags,
+        )
+    except OSError as exc:
+        raise HTTPException(status_code=500, detail=f"Unable to start the sales activity runner: {exc}") from exc
+
+    return SalesAnalyticsTriggerOut(
+        started=True,
+        message="Sales activity scrape started.",
+        status=read_sales_analytics_status(),
+    )
+
+
 def normalize_optional_url(value: str, field_name: str = "url", max_len: int = 500) -> str:
     text = normalize_short_text(value, field_name, max_len=max_len)
     if not text:
@@ -2685,6 +2967,7 @@ def init_db() -> None:
             agent_name TEXT NOT NULL,
             dms_number TEXT NOT NULL DEFAULT '',
             profile_name TEXT NOT NULL DEFAULT '',
+            customer_phone TEXT NOT NULL DEFAULT '',
             notes TEXT NOT NULL DEFAULT '',
             sold INTEGER NOT NULL DEFAULT 0,
             sold_ts REAL,
@@ -2697,6 +2980,7 @@ def init_db() -> None:
         )
         """
     )
+    ensure_column("bdc_sales_tracker_entries", "customer_phone", "TEXT NOT NULL DEFAULT ''")
     db_execute("CREATE INDEX IF NOT EXISTS idx_bdc_sales_tracker_entries_month ON bdc_sales_tracker_entries(month_key, agent_id, display_order, id)")
     db_execute(
         """
@@ -3031,6 +3315,7 @@ def bdc_sales_tracker_entry_out(row: Dict[str, Any]) -> BdcSalesTrackerEntryOut:
         agent_name=str(row.get("agent_name") or ""),
         dms_number=str(row.get("dms_number") or ""),
         profile_name=str(row.get("profile_name") or ""),
+        customer_phone=str(row.get("customer_phone") or ""),
         notes=str(row.get("notes") or ""),
         sold=bool(int(row.get("sold") or 0)),
         sold_at=str(row.get("sold_at") or ""),
@@ -3791,9 +4076,10 @@ def create_bdc_sales_tracker_entry(payload: BdcSalesTrackerEntryIn) -> BdcSalesT
     if single_dms_number and single_dms_number.lower() not in {item.lower() for item in dms_numbers}:
         dms_numbers.append(single_dms_number)
     profile_name = normalize_short_text(payload.profile_name, "profile_name", max_len=180)
+    customer_phone = normalize_optional_phone(payload.customer_phone, "customer_phone")
     notes = normalize_notes(payload.notes, "notes", max_len=1000)
-    if not dms_numbers and not profile_name:
-        raise HTTPException(status_code=400, detail="enter a DMS number or profile name")
+    if not dms_numbers and not profile_name and not customer_phone and not notes:
+        raise HTTPException(status_code=400, detail="enter a customer, phone, DMS number, or note")
     now_ts = time.time()
     now_at = now_iso()
     sold = bool(payload.sold)
@@ -3807,10 +4093,10 @@ def create_bdc_sales_tracker_entry(payload: BdcSalesTrackerEntryIn) -> BdcSalesT
         db_insert(
             """
             INSERT INTO bdc_sales_tracker_entries (
-                month_key, agent_id, agent_name, dms_number, profile_name, notes, sold,
+                month_key, agent_id, agent_name, dms_number, profile_name, customer_phone, notes, sold,
                 sold_ts, sold_at, display_order, created_ts, created_at, updated_ts, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 month_key,
@@ -3818,6 +4104,7 @@ def create_bdc_sales_tracker_entry(payload: BdcSalesTrackerEntryIn) -> BdcSalesT
                 str(agent_row.get("name") or ""),
                 dms_number,
                 profile_name,
+                customer_phone,
                 notes,
                 1 if sold else 0,
                 now_ts if sold else None,
@@ -3838,9 +4125,10 @@ def update_bdc_sales_tracker_entry(entry_id: int, payload: BdcSalesTrackerEntryU
         raise HTTPException(status_code=404, detail="tracker row not found")
     dms_number = normalize_short_text(payload.dms_number, "dms_number", max_len=80)
     profile_name = normalize_short_text(payload.profile_name, "profile_name", max_len=180)
+    customer_phone = normalize_optional_phone(payload.customer_phone, "customer_phone")
     notes = normalize_notes(payload.notes, "notes", max_len=1000)
-    if not dms_number and not profile_name:
-        raise HTTPException(status_code=400, detail="enter a DMS number or profile name")
+    if not dms_number and not profile_name and not customer_phone and not notes:
+        raise HTTPException(status_code=400, detail="enter a customer, phone, DMS number, or note")
     sold = bool(payload.sold)
     now_ts = time.time()
     now_at = now_iso()
@@ -3858,6 +4146,7 @@ def update_bdc_sales_tracker_entry(entry_id: int, payload: BdcSalesTrackerEntryU
         UPDATE bdc_sales_tracker_entries
         SET dms_number = ?,
             profile_name = ?,
+            customer_phone = ?,
             notes = ?,
             sold = ?,
             sold_ts = ?,
@@ -3869,6 +4158,7 @@ def update_bdc_sales_tracker_entry(entry_id: int, payload: BdcSalesTrackerEntryU
         (
             dms_number,
             profile_name,
+            customer_phone,
             notes,
             1 if sold else 0,
             sold_ts,
@@ -7564,6 +7854,27 @@ def get_bdc_undo_settings_public() -> BdcUndoSettingsOut:
 @app.get("/api/tabs/visibility", response_model=TabVisibilityOut)
 def get_tabs_visibility_public() -> TabVisibilityOut:
     return get_tab_visibility()
+
+
+@app.get("/api/sales-analytics/dashboard", response_model=SalesAnalyticsDashboardOut)
+def get_sales_analytics_dashboard(
+    request: Request,
+    limit: int = 18,
+    x_admin_token: Optional[str] = Header(default=None),
+) -> SalesAnalyticsDashboardOut:
+    safe_limit = max(1, min(60, int(limit or 18)))
+    can_trigger = is_local_request(request) or has_admin_session(x_admin_token)
+    return fetch_sales_analytics_dashboard(limit=safe_limit, can_trigger=can_trigger)
+
+
+@app.post("/api/sales-analytics/run", response_model=SalesAnalyticsTriggerOut)
+def post_sales_analytics_run(
+    request: Request,
+    x_admin_token: Optional[str] = Header(default=None),
+) -> SalesAnalyticsTriggerOut:
+    if not is_local_request(request) and not has_admin_session(x_admin_token):
+        raise HTTPException(status_code=403, detail="admin login required")
+    return trigger_sales_analytics_runner()
 
 
 @app.get("/api/freshup/log", response_model=FreshUpLogListOut)

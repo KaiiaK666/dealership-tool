@@ -276,6 +276,10 @@ export const importSpecialFeedSource = (token, sourceKey) =>
   });
 export const getBdcSalesTracker = (params = {}) =>
   request(`/api/bdc-sales-tracker${qs({ month: params.month })}`);
+export const getSalesAnalyticsDashboard = (params = {}) =>
+  request(`/api/sales-analytics/dashboard${qs({ limit: params.limit })}`);
+export const runSalesAnalyticsReport = () =>
+  request("/api/sales-analytics/run", { method: "POST", timeout: 20000 });
 export const updateBdcSalesTrackerMonth = (token, payload) =>
   request("/api/bdc-sales-tracker/month", { method: "POST", body: payload, headers: adminHeaders(token) });
 export const updateBdcSalesTrackerRules = (token, payload) =>
