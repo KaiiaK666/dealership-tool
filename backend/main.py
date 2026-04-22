@@ -163,6 +163,19 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
 OPENAI_AGENT_MODEL = os.getenv("OPENAI_AGENT_MODEL", "gpt-5.4-mini").strip() or "gpt-5.4-mini"
 OPENAI_AGENT_REASONING_EFFORT = os.getenv("OPENAI_AGENT_REASONING_EFFORT", "low").strip() or "low"
 OPENAI_AGENT_MAX_STEPS = max(2, min(10, int(os.getenv("OPENAI_AGENT_MAX_STEPS", "6") or 6)))
+REMOTE_RUNNER_TOKEN = os.getenv("DEALER_REMOTE_RUNNER_TOKEN", "").strip()
+REMOTE_RUNNER_BASE_URL = os.getenv("DEALER_REMOTE_RUNNER_BASE_URL", "").strip().rstrip("/")
+REMOTE_RUNNER_LABEL = os.getenv("DEALER_REMOTE_RUNNER_LABEL", "Home PC").strip() or "Home PC"
+REMOTE_RUNNER_POLL_SECONDS = max(5, int(os.getenv("DEALER_REMOTE_RUNNER_POLL_SECONDS", "15") or 15))
+REMOTE_RUNNER_ONLINE_WINDOW_SECONDS = max(
+    REMOTE_RUNNER_POLL_SECONDS * 2,
+    int(os.getenv("DEALER_REMOTE_RUNNER_ONLINE_WINDOW_SECONDS", "90") or 90),
+)
+REMOTE_RUNNER_JOB_STALE_SECONDS = max(
+    5 * 60,
+    int(os.getenv("DEALER_REMOTE_RUNNER_JOB_STALE_SECONDS", "1200") or 1200),
+)
+REMOTE_RUNNER_STATE_META_KEY = "remote-runner:state"
 DEALERSHIPS = ("Kia", "Mazda", "Outlet")
 SERVICE_BRANDS = ("Kia", "Mazda")
 QUOTE_BRANDS = ("Kia New", "Mazda New", "Used")
@@ -432,6 +445,9 @@ class BdcLeadPushConfigOut(BaseModel):
     enabled: bool = True
     chat_name: str = SALES_ACTIVITY_SELF_CHAT_LABEL
     runner_ready: bool = False
+    runner_online: bool = False
+    runner_label: str = REMOTE_RUNNER_LABEL
+    runner_status_text: str = ""
     message_type: str = "whatsapp-self"
 
 
@@ -655,6 +671,7 @@ class BdcSalesTrackerEntryIn(BaseModel):
     dms_number: str = ""
     dms_numbers_text: str = ""
     profile_name: str = ""
+    opportunity_id: str = ""
     customer_phone: str = ""
     notes: str = ""
     sold: bool = False
@@ -663,6 +680,7 @@ class BdcSalesTrackerEntryIn(BaseModel):
 class BdcSalesTrackerEntryUpdateIn(BaseModel):
     dms_number: str = ""
     profile_name: str = ""
+    opportunity_id: str = ""
     customer_phone: str = ""
     notes: str = ""
     sold: bool = False
@@ -675,6 +693,7 @@ class BdcSalesTrackerEntryOut(BaseModel):
     agent_name: str
     dms_number: str = ""
     profile_name: str = ""
+    opportunity_id: str = ""
     customer_phone: str = ""
     notes: str = ""
     sold: bool = False
@@ -900,6 +919,9 @@ class SalesAnalyticsConfigOut(BaseModel):
     schedule_times: List[str] = Field(default_factory=lambda: list(SALES_ACTIVITY_SCHEDULE_TIMES))
     chat_name: str = SALES_ACTIVITY_SELF_CHAT_LABEL
     runner_ready: bool = False
+    runner_online: bool = False
+    runner_label: str = REMOTE_RUNNER_LABEL
+    runner_status_text: str = ""
     can_trigger: bool = False
 
 
@@ -914,6 +936,48 @@ class SalesAnalyticsTriggerOut(BaseModel):
     started: bool = False
     message: str = ""
     status: SalesAnalyticsStatusOut = Field(default_factory=SalesAnalyticsStatusOut)
+
+
+class RemoteRunnerStateOut(BaseModel):
+    label: str = REMOTE_RUNNER_LABEL
+    online: bool = False
+    last_seen_at: str = ""
+    whatsapp_ready: bool = False
+    sales_analytics_variants_ready: List[str] = Field(default_factory=list)
+    active_job_id: Optional[int] = None
+
+
+class RemoteRunnerPollIn(BaseModel):
+    label: str = REMOTE_RUNNER_LABEL
+    whatsapp_ready: bool = False
+    sales_analytics_variants_ready: List[str] = Field(default_factory=list)
+
+
+class RemoteRunnerJobOut(BaseModel):
+    id: int
+    job_type: str
+    status: str = "queued"
+    variant_key: str = ""
+    message_text: str = ""
+    message_tag: str = ""
+    assignment_id: Optional[int] = None
+    requested_at: str = ""
+    requested_by: str = ""
+
+
+class RemoteRunnerPollOut(BaseModel):
+    runner: RemoteRunnerStateOut = Field(default_factory=RemoteRunnerStateOut)
+    job: Optional[RemoteRunnerJobOut] = None
+
+
+class RemoteRunnerJobResultIn(BaseModel):
+    label: str = REMOTE_RUNNER_LABEL
+    message: str = ""
+
+
+class RemoteRunnerAckOut(BaseModel):
+    ok: bool = True
+    message: str = ""
 
 
 class ServiceDriveNoteIn(BaseModel):
@@ -1313,6 +1377,39 @@ def parse_bdc_sales_tracker_log_identity(value: str) -> Tuple[str, str, str]:
     return normalize_short_text(raw, "customer_name", max_len=120), "", ""
 
 
+def normalize_bdc_sales_tracker_entry_identity(
+    profile_value: str,
+    opportunity_value: str = "",
+    dms_value: str = "",
+) -> Tuple[str, str, str]:
+    raw_profile = str(profile_value or "")
+    lowered_profile = raw_profile.lower()
+    should_parse_profile = bool(raw_profile.strip()) and (
+        "/" in raw_profile or "opp" in lowered_profile or "opportunity" in lowered_profile or "dms" in lowered_profile
+    )
+    parsed_profile = ""
+    parsed_opportunity = ""
+    parsed_dms = ""
+    if should_parse_profile:
+        parsed_profile, parsed_opportunity, parsed_dms = parse_bdc_sales_tracker_log_identity(raw_profile)
+    profile_name = normalize_short_text(
+        parsed_profile if should_parse_profile and parsed_profile else raw_profile,
+        "profile_name",
+        max_len=180,
+    )
+    opportunity_id = normalize_short_text(
+        parsed_opportunity if should_parse_profile and parsed_opportunity else opportunity_value,
+        "opportunity_id",
+        max_len=80,
+    )
+    dms_number = normalize_short_text(
+        parsed_dms if should_parse_profile and parsed_dms else dms_value,
+        "dms_number",
+        max_len=80,
+    )
+    return profile_name, opportunity_id, dms_number
+
+
 def merge_bdc_sales_tracker_notes(*parts: Any) -> str:
     lines: List[str] = []
     seen: Set[str] = set()
@@ -1610,13 +1707,30 @@ def deliver_assignment_notifications(
     return sms_status, email_status
 
 
-def whatsapp_message_runner_ready() -> bool:
+def local_whatsapp_message_runner_ready() -> bool:
     return bool(
         shutil.which("node")
         and os.path.exists(SALES_ACTIVITY_WHATSAPP_MESSAGE_ENTRY)
         and os.path.exists(os.path.join(SALES_ACTIVITY_RUNNER_DIR, ".env"))
         and os.path.exists(os.path.join(SALES_ACTIVITY_RUNNER_DIR, "node_modules", "playwright"))
     )
+
+
+def whatsapp_message_runner_ready() -> bool:
+    return local_whatsapp_message_runner_ready() or remote_runner_broker_enabled()
+
+
+def whatsapp_runner_status_text() -> str:
+    if local_whatsapp_message_runner_ready():
+        return "This machine is ready to send the WhatsApp message immediately."
+    if not remote_runner_broker_enabled():
+        return "Set up the home-PC bridge or install the WhatsApp sender on this machine."
+    state = remote_runner_state()
+    if state.online and state.whatsapp_ready:
+        return f"{state.label} is online and processing queued WhatsApp requests."
+    if state.online:
+        return f"{state.label} is online, but its WhatsApp sender is not ready yet."
+    return f"Requests will stay queued here until {state.label} checks in."
 
 
 def bdc_lead_push_enabled() -> bool:
@@ -1627,10 +1741,14 @@ def bdc_lead_push_enabled() -> bool:
 
 
 def get_bdc_lead_push_config() -> BdcLeadPushConfigOut:
+    state = remote_runner_state()
     return BdcLeadPushConfigOut(
         enabled=bdc_lead_push_enabled(),
         chat_name=SALES_ACTIVITY_SELF_CHAT_LABEL,
         runner_ready=whatsapp_message_runner_ready(),
+        runner_online=state.online if remote_runner_broker_enabled() and not local_whatsapp_message_runner_ready() else True,
+        runner_label=state.label or REMOTE_RUNNER_LABEL,
+        runner_status_text=whatsapp_runner_status_text(),
     )
 
 
@@ -2280,6 +2398,18 @@ def normalize_sales_analytics_variant(value: Optional[str]) -> str:
     return normalized
 
 
+def normalize_remote_runner_variants(values: Optional[List[str]] = None) -> List[str]:
+    normalized: List[str] = []
+    for value in values or []:
+        try:
+            item = normalize_sales_analytics_variant(value)
+        except HTTPException:
+            continue
+        if item not in normalized:
+            normalized.append(item)
+    return normalized
+
+
 def sales_analytics_variant_meta(variant: Optional[str] = None) -> Dict[str, Any]:
     key = normalize_sales_analytics_variant(variant)
     meta = dict(SALES_ANALYTICS_VARIANTS[key])
@@ -2299,6 +2429,96 @@ def sales_analytics_paths(variant: Optional[str] = None) -> Dict[str, str]:
         "history": os.path.join(root, "history.json"),
         "status": os.path.join(root, "status.json"),
     }
+
+
+def remote_runner_broker_enabled() -> bool:
+    return bool(REMOTE_RUNNER_TOKEN) and not REMOTE_RUNNER_BASE_URL
+
+
+def remote_runner_worker_enabled() -> bool:
+    return bool(REMOTE_RUNNER_TOKEN and REMOTE_RUNNER_BASE_URL)
+
+
+def read_remote_runner_state_payload() -> Dict[str, Any]:
+    raw = str(get_meta(REMOTE_RUNNER_STATE_META_KEY) or "").strip()
+    if not raw:
+        return {}
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def write_remote_runner_state_payload(payload: Dict[str, Any]) -> None:
+    set_meta(REMOTE_RUNNER_STATE_META_KEY, json.dumps(payload, separators=(",", ":")))
+
+
+def build_remote_runner_state(payload: Optional[Dict[str, Any]] = None) -> RemoteRunnerStateOut:
+    raw = payload if isinstance(payload, dict) else read_remote_runner_state_payload()
+    label = str(raw.get("label") or REMOTE_RUNNER_LABEL).strip() or REMOTE_RUNNER_LABEL
+    last_seen_ts = float(raw.get("last_seen_ts") or 0)
+    online = bool(last_seen_ts and (time.time() - last_seen_ts) <= REMOTE_RUNNER_ONLINE_WINDOW_SECONDS)
+    active_job_id = raw.get("active_job_id")
+    try:
+        active_job_id = int(active_job_id) if active_job_id is not None else None
+    except (TypeError, ValueError):
+        active_job_id = None
+    return RemoteRunnerStateOut(
+        label=label,
+        online=online,
+        last_seen_at=str(raw.get("last_seen_at") or ""),
+        whatsapp_ready=bool(raw.get("whatsapp_ready")),
+        sales_analytics_variants_ready=normalize_remote_runner_variants(raw.get("sales_analytics_variants_ready") or []),
+        active_job_id=active_job_id,
+    )
+
+
+def update_remote_runner_state(
+    *,
+    label: Optional[str] = None,
+    whatsapp_ready: Optional[bool] = None,
+    sales_analytics_variants_ready: Optional[List[str]] = None,
+    active_job_id: Optional[int] = None,
+    touch: bool = True,
+) -> RemoteRunnerStateOut:
+    payload = read_remote_runner_state_payload()
+    if label is not None:
+        payload["label"] = str(label).strip() or REMOTE_RUNNER_LABEL
+    if whatsapp_ready is not None:
+        payload["whatsapp_ready"] = bool(whatsapp_ready)
+    if sales_analytics_variants_ready is not None:
+        payload["sales_analytics_variants_ready"] = normalize_remote_runner_variants(sales_analytics_variants_ready)
+    if active_job_id is not None:
+        payload["active_job_id"] = int(active_job_id) if int(active_job_id) > 0 else None
+    if touch:
+        payload["last_seen_at"] = now_iso()
+        payload["last_seen_ts"] = time.time()
+    write_remote_runner_state_payload(payload)
+    return build_remote_runner_state(payload)
+
+
+def remote_runner_state() -> RemoteRunnerStateOut:
+    return build_remote_runner_state()
+
+
+def remote_runner_online() -> bool:
+    return remote_runner_state().online
+
+
+def remote_runner_label() -> str:
+    return remote_runner_state().label or REMOTE_RUNNER_LABEL
+
+
+def remote_runner_whatsapp_online_ready() -> bool:
+    state = remote_runner_state()
+    return state.online and bool(state.whatsapp_ready)
+
+
+def remote_runner_sales_variant_online_ready(variant: Optional[str] = None) -> bool:
+    state = remote_runner_state()
+    key = normalize_sales_analytics_variant(variant)
+    return state.online and key in set(state.sales_analytics_variants_ready or [])
 
 
 def sales_analytics_runner_env(variant: Optional[str] = None) -> Dict[str, str]:
@@ -2321,14 +2541,32 @@ def sales_analytics_runner_env(variant: Optional[str] = None) -> Dict[str, str]:
     return env
 
 
-def sales_analytics_runner_ready(variant: Optional[str] = None) -> bool:
+def local_sales_analytics_runner_ready(variant: Optional[str] = None) -> bool:
     meta = sales_analytics_variant_meta(variant)
     batch_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), str(meta["batch_file"]))
     return bool(
-        whatsapp_message_runner_ready()
+        local_whatsapp_message_runner_ready()
         and os.path.exists(SALES_ACTIVITY_RUNNER_ENTRY)
         and os.path.exists(batch_path)
     )
+
+
+def sales_analytics_runner_ready(variant: Optional[str] = None) -> bool:
+    return local_sales_analytics_runner_ready(variant) or remote_runner_broker_enabled()
+
+
+def sales_analytics_runner_status_text(variant: Optional[str] = None) -> str:
+    meta = sales_analytics_variant_meta(variant)
+    if local_sales_analytics_runner_ready(meta["key"]):
+        return "This machine is ready to run the live DealerSocket pull immediately."
+    if not remote_runner_broker_enabled():
+        return "Set up the home-PC bridge or install the sales-activity runner on this machine."
+    state = remote_runner_state()
+    if state.online and meta["key"] in set(state.sales_analytics_variants_ready or []):
+        return f"{state.label} is online and processing queued report pulls."
+    if state.online:
+        return f"{state.label} is online, but the {meta['label'].lower()} runner is not ready yet."
+    return f"Requests will stay queued here until {state.label} checks in."
 
 
 def read_sales_analytics_status(variant: Optional[str] = None) -> SalesAnalyticsStatusOut:
@@ -2369,10 +2607,48 @@ def read_sales_analytics_history(limit: int = 18, variant: Optional[str] = None)
     return runs
 
 
+def write_sales_analytics_status(variant: Optional[str], next_patch: Dict[str, Any]) -> SalesAnalyticsStatusOut:
+    meta = sales_analytics_variant_meta(variant)
+    paths = sales_analytics_paths(meta["key"])
+    current = read_sales_analytics_status(meta["key"]).model_dump()
+    current.update(
+        {
+            "variant_key": meta["key"],
+            "variant_label": meta["label"],
+            "report_name": str(current.get("report_name") or meta["report_name"]),
+            "schedule_label": meta["schedule_label"],
+            "schedule_days": list(meta["schedule_days"]),
+            "schedule_times": list(meta["schedule_times"]),
+            "chat_name": str(current.get("chat_name") or SALES_ACTIVITY_SELF_CHAT_LABEL) or SALES_ACTIVITY_SELF_CHAT_LABEL,
+        }
+    )
+    current.update(next_patch or {})
+    write_json_file(paths["status"], current)
+    return SalesAnalyticsStatusOut.model_validate(current)
+
+
+def upsert_sales_analytics_run_record(variant: Optional[str], run_payload: Dict[str, Any]) -> SalesAnalyticsRunOut:
+    meta = sales_analytics_variant_meta(variant)
+    paths = sales_analytics_paths(meta["key"])
+    run = SalesAnalyticsRunOut.model_validate(run_payload or {})
+    existing_raw = read_json_file(paths["history"], [])
+    history = existing_raw if isinstance(existing_raw, list) else []
+    filtered = [
+        entry
+        for entry in history
+        if isinstance(entry, dict) and str(entry.get("run_id") or "") != str(run.run_id or "")
+    ]
+    next_history = [run.model_dump(), *filtered][:90]
+    write_json_file(paths["latest"], run.model_dump())
+    write_json_file(paths["history"], next_history)
+    return run
+
+
 def build_sales_analytics_config(variant: Optional[str] = None, can_trigger: bool = False) -> SalesAnalyticsConfigOut:
     meta = sales_analytics_variant_meta(variant)
     latest = read_sales_analytics_latest(meta["key"])
     status = read_sales_analytics_status(meta["key"])
+    state = remote_runner_state()
     chat_name = (
         str((latest.delivery.chat_name if latest else "") or status.chat_name or SALES_ACTIVITY_SELF_CHAT_LABEL).strip()
         or SALES_ACTIVITY_SELF_CHAT_LABEL
@@ -2389,6 +2665,9 @@ def build_sales_analytics_config(variant: Optional[str] = None, can_trigger: boo
         schedule_times=list(meta["schedule_times"]),
         chat_name=chat_name,
         runner_ready=sales_analytics_runner_ready(meta["key"]),
+        runner_online=state.online if remote_runner_broker_enabled() and not local_sales_analytics_runner_ready(meta["key"]) else True,
+        runner_label=state.label or REMOTE_RUNNER_LABEL,
+        runner_status_text=sales_analytics_runner_status_text(meta["key"]),
         can_trigger=can_trigger,
     )
 
@@ -3285,6 +3564,7 @@ def init_db() -> None:
             agent_name TEXT NOT NULL,
             dms_number TEXT NOT NULL DEFAULT '',
             profile_name TEXT NOT NULL DEFAULT '',
+            opportunity_id TEXT NOT NULL DEFAULT '',
             customer_phone TEXT NOT NULL DEFAULT '',
             notes TEXT NOT NULL DEFAULT '',
             sold INTEGER NOT NULL DEFAULT 0,
@@ -3299,6 +3579,7 @@ def init_db() -> None:
         """
     )
     ensure_column("bdc_sales_tracker_entries", "customer_phone", "TEXT NOT NULL DEFAULT ''")
+    ensure_column("bdc_sales_tracker_entries", "opportunity_id", "TEXT NOT NULL DEFAULT ''")
     db_execute("CREATE INDEX IF NOT EXISTS idx_bdc_sales_tracker_entries_month ON bdc_sales_tracker_entries(month_key, agent_id, display_order, id)")
     db_execute(
         """
@@ -3547,6 +3828,30 @@ def init_db() -> None:
         """
     )
     db_execute("CREATE INDEX IF NOT EXISTS idx_agent_loop_events_run_id ON agent_loop_events(run_id, id)")
+    db_execute(
+        """
+        CREATE TABLE IF NOT EXISTS remote_runner_jobs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            job_type TEXT NOT NULL,
+            status TEXT NOT NULL DEFAULT 'queued',
+            variant_key TEXT NOT NULL DEFAULT '',
+            message_text TEXT NOT NULL DEFAULT '',
+            message_tag TEXT NOT NULL DEFAULT '',
+            assignment_id INTEGER,
+            requested_by TEXT NOT NULL DEFAULT '',
+            requested_ts REAL NOT NULL,
+            requested_at TEXT NOT NULL,
+            started_ts REAL,
+            started_at TEXT NOT NULL DEFAULT '',
+            finished_ts REAL,
+            finished_at TEXT NOT NULL DEFAULT '',
+            worker_label TEXT NOT NULL DEFAULT '',
+            result_message TEXT NOT NULL DEFAULT '',
+            error_message TEXT NOT NULL DEFAULT ''
+        )
+        """
+    )
+    db_execute("CREATE INDEX IF NOT EXISTS idx_remote_runner_jobs_status ON remote_runner_jobs(status, requested_ts, id)")
 
 
 def prune_sessions() -> None:
@@ -3637,6 +3942,7 @@ def bdc_sales_tracker_entry_out(row: Dict[str, Any]) -> BdcSalesTrackerEntryOut:
         agent_name=str(row.get("agent_name") or ""),
         dms_number=str(row.get("dms_number") or ""),
         profile_name=str(row.get("profile_name") or ""),
+        opportunity_id=str(row.get("opportunity_id") or ""),
         customer_phone=str(row.get("customer_phone") or ""),
         notes=str(row.get("notes") or ""),
         sold=bool(int(row.get("sold") or 0)),
@@ -4162,6 +4468,7 @@ def find_matching_bdc_sales_tracker_entry(
     agent_id: int,
     customer_name: str,
     dms_number: str,
+    opportunity_id: str = "",
 ) -> Optional[Dict[str, Any]]:
     if dms_number:
         row = db_query_one(
@@ -4173,6 +4480,19 @@ def find_matching_bdc_sales_tracker_entry(
             LIMIT 1
             """,
             (month_key, int(agent_id), dms_number),
+        )
+        if row:
+            return row
+    if opportunity_id:
+        row = db_query_one(
+            """
+            SELECT *
+            FROM bdc_sales_tracker_entries
+            WHERE month_key = ? AND agent_id = ? AND LOWER(opportunity_id) = LOWER(?)
+            ORDER BY sold ASC, updated_ts DESC, id DESC
+            LIMIT 1
+            """,
+            (month_key, int(agent_id), opportunity_id),
         )
         if row:
             return row
@@ -4500,15 +4820,19 @@ def create_bdc_sales_tracker_entry(payload: BdcSalesTrackerEntryIn) -> BdcSalesT
     agent_row = get_bdc_agent_row(payload.agent_id)
     if not agent_row:
         raise HTTPException(status_code=404, detail="BDC agent not found")
+    profile_name, opportunity_id, parsed_dms_number = normalize_bdc_sales_tracker_entry_identity(
+        payload.profile_name,
+        payload.opportunity_id,
+        payload.dms_number,
+    )
     dms_numbers = parse_bdc_sales_tracker_dms_numbers(payload.dms_numbers_text)
-    single_dms_number = normalize_short_text(payload.dms_number, "dms_number", max_len=80)
+    single_dms_number = parsed_dms_number
     if single_dms_number and single_dms_number.lower() not in {item.lower() for item in dms_numbers}:
         dms_numbers.append(single_dms_number)
-    profile_name = normalize_short_text(payload.profile_name, "profile_name", max_len=180)
     customer_phone = normalize_optional_phone(payload.customer_phone, "customer_phone")
     notes = normalize_notes(payload.notes, "notes", max_len=1000)
-    if not dms_numbers and not profile_name and not customer_phone and not notes:
-        raise HTTPException(status_code=400, detail="enter a customer, phone, DMS number, or note")
+    if not dms_numbers and not profile_name and not opportunity_id and not customer_phone and not notes:
+        raise HTTPException(status_code=400, detail="enter a customer, phone, opp id, DMS number, or note")
     now_ts = time.time()
     now_at = now_iso()
     sold = bool(payload.sold)
@@ -4524,10 +4848,10 @@ def create_bdc_sales_tracker_entry(payload: BdcSalesTrackerEntryIn) -> BdcSalesT
         db_insert(
             """
             INSERT INTO bdc_sales_tracker_entries (
-                month_key, agent_id, agent_name, dms_number, profile_name, customer_phone, notes, sold,
+                month_key, agent_id, agent_name, dms_number, profile_name, opportunity_id, customer_phone, notes, sold,
                 sold_ts, sold_at, display_order, created_ts, created_at, updated_ts, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 month_key,
@@ -4535,6 +4859,7 @@ def create_bdc_sales_tracker_entry(payload: BdcSalesTrackerEntryIn) -> BdcSalesT
                 str(agent_row.get("name") or ""),
                 dms_number,
                 profile_name,
+                opportunity_id,
                 customer_phone,
                 notes,
                 1 if sold else 0,
@@ -4554,12 +4879,15 @@ def update_bdc_sales_tracker_entry(entry_id: int, payload: BdcSalesTrackerEntryU
     row = get_bdc_sales_tracker_entry_row(entry_id)
     if not row:
         raise HTTPException(status_code=404, detail="tracker row not found")
-    dms_number = normalize_short_text(payload.dms_number, "dms_number", max_len=80)
-    profile_name = normalize_short_text(payload.profile_name, "profile_name", max_len=180)
+    profile_name, opportunity_id, dms_number = normalize_bdc_sales_tracker_entry_identity(
+        payload.profile_name,
+        payload.opportunity_id,
+        payload.dms_number,
+    )
     customer_phone = normalize_optional_phone(payload.customer_phone, "customer_phone")
     notes = normalize_notes(payload.notes, "notes", max_len=1000)
-    if not dms_number and not profile_name and not customer_phone and not notes:
-        raise HTTPException(status_code=400, detail="enter a customer, phone, DMS number, or note")
+    if not dms_number and not profile_name and not opportunity_id and not customer_phone and not notes:
+        raise HTTPException(status_code=400, detail="enter a customer, phone, opp id, DMS number, or note")
     ensure_unique_bdc_sales_tracker_dms(str(row.get("month_key") or ""), dms_number, exclude_entry_id=int(entry_id))
     sold = bool(payload.sold)
     now_ts = time.time()
@@ -4578,6 +4906,7 @@ def update_bdc_sales_tracker_entry(entry_id: int, payload: BdcSalesTrackerEntryU
         UPDATE bdc_sales_tracker_entries
         SET dms_number = ?,
             profile_name = ?,
+            opportunity_id = ?,
             customer_phone = ?,
             notes = ?,
             sold = ?,
@@ -4590,6 +4919,7 @@ def update_bdc_sales_tracker_entry(entry_id: int, payload: BdcSalesTrackerEntryU
         (
             dms_number,
             profile_name,
+            opportunity_id,
             customer_phone,
             notes,
             1 if sold else 0,
@@ -4737,7 +5067,7 @@ def mark_bdc_sales_tracker_dms_log_entry_sold(entry_id: int) -> BdcSalesTrackerO
     if not agent_id:
         raise HTTPException(status_code=400, detail="Apt Set Under must match an active BDC agent before marking sold")
 
-    tracker_notes = merge_bdc_sales_tracker_notes(f"Opp ID {opportunity_id}" if opportunity_id else "", notes)
+    tracker_notes = merge_bdc_sales_tracker_notes(notes)
     if dms_number:
         global_entry = find_bdc_sales_tracker_entry_by_dms(month_key, dms_number)
         if global_entry and int(global_entry.get("agent_id") or 0) != int(agent_id):
@@ -4745,7 +5075,7 @@ def mark_bdc_sales_tracker_dms_log_entry_sold(entry_id: int) -> BdcSalesTrackerO
                 status_code=400,
                 detail=f"DMS number {dms_number} is already tracked under {str(global_entry.get('agent_name') or 'another agent')}",
             )
-    existing_entry = find_matching_bdc_sales_tracker_entry(month_key, int(agent_id), customer_name, dms_number)
+    existing_entry = find_matching_bdc_sales_tracker_entry(month_key, int(agent_id), customer_name, dms_number, opportunity_id)
     tracker_now_ts = time.time()
     tracker_now_at = now_iso()
     if existing_entry:
@@ -4760,6 +5090,7 @@ def mark_bdc_sales_tracker_dms_log_entry_sold(entry_id: int) -> BdcSalesTrackerO
             UPDATE bdc_sales_tracker_entries
             SET dms_number = ?,
                 profile_name = ?,
+                opportunity_id = ?,
                 notes = ?,
                 sold = 1,
                 sold_ts = ?,
@@ -4771,6 +5102,7 @@ def mark_bdc_sales_tracker_dms_log_entry_sold(entry_id: int) -> BdcSalesTrackerO
             (
                 dms_number or str(existing_entry.get("dms_number") or ""),
                 customer_name or str(existing_entry.get("profile_name") or ""),
+                opportunity_id or str(existing_entry.get("opportunity_id") or ""),
                 existing_notes,
                 sold_ts,
                 sold_at,
@@ -4788,10 +5120,10 @@ def mark_bdc_sales_tracker_dms_log_entry_sold(entry_id: int) -> BdcSalesTrackerO
         db_insert(
             """
             INSERT INTO bdc_sales_tracker_entries (
-                month_key, agent_id, agent_name, dms_number, profile_name, customer_phone, notes, sold,
+                month_key, agent_id, agent_name, dms_number, profile_name, opportunity_id, customer_phone, notes, sold,
                 sold_ts, sold_at, display_order, created_ts, created_at, updated_ts, updated_at
             )
-            VALUES (?, ?, ?, ?, ?, '', ?, 1, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, '', ?, 1, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 month_key,
@@ -4799,6 +5131,7 @@ def mark_bdc_sales_tracker_dms_log_entry_sold(entry_id: int) -> BdcSalesTrackerO
                 agent_name,
                 dms_number,
                 customer_name,
+                opportunity_id,
                 tracker_notes,
                 tracker_now_ts,
                 tracker_now_at,
@@ -5384,19 +5717,14 @@ def assign_next_lead(payload: BdcLeadAssignIn) -> BdcAssignmentOut:
     if not row:
         raise HTTPException(status_code=500, detail="failed to create assignment log")
     whatsapp_status = deliver_assignment_whatsapp_push_async(row)
-    salesperson_row = get_salesperson_row(salesperson.id)
-    sms_status = ""
-    email_status = ""
-    if salesperson_row:
-        sms_status, email_status = deliver_assignment_notifications(salesperson_row, row)
-    if sms_status or email_status or whatsapp_status:
+    if whatsapp_status:
         db_execute(
             """
             UPDATE bdc_assignment_log
             SET notification_sms_status = ?, notification_email_status = ?, notification_whatsapp_status = ?
             WHERE id = ?
             """,
-            (sms_status, email_status, whatsapp_status, created_id),
+            ("", "", whatsapp_status, created_id),
         )
         row = db_query_one("SELECT * FROM bdc_assignment_log WHERE id = ?", (created_id,)) or row
     return bdc_log_out(row)

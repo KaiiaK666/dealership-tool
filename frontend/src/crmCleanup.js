@@ -17,6 +17,20 @@ export const CRM_CLEANUP_SOURCE_OPTIONS = [
 
 const LIST_BUILDER_REQUIRED_HEADERS = ["First Name", "Last Name", "Address 1", "City", "State", "Postal Code"];
 const REPORT_SCRAPE_REQUIRED_HEADERS = ["Date", "Name", "Assign To", "BDC Assign To"];
+const SOURCE_PARSERS = {
+  listBuilder: listBuilderRecords,
+  reportScrape: reportScrapeRecords,
+};
+
+class HeaderMismatchError extends Error {
+  constructor(sourceType, missing) {
+    const option = CRM_CLEANUP_SOURCE_OPTIONS.find((item) => item.id === sourceType);
+    super(`This file is missing ${option?.label || sourceType} columns: ${missing.join(", ")}.`);
+    this.name = "HeaderMismatchError";
+    this.sourceType = sourceType;
+    this.missing = missing;
+  }
+}
 
 const GROUP_META = {
   phone: {
@@ -179,7 +193,7 @@ function listBuilderRecords(rows) {
   const headers = normalizeHeaders(rows[0] || []);
   const missing = missingHeaders(headers, LIST_BUILDER_REQUIRED_HEADERS);
   if (missing.length) {
-    throw new Error(`This file is missing list-builder columns: ${missing.join(", ")}.`);
+    throw new HeaderMismatchError("listBuilder", missing);
   }
 
   return rows.slice(1).map((row, index) => mapRowToObject(headers, row, index + 2)).filter((item) => {
@@ -271,7 +285,7 @@ function reportScrapeRecords(rows) {
   const headers = normalizeHeaders(rows[0] || []);
   const missing = missingHeaders(headers, REPORT_SCRAPE_REQUIRED_HEADERS);
   if (missing.length) {
-    throw new Error(`This file is missing report-scrape columns: ${missing.join(", ")}.`);
+    throw new HeaderMismatchError("reportScrape", missing);
   }
 
   const dateColumnIndex = headers.indexOf("Date");
@@ -481,7 +495,37 @@ export async function analyzeCrmCleanupFile(file, sourceType) {
     throw new Error("The uploaded file is empty.");
   }
 
-  const records = sourceType === "listBuilder" ? listBuilderRecords(rows) : reportScrapeRecords(rows);
+  const preferredTypes = [sourceType, ...CRM_CLEANUP_SOURCE_OPTIONS.map((item) => item.id).filter((item) => item !== sourceType)];
+  const mismatches = [];
+  let detectedSourceType = sourceType;
+  let records = null;
+
+  for (const candidateType of preferredTypes) {
+    const parser = SOURCE_PARSERS[candidateType];
+    if (!parser) continue;
+    try {
+      records = parser(rows);
+      detectedSourceType = candidateType;
+      break;
+    } catch (errorValue) {
+      if (errorValue instanceof HeaderMismatchError) {
+        mismatches.push(errorValue);
+        continue;
+      }
+      throw errorValue;
+    }
+  }
+
+  if (!records) {
+    const details = mismatches
+      .map((errorValue) => {
+        const option = CRM_CLEANUP_SOURCE_OPTIONS.find((item) => item.id === errorValue.sourceType);
+        return `${option?.label || errorValue.sourceType}: missing ${errorValue.missing.join(", ")}`;
+      })
+      .join(" | ");
+    throw new Error(`This file does not match the supported CRM formats. ${details}`);
+  }
+
   if (!records.length) {
     throw new Error("No customer rows were found in that upload.");
   }
@@ -491,7 +535,7 @@ export async function analyzeCrmCleanupFile(file, sourceType) {
   const datasetFingerprint = simpleHash(
     joinParts(
       [
-        sourceType,
+        detectedSourceType,
         file.name,
         String(file.size),
         String(file.lastModified || ""),
@@ -502,11 +546,14 @@ export async function analyzeCrmCleanupFile(file, sourceType) {
   );
 
   return {
-    datasetKey: `${sourceType}-${datasetFingerprint}`,
+    datasetKey: `${detectedSourceType}-${datasetFingerprint}`,
     fileName: file.name,
     fileSize: file.size,
-    sourceType,
-    sourceLabel: option.label,
+    sourceType: detectedSourceType,
+    requestedSourceType: sourceType,
+    sourceLabel:
+      CRM_CLEANUP_SOURCE_OPTIONS.find((item) => item.id === detectedSourceType)?.label || option.label,
+    autoDetected: detectedSourceType !== sourceType,
     sheetName,
     groups,
     flaggedRows,

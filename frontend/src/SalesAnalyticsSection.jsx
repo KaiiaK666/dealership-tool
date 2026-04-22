@@ -1,8 +1,18 @@
 import React from "react";
 
+const SALES_ANALYTICS_PULL_ESTIMATED_SECONDS = 180;
+const SALES_ANALYTICS_PULL_WINDOW_LABEL = "2 to 4 minutes";
+
 function formatNumber(value) {
   const numeric = Number(value || 0);
   return Number.isFinite(numeric) ? numeric.toLocaleString("en-US") : "0";
+}
+
+function parseTimeMs(value) {
+  if (!value) return null;
+  const parsed = new Date(value);
+  const time = parsed.getTime();
+  return Number.isNaN(time) ? null : time;
 }
 
 function formatDateTime(value) {
@@ -39,9 +49,31 @@ function statusLabel(value) {
   return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
+function formatDurationLabel(totalSeconds) {
+  const safeSeconds = Math.max(0, Math.round(Number(totalSeconds || 0)));
+  const minutes = Math.floor(safeSeconds / 60);
+  const seconds = safeSeconds % 60;
+  if (minutes <= 0) return `${seconds}s`;
+  if (seconds <= 0) return `${minutes}m`;
+  return `${minutes}m ${String(seconds).padStart(2, "0")}s`;
+}
+
+function pullTimingSummary(status, nowMs) {
+  const startedMs = parseTimeMs(status?.started_at);
+  const elapsedSeconds = startedMs ? Math.max(0, Math.round((Number(nowMs || Date.now()) - startedMs) / 1000)) : 0;
+  const remainingSeconds = Math.max(0, SALES_ANALYTICS_PULL_ESTIMATED_SECONDS - elapsedSeconds);
+  const progressPercent = Math.min(100, Math.max(6, Math.round((elapsedSeconds / SALES_ANALYTICS_PULL_ESTIMATED_SECONDS) * 100)));
+  return {
+    elapsedLabel: formatDurationLabel(elapsedSeconds),
+    remainingLabel: remainingSeconds > 0 ? formatDurationLabel(remainingSeconds) : "Any second now",
+    progressPercent,
+    startedLabel: startedMs ? formatDateTime(status?.started_at) : "Just now",
+  };
+}
+
 function runStatusCopy(config, status) {
   if (status?.state === "running") {
-    return "The scraper is running now. If this is the first local run, DealerSocket MFA or WhatsApp login may need attention in the saved Chrome profile.";
+    return `Wait while the pull finishes. Most runs show on this website within ${SALES_ANALYTICS_PULL_WINDOW_LABEL}.`;
   }
   if (!config?.runner_ready) {
     return "Install the sales-activity runner dependencies before triggering a scrape from this tab.";
@@ -116,9 +148,48 @@ export default function SalesAnalyticsSection({
   const maxTexts = Math.max(...rows.map((row) => Number(row?.texts_sent || 0)), 1);
   const buttonDisabled = running || loading || !config.runner_ready || !config.can_trigger;
   const screenshotUrl = latest?.screenshot_url ? assetUrl(latest.screenshot_url) : "";
+  const runIsActive = running || String(status?.state || "").toLowerCase() === "running";
+  const [clockMs, setClockMs] = React.useState(() => Date.now());
+
+  React.useEffect(() => {
+    if (!runIsActive) return undefined;
+    setClockMs(Date.now());
+    const intervalId = window.setInterval(() => setClockMs(Date.now()), 1000);
+    return () => window.clearInterval(intervalId);
+  }, [runIsActive, status?.started_at]);
+
+  const timing = pullTimingSummary(status, clockMs);
 
   return (
-    <section className="stack sales-analytics-shell">
+    <section className={`stack sales-analytics-shell ${runIsActive ? "is-pull-running" : ""}`} aria-busy={runIsActive}>
+      {runIsActive ? (
+        <div className="sales-analytics-pull-overlay" role="status" aria-live="polite">
+          <div className="sales-analytics-pull-overlay__card">
+            <span className="eyebrow">Pull in progress</span>
+            <h3>Wait while the report pull finishes</h3>
+            <p>
+              DealerSocket scraping, screenshot creation, WhatsApp delivery, and the website refresh are running now. Most
+              pulls show here within {SALES_ANALYTICS_PULL_WINDOW_LABEL}.
+            </p>
+            <div className="sales-analytics-pull-overlay__stats">
+              <article className="sales-analytics-pull-overlay__stat">
+                <span>Estimated time left</span>
+                <strong>{timing.remainingLabel}</strong>
+                <small>The board refreshes automatically when the run lands.</small>
+              </article>
+              <article className="sales-analytics-pull-overlay__stat">
+                <span>Pull started</span>
+                <strong>{timing.startedLabel}</strong>
+                <small>{status?.message || "The latest report will replace this board as soon as the pull completes."}</small>
+              </article>
+            </div>
+            <div className="sales-analytics-pull-overlay__progress" aria-hidden="true">
+              <span style={{ width: `${timing.progressPercent}%` }} />
+            </div>
+            <small className="sales-analytics-pull-overlay__elapsed">Elapsed: {timing.elapsedLabel}</small>
+          </div>
+        </div>
+      ) : null}
       <div className="panel sales-analytics-hero">
         <div className="sales-analytics-hero__copy">
           <span className="eyebrow">Sales analytics</span>
@@ -129,6 +200,7 @@ export default function SalesAnalyticsSection({
                 type="button"
                 className={`sales-analytics-variant-tab ${selectedVariant === variant.key ? "is-active" : ""}`}
                 onClick={() => onSelectVariant?.(variant.key)}
+                aria-pressed={selectedVariant === variant.key}
               >
                 {variant.label}
               </button>
@@ -160,7 +232,7 @@ export default function SalesAnalyticsSection({
 
         <div className="sales-analytics-hero__actions">
           <button type="button" onClick={onRun} disabled={buttonDisabled}>
-            {running ? "Running Manual Pull..." : "Run Manual Pull"}
+            {runIsActive ? "Pull In Progress..." : "Run Manual Pull"}
           </button>
           <button type="button" className="secondary" onClick={onRefresh} disabled={loading}>
             {loading ? "Refreshing..." : "Refresh Dashboard"}

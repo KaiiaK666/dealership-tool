@@ -17,7 +17,11 @@ function readCleanupProgress() {
 
 function writeCleanupProgress(nextState) {
   if (typeof window === "undefined") return;
-  window.localStorage.setItem(CRM_CLEANUP_PROGRESS_KEY, JSON.stringify(nextState));
+  try {
+    window.localStorage.setItem(CRM_CLEANUP_PROGRESS_KEY, JSON.stringify(nextState));
+  } catch {
+    // Ignore storage write failures and keep the review queue usable.
+  }
 }
 
 function numberLabel(value) {
@@ -63,6 +67,7 @@ export default function CrmCleanupSection() {
   const [analysis, setAnalysis] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [feedback, setFeedback] = useState("");
   const [groupFilter, setGroupFilter] = useState("open");
   const [search, setSearch] = useState("");
   const [cleanedGroupIds, setCleanedGroupIds] = useState([]);
@@ -128,17 +133,23 @@ export default function CrmCleanupSection() {
   const cleanedCount = analysis?.groups?.filter((group) => cleanedGroupSet.has(group.id)).length || 0;
   const fileOption = CRM_CLEANUP_SOURCE_OPTIONS.find((item) => item.id === sourceType) || CRM_CLEANUP_SOURCE_OPTIONS[0];
 
-  async function handleAnalyze(event) {
-    event.preventDefault();
+  async function handleAnalyze() {
     setBusy(true);
     setError("");
+    setFeedback("");
     try {
       const result = await analyzeCrmCleanupFile(selectedFile, sourceType);
       startTransition(() => {
+        setSourceType(result.sourceType);
         setAnalysis(result);
         setGroupFilter("open");
         setSearch("");
       });
+      setFeedback(
+        result.autoDetected
+          ? `Detected ${result.sourceLabel} automatically from the uploaded columns.`
+          : `Showing ${numberLabel(result.summary.totalGroups)} duplicate groups across ${numberLabel(result.summary.flaggedRows)} flagged rows.`
+      );
     } catch (errorValue) {
       setError(errorValue?.message || "Unable to analyze that upload.");
     } finally {
@@ -150,6 +161,7 @@ export default function CrmCleanupSection() {
     setSelectedFile(null);
     setAnalysis(null);
     setError("");
+    setFeedback("");
     setSearch("");
     setGroupFilter("open");
     setCleanedGroupIds([]);
@@ -212,11 +224,12 @@ export default function CrmCleanupSection() {
               <span>{option.label}</span>
               <strong>{option.acceptedLabel}</strong>
               <small>{option.description}</small>
+              <em>{sourceType === option.id ? "Selected" : "Click to use this format"}</em>
             </button>
           ))}
         </div>
 
-        <form className="crm-cleanup-upload-form" onSubmit={handleAnalyze}>
+        <div className="crm-cleanup-upload-form">
           <label className="crm-cleanup-upload-field">
             <span>Upload file</span>
             <input
@@ -226,10 +239,11 @@ export default function CrmCleanupSection() {
               onChange={(event) => {
                 setSelectedFile(event.target.files?.[0] || null);
                 setError("");
+                setFeedback("");
               }}
             />
             <small>
-              {fileOption.label} supports {fileOption.acceptedLabel}.
+              Selected format: {fileOption.label}. Supports {fileOption.acceptedLabel}.
             </small>
           </label>
 
@@ -238,14 +252,15 @@ export default function CrmCleanupSection() {
               <strong>{selectedFile ? selectedFile.name : "No file selected yet"}</strong>
               <span>{selectedFile ? `${(selectedFile.size / 1024).toFixed(1)} KB` : "Choose your export to begin."}</span>
             </div>
-            <button type="submit" disabled={!selectedFile || busy}>
+            <button type="button" onClick={handleAnalyze} disabled={!selectedFile || busy}>
               {busy ? "Analyzing..." : "Analyze CRM Upload"}
             </button>
           </div>
-        </form>
+        </div>
       </div>
 
       {error ? <div className="notice error">{error}</div> : null}
+      {feedback ? <div className="notice">{feedback}</div> : null}
 
       {analysis ? (
         <>
