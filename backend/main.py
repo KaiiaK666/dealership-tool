@@ -113,27 +113,31 @@ BDC_SALES_TRACKER_DEFAULT_SOLD_FROM_APPOINTMENTS_RATE_TARGET = 0.15
 BDC_SALES_TRACKER_DEFAULT_SOLD_FROM_APPOINTMENTS_RATE_CEILING = 0.18
 SPECIALS_KIA_NEW_URL = "https://www.bertogdenmissionkia.com/new-specials/"
 SPECIALS_MAZDA_NEW_URL = "https://www.bertogdenmissionmazda.com/new-vehicles/"
+SPECIALS_AUTO_OUTLET_URL = "https://www.bertogdenmissionautooutlet.com/"
 SPECIALS_KIA_JIRA_ID = "OGDENMIKIA"
 SPECIALS_KIA_OFFERS_JS_URL = "https://d2dhakgqu1upap.cloudfront.net/specials/offers.js"
 SPECIALS_KIA_DEFAULT_PAGE_ID = "66e84f5a02b762a019f35dfb"
 SPECIALS_MAZDA_ALGOLIA_APP_ID = "1WNYBZLEEN"
 SPECIALS_MAZDA_ALGOLIA_SEARCH_KEY = "e2acb682178e9dcc22d18ecb2ff7d9e4"
 SPECIALS_MAZDA_ALGOLIA_INVENTORY_INDEX = "bertogdenmazdamission_production_inventory"
+SPECIALS_AUTO_OUTLET_ALGOLIA_APP_ID = "EHWUW84XVK"
+SPECIALS_AUTO_OUTLET_ALGOLIA_SEARCH_KEY = "fb58227032e79f03b9b820cbaea7f8fb"
+SPECIALS_AUTO_OUTLET_ALGOLIA_INVENTORY_INDEX = "bertogdenpreownedmission-wpml0422_production_inventory"
 SPECIALS_AUTO_REFRESH_SECONDS = 4 * 60 * 60
 SPECIALS_SOURCE_DEFINITIONS: Dict[str, Dict[str, str]] = {
     "kia_new": {
-        "label": "Kia New Specials",
+        "label": "Kia Monthly Specials",
         "default_url": SPECIALS_KIA_NEW_URL,
         "category": "new_specials",
     },
     "mazda_new": {
-        "label": "Mazda New Inventory Picks",
+        "label": "Mazda Monthly Specials",
         "default_url": SPECIALS_MAZDA_NEW_URL,
         "category": "new_inventory",
     },
     "used_srp": {
-        "label": "Used Deal Picks",
-        "default_url": "",
+        "label": "Mission Auto Outlet Top Picks",
+        "default_url": SPECIALS_AUTO_OUTLET_URL,
         "category": "used_inventory",
     },
 }
@@ -1891,17 +1895,14 @@ def specials_source_definition(source_key: str) -> Dict[str, str]:
 
 
 def get_specials_config() -> SpecialsConfigOut:
-    used_srp_url = normalize_optional_url(str(get_meta(SPECIALS_USED_SOURCE_META_KEY) or ""), "used_srp_url") if str(get_meta(SPECIALS_USED_SOURCE_META_KEY) or "").strip() else ""
     return SpecialsConfigOut(
         kia_new_url=SPECIALS_KIA_NEW_URL,
         mazda_new_url=SPECIALS_MAZDA_NEW_URL,
-        used_srp_url=used_srp_url,
+        used_srp_url=SPECIALS_AUTO_OUTLET_URL,
     )
 
 
 def save_specials_config(payload: SpecialsConfigIn) -> SpecialsConfigOut:
-    used_srp_url = normalize_optional_url(payload.used_srp_url, "used_srp_url") if str(payload.used_srp_url or "").strip() else ""
-    set_meta(SPECIALS_USED_SOURCE_META_KEY, used_srp_url)
     return get_specials_config()
 
 
@@ -2295,6 +2296,116 @@ def build_mazda_special_import(source_url: str) -> VehicleSpecialImportIn:
     return VehicleSpecialImportIn(source_key="mazda_new", source_url=source_url, entries=entries)
 
 
+def build_auto_outlet_used_import(source_url: str) -> VehicleSpecialImportIn:
+    app_id = SPECIALS_AUTO_OUTLET_ALGOLIA_APP_ID
+    api_key = SPECIALS_AUTO_OUTLET_ALGOLIA_SEARCH_KEY
+    inventory_index = SPECIALS_AUTO_OUTLET_ALGOLIA_INVENTORY_INDEX
+    try:
+        page_html = browser_fetch_text(source_url)
+        settings = extract_mvn_algolia_settings(page_html)
+        page_app_id = str(settings.get("appId") or "").strip()
+        page_api_key = str(settings.get("apiKeySearch") or "").strip()
+        page_inventory_index = str(settings.get("inventoryIndex") or "").strip()
+        if page_app_id and page_api_key and page_inventory_index:
+            app_id = page_app_id
+            api_key = page_api_key
+            inventory_index = page_inventory_index
+    except HTTPException:
+        pass
+    if not app_id or not api_key or not inventory_index:
+        raise HTTPException(status_code=502, detail="Mission Auto Outlet inventory settings are missing required values")
+
+    algolia_url = f"https://{app_id}-dsn.algolia.net/1/indexes/{inventory_index}/query"
+    algolia_headers = {
+        "X-Algolia-Application-Id": app_id,
+        "X-Algolia-API-Key": api_key,
+        "Content-Type": "application/json",
+        "Origin": "https://www.bertogdenmissionautooutlet.com",
+        "Referer": source_url,
+    }
+    algolia_payload = {
+        "query": "",
+        "hitsPerPage": 40,
+        "facetFilters": [["type:Pre-Owned", "type:Certified Pre-Owned", "type:Used", "type:Certified Used"]],
+    }
+    result = browser_fetch_json(algolia_url, method="POST", headers=algolia_headers, json_payload=algolia_payload)
+    hits = result.get("hits") or []
+    if not hits:
+        raise HTTPException(status_code=502, detail="Mission Auto Outlet inventory search returned no vehicles")
+
+    candidates: List[Tuple[float, float, float, Dict[str, Any]]] = []
+    for hit in hits:
+        if not isinstance(hit, dict):
+            continue
+        title = collapse_whitespace(
+            " ".join(
+                [
+                    str(hit.get("year") or "").strip(),
+                    str(hit.get("make") or "").strip(),
+                    str(hit.get("model") or "").strip(),
+                    str(hit.get("trim") or "").strip(),
+                ]
+            )
+        ) or collapse_whitespace(str(hit.get("title_vrp") or "").replace("Pre-Owned", "").replace("Certified", ""))
+        link_url = str(hit.get("link") or "").strip()
+        image_url = str(hit.get("thumbnail") or "").strip()
+        if not title or not link_url or not image_url:
+            continue
+        price_value = numeric_token_from_text(str(hit.get("our_price") or ""))
+        mileage_value = numeric_token_from_text(str(hit.get("miles") or ""))
+        score_value, _ = score_used_special_candidate(
+            title,
+            format_currency_short(price_value) if price_value else "",
+            f"{int(mileage_value):,} miles" if mileage_value else "",
+        )
+        year_value = parse_vehicle_year(title)
+        candidates.append((score_value, mileage_value, -year_value, hit))
+
+    if not candidates:
+        raise HTTPException(status_code=502, detail="Mission Auto Outlet inventory search returned no usable vehicles")
+
+    candidates.sort(key=lambda item: (-item[0], item[1], item[2]))
+    entries: List[VehicleSpecialImportEntryIn] = []
+    for _, _, _, hit in candidates[:16]:
+        title = collapse_whitespace(
+            " ".join(
+                [
+                    str(hit.get("year") or "").strip(),
+                    str(hit.get("make") or "").strip(),
+                    str(hit.get("model") or "").strip(),
+                    str(hit.get("trim") or "").strip(),
+                ]
+            )
+        ) or collapse_whitespace(str(hit.get("title_vrp") or "").replace("Pre-Owned", "").replace("Certified", ""))
+        ext_color = collapse_whitespace(hit.get("ext_color") or "")
+        int_color = collapse_whitespace(hit.get("int_color") or "")
+        drivetrain = collapse_whitespace(hit.get("drivetrain") or "")
+        subtitle_parts = [part for part in (ext_color, int_color, drivetrain) if part]
+        price_value = numeric_token_from_text(str(hit.get("our_price") or ""))
+        mileage_value = numeric_token_from_text(str(hit.get("miles") or ""))
+        stock_number = collapse_whitespace(hit.get("stock") or "")
+        note_parts = ["Mission Auto Outlet"]
+        if stock_number:
+            note_parts.append(f"Stock {stock_number}")
+        date_in_stock = collapse_whitespace(hit.get("date_in_stock") or "")
+        if date_in_stock:
+            note_parts.append(f"In stock {date_in_stock}")
+        entries.append(
+            VehicleSpecialImportEntryIn(
+                badge="Auto Outlet Pick",
+                title=title,
+                subtitle=" • ".join(subtitle_parts) if subtitle_parts else "Pre-owned highlight from Mission Auto Outlet",
+                price_text=f"Bert Ogden Price {format_currency_short(price_value)}" if price_value else "",
+                payment_text=f"Stock {stock_number}" if stock_number else "Mission Auto Outlet",
+                mileage_text=f"{int(mileage_value):,} miles" if mileage_value else "",
+                note=" • ".join(note_parts),
+                image_url=str(hit.get("thumbnail") or "").strip(),
+                link_url=str(hit.get("link") or "").strip(),
+            )
+        )
+    return VehicleSpecialImportIn(source_key="used_srp", source_url=source_url, entries=entries)
+
+
 def import_auto_vehicle_special_source(source_key: str) -> SpecialsListOut:
     normalized_source_key = normalize_special_source_key(source_key)
     config = get_specials_config()
@@ -2302,8 +2413,10 @@ def import_auto_vehicle_special_source(source_key: str) -> SpecialsListOut:
         payload = build_kia_special_import(config.kia_new_url)
     elif normalized_source_key == "mazda_new":
         payload = build_mazda_special_import(config.mazda_new_url)
+    elif normalized_source_key == "used_srp":
+        payload = build_auto_outlet_used_import(config.used_srp_url)
     else:
-        raise HTTPException(status_code=400, detail="Automatic import is only available for Kia and Mazda website sources")
+        raise HTTPException(status_code=400, detail="Automatic import is only available for Kia, Mazda, and Auto Outlet sources")
     return import_vehicle_special_feed(payload)
 
 
@@ -2359,7 +2472,7 @@ def latest_special_feed_import_ts(source_key: str) -> float:
 
 def maybe_auto_refresh_special_sources() -> None:
     now_ts = time.time()
-    for source_key in ("kia_new", "mazda_new"):
+    for source_key in ("kia_new", "mazda_new", "used_srp"):
         imported_ts = latest_special_feed_import_ts(source_key)
         if imported_ts and (now_ts - imported_ts) < SPECIALS_AUTO_REFRESH_SECONDS:
             continue

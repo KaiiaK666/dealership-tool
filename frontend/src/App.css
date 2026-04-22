@@ -3972,6 +3972,14 @@ button.days-off-day:hover:not(:disabled) {
   color: #fff;
 }
 
+.special-feed-card__overlay-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
 .special-feed-card__overlay span,
 .special-feed-card__overlay strong {
   width: fit-content;
@@ -3988,6 +3996,10 @@ button.days-off-day:hover:not(:disabled) {
 .special-feed-card__overlay strong {
   font-size: 0.76rem;
   background: rgba(32, 151, 116, 0.22);
+}
+
+.special-feed-card__month {
+  background: rgba(255, 255, 255, 0.24);
 }
 
 .special-feed-card.is-used .special-feed-card__art {
@@ -4040,6 +4052,11 @@ button.days-off-day:hover:not(:disabled) {
   line-height: 1.5;
 }
 
+.special-feed-admin-card__copy small {
+  color: var(--muted);
+  line-height: 1.5;
+}
+
 .special-feed-admin-card__copy span {
   font-family: "IBM Plex Mono", monospace;
   font-size: 0.72rem;
@@ -4076,6 +4093,10 @@ button.days-off-day:hover:not(:disabled) {
 .special-feed-admin-manual {
   border-top: 1px solid rgba(31, 37, 43, 0.08);
   padding-top: 14px;
+}
+
+.special-feed-admin-manual .admin-grid {
+  margin-top: 14px;
 }
 
 .special-feed-admin-manual summary {

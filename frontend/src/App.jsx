@@ -97,21 +97,21 @@ const TAB_INDEX = Object.fromEntries(TABS.map((item, index) => [item.id, index])
 const SPECIAL_FEED_SOURCES = [
   {
     key: "kia_new",
-    label: "Kia New Specials",
-    description: "Imports the live Kia specials page and turns it into generated offer tiles.",
+    label: "Kia Monthly Specials",
+    description: "Imports the live Kia specials page and turns it into month-stamped offer tiles.",
     defaultUrl: "https://www.bertogdenmissionkia.com/new-specials/",
   },
   {
     key: "mazda_new",
-    label: "Mazda New Inventory Picks",
-    description: "Imports the Mazda new inventory page so you can feature current new-car spots in the specials tab.",
+    label: "Mazda Monthly Specials",
+    description: "Imports the live Mazda new inventory page and turns it into month-stamped offer tiles.",
     defaultUrl: "https://www.bertogdenmissionmazda.com/new-vehicles/",
   },
   {
     key: "used_srp",
-    label: "Used Deal Picks",
-    description: "Imports a used SRP page, scores vehicles by price and miles, and surfaces the strongest deal tiles separately.",
-    defaultUrl: "",
+    label: "Mission Auto Outlet Top Picks",
+    description: "Pulls the strongest used-car picks from Mission Auto Outlet based on price, miles, and model year.",
+    defaultUrl: "https://www.bertogdenmissionautooutlet.com/",
   },
 ];
 
@@ -378,8 +378,24 @@ function weekdayLongLabel(index) {
   return CALENDAR_WEEKDAY_LONG[index] || "";
 }
 
+function parseDateLike(value) {
+  if (value === null || value === undefined || value === "") return null;
+  if (value instanceof Date) return value;
+  if (typeof value === "number") {
+    return new Date(value < 1e12 ? value * 1000 : value);
+  }
+  const raw = String(value).trim();
+  if (!raw) return null;
+  if (/^\d+(\.\d+)?$/.test(raw)) {
+    const numeric = Number(raw);
+    return new Date(numeric < 1e12 ? numeric * 1000 : numeric);
+  }
+  return new Date(raw);
+}
+
 function dateTimeLabel(value) {
-  const parsed = new Date(value);
+  const parsed = parseDateLike(value);
+  if (!parsed) return "";
   if (Number.isNaN(parsed.getTime())) return value;
   return new Intl.DateTimeFormat("en-US", {
     month: "short",
@@ -387,6 +403,12 @@ function dateTimeLabel(value) {
     hour: "numeric",
     minute: "2-digit",
   }).format(parsed);
+}
+
+function specialMonthStamp(value) {
+  const parsed = parseDateLike(value);
+  if (!parsed || Number.isNaN(parsed.getTime())) return monthLabel(currentMonth());
+  return new Intl.DateTimeFormat("en-US", { month: "long", year: "numeric" }).format(parsed);
 }
 
 function longDateLabel(value) {
@@ -1821,6 +1843,11 @@ export default function App() {
   const selectedSpecial = specials.find((item) => item.id === selectedSpecialId) || specials[0] || null;
   const specialFeedSourceMap = Object.fromEntries(SPECIAL_FEED_SOURCES.map((item) => [item.key, item]));
   const populatedSpecialVehicleSections = specialVehicleSections.filter((section) => (section.entries || []).length);
+  const specialSectionsByKey = Object.fromEntries(specialVehicleSections.map((section) => [section.key, section]));
+  const latestSpecialImportTs = populatedSpecialVehicleSections.reduce(
+    (maxValue, section) => Math.max(maxValue, Number(section.imported_ts || 0)),
+    0
+  );
   const selectedTrafficSalesperson =
     activeSales.find((person) => String(person.id) === String(selectedTrafficSalesId)) || null;
   const selectedTrafficSalesStore =
@@ -3940,7 +3967,7 @@ export default function App() {
   function specialsSourceUrl(sourceKey) {
     if (sourceKey === "kia_new") return specialsConfig.kia_new_url || specialFeedSourceMap.kia_new?.defaultUrl || "";
     if (sourceKey === "mazda_new") return specialsConfig.mazda_new_url || specialFeedSourceMap.mazda_new?.defaultUrl || "";
-    return specialsConfigDraft.used_srp_url || specialsConfig.used_srp_url || specialFeedSourceMap.used_srp?.defaultUrl || "";
+    return specialsConfig.used_srp_url || specialFeedSourceMap.used_srp?.defaultUrl || "";
   }
 
   async function persistUsedSpecialsUrl() {
@@ -3957,13 +3984,6 @@ export default function App() {
     setBusy(`specials-auto-${sourceKey}`);
     setError("");
     try {
-      if (sourceKey === "used_srp") {
-        const nextConfig = await persistUsedSpecialsUrl();
-        const sourceUrl = String(nextConfig.used_srp_url || "").trim();
-        if (!sourceUrl) throw new Error("Add the used SRP URL first.");
-        setSpecialsImportStatus("Used deal picks still use the manual fallback. Kia and Mazda are now one-click refreshes.");
-        return;
-      }
       const saved = await importSpecialFeedSource(adminToken, sourceKey);
       syncSpecialsState(saved);
       const refreshedSection = (saved.vehicle_sections || []).find((section) => section.key === sourceKey);
@@ -3984,10 +4004,13 @@ export default function App() {
       syncSpecialsState(kiaSaved);
       const mazdaSaved = await importSpecialFeedSource(adminToken, "mazda_new");
       syncSpecialsState(mazdaSaved);
-      const sections = mazdaSaved.vehicle_sections || [];
+      const usedSaved = await importSpecialFeedSource(adminToken, "used_srp");
+      syncSpecialsState(usedSaved);
+      const sections = usedSaved.vehicle_sections || [];
       const kiaCount = sections.find((section) => section.key === "kia_new")?.entries?.length || 0;
       const mazdaCount = sections.find((section) => section.key === "mazda_new")?.entries?.length || 0;
-      setSpecialsImportStatus(`Refreshed Kia (${kiaCount}) and Mazda (${mazdaCount}) website sections from the live feeds.`);
+      const usedCount = sections.find((section) => section.key === "used_srp")?.entries?.length || 0;
+      setSpecialsImportStatus(`Refreshed Kia (${kiaCount}), Mazda (${mazdaCount}), and Auto Outlet (${usedCount}) from the live feeds.`);
     } catch (errorValue) {
       setError(errText(errorValue));
     } finally {
@@ -8158,48 +8181,50 @@ export default function App() {
         {tab === "specials" ? (
           <section className="stack">
             <div className="panel specials-panel-header">
-              <span className="eyebrow">Specials</span>
-              <h2>Live website specials with one-click Kia and Mazda refresh</h2>
+              <span className="eyebrow">Live specials</span>
+              <h2>{specialMonthStamp(latestSpecialImportTs)} Kia, Mazda, and Auto Outlet picks</h2>
               <p className="admin-note">
-                Kia pulls straight from the live specials feed, Mazda pulls straight from the live new-inventory feed, and both land
-                here automatically. Manual graphic tiles still live underneath for anything custom.
+                This page now stays focused on the live monthly Kia and Mazda offer tiles plus the top used picks from Mission Auto
+                Outlet. The old manual graphic library stays on the admin side only.
               </p>
               <div className="specials-panel-header__chips">
-                <span>{populatedSpecialVehicleSections.length} live source section{populatedSpecialVehicleSections.length === 1 ? "" : "s"}</span>
-                <span>{specials.length} manual tile{specials.length === 1 ? "" : "s"}</span>
-                <span>{specialsConfig.used_srp_url ? "Used SRP configured" : "Used SRP waiting on URL"}</span>
+                <span>{specialMonthStamp(latestSpecialImportTs)} stamp</span>
+                <span>{specialSectionsByKey.kia_new?.entries?.length || 0} Kia tile{(specialSectionsByKey.kia_new?.entries?.length || 0) === 1 ? "" : "s"}</span>
+                <span>{specialSectionsByKey.mazda_new?.entries?.length || 0} Mazda tile{(specialSectionsByKey.mazda_new?.entries?.length || 0) === 1 ? "" : "s"}</span>
+                <span>{specialSectionsByKey.used_srp?.entries?.length || 0} Auto Outlet pick{(specialSectionsByKey.used_srp?.entries?.length || 0) === 1 ? "" : "s"}</span>
               </div>
               {adminToken ? (
                 <div className="specials-panel-header__actions">
                   <button
                     type="button"
                     onClick={refreshAutomaticSpecials}
-                    disabled={busy === "specials-auto-all" || busy === "specials-auto-kia_new" || busy === "specials-auto-mazda_new"}
+                    disabled={
+                      busy === "specials-auto-all" ||
+                      busy === "specials-auto-kia_new" ||
+                      busy === "specials-auto-mazda_new" ||
+                      busy === "specials-auto-used_srp"
+                    }
                   >
-                    {busy === "specials-auto-all" ? "Refreshing Kia + Mazda..." : "Refresh Kia + Mazda"}
-                  </button>
-                  <button
-                    type="button"
-                    className="secondary"
-                    onClick={() => refreshSpecialFeedSource("kia_new")}
-                    disabled={busy === "specials-auto-all" || busy === "specials-auto-kia_new"}
-                  >
-                    {busy === "specials-auto-kia_new" ? "Refreshing Kia..." : "Refresh Kia"}
-                  </button>
-                  <button
-                    type="button"
-                    className="secondary"
-                    onClick={() => refreshSpecialFeedSource("mazda_new")}
-                    disabled={busy === "specials-auto-all" || busy === "specials-auto-mazda_new"}
-                  >
-                    {busy === "specials-auto-mazda_new" ? "Refreshing Mazda..." : "Refresh Mazda"}
+                    {busy === "specials-auto-all" ? "Refreshing all live specials..." : "Refresh All Live Specials"}
                   </button>
                 </div>
               ) : null}
               {specialsImportStatus ? <div className="special-feed-admin-panel__status">{specialsImportStatus}</div> : null}
             </div>
 
-            {specialVehicleSections.map((section) => {
+            {populatedSpecialVehicleSections.length ? (
+              populatedSpecialVehicleSections.map((section) => {
+                const sectionMonth = specialMonthStamp(section.imported_ts || latestSpecialImportTs);
+                const sectionTitle =
+                  section.key === "kia_new"
+                    ? `${sectionMonth} Kia specials`
+                    : section.key === "mazda_new"
+                      ? `${sectionMonth} Mazda specials`
+                      : `${sectionMonth} Mission Auto Outlet top picks`;
+                const sectionSummary =
+                  section.key === "used_srp"
+                    ? "Highest-scoring used inventory picks based on price, miles, and model year."
+                    : "Live website tiles cached from the current monthly offers.";
               const sourceMeta = specialFeedSourceMap[section.key] || null;
               const sectionUrl = section.source_url || sourceMeta?.defaultUrl || "";
               return (
@@ -8207,15 +8232,12 @@ export default function App() {
                   <div className="special-feed-section__header">
                     <div>
                       <span className="eyebrow">{section.label}</span>
-                      <h3>
-                        {section.key === "used_srp"
-                          ? "Good-deal used tiles based on imported price and mileage"
-                          : "Website-sourced vehicle specials cached from the live page"}
-                      </h3>
-                      <p className="admin-note">{sourceMeta?.description || "Imported directly from the live website source."}</p>
+                      <h3>{sectionTitle}</h3>
+                      <p className="admin-note">{sectionSummary}</p>
                     </div>
                     <div className="special-feed-section__meta">
-                      {section.imported_ts ? <span>Imported {dateTimeLabel(section.imported_ts)}</span> : <span>Not imported yet</span>}
+                      <span>{section.entries?.length || 0} live tile{(section.entries?.length || 0) === 1 ? "" : "s"}</span>
+                      {section.imported_ts ? <span>Synced {dateTimeLabel(section.imported_ts)}</span> : <span>Not imported yet</span>}
                       {sectionUrl ? (
                         <a href={sectionUrl} target="_blank" rel="noreferrer">
                           Open source
@@ -8226,8 +8248,7 @@ export default function App() {
                     </div>
                   </div>
 
-                  {section.entries?.length ? (
-                    <div className="special-feed-grid">
+                  <div className="special-feed-grid">
                       {section.entries.map((item) => {
                         const Wrapper = item.link_url ? "a" : "div";
                         const wrapperProps = item.link_url
@@ -8242,7 +8263,10 @@ export default function App() {
                             <div className="special-feed-card__art">
                               {item.image_url ? <img src={item.image_url} alt={item.title} /> : null}
                               <div className="special-feed-card__overlay">
-                                <span>{item.badge || section.label}</span>
+                                <div className="special-feed-card__overlay-top">
+                                  <span>{item.badge || section.label}</span>
+                                  <span className="special-feed-card__month">{sectionMonth}</span>
+                                </div>
                                 {item.score_label ? <strong>{item.score_label}</strong> : null}
                               </div>
                             </div>
@@ -8261,56 +8285,15 @@ export default function App() {
                         );
                       })}
                     </div>
-                  ) : (
-                    <div className="empty">
-                      {section.key === "used_srp" && !sectionUrl
-                        ? "Add the used SRP URL in Admin > Specials, then import the used feed if you need those deal picks."
-                        : adminToken
-                          ? "No imported entries yet for this source. Use the refresh buttons above."
-                          : "No imported entries yet for this source. Ask an admin to refresh the live feeds."}
-                    </div>
-                  )}
                 </div>
               );
-            })}
-
-            <div className="panel">
-              <span className="eyebrow">Graphic tile library</span>
-              <h3>Manual uploaded promo graphics</h3>
-              <p className="admin-note">Keep your square offer graphics here for polished promotions and click any tile to preview it larger.</p>
-            </div>
-
-            {selectedSpecial ? (
-              <div className="panel specials-hero">
-                <div className="specials-hero__copy">
-                  <span className="eyebrow">{selectedSpecial.tag}</span>
-                  <h2>{selectedSpecial.title}</h2>
-                  <p>Click any manual tile below to switch the current graphic.</p>
-                </div>
-                <div className="specials-hero__media">
-                  <img src={assetUrl(selectedSpecial.image_url)} alt={selectedSpecial.title} />
-                </div>
+            })) : (
+              <div className="panel empty">
+                {adminToken
+                  ? "No live specials have been imported yet. Use Refresh All Live Specials above."
+                  : "No live specials are available yet. Ask an admin to refresh the live feeds."}
               </div>
-            ) : (
-              <div className="empty">No manual specials uploaded yet.</div>
             )}
-
-            <div className="specials-grid">
-              {specials.map((item) => (
-                <button
-                  key={item.id}
-                  type="button"
-                  className={`special-card ${selectedSpecial?.id === item.id ? "is-active" : ""}`}
-                  onClick={() => setSelectedSpecialId(item.id)}
-                >
-                  <img src={assetUrl(item.image_url)} alt={item.title} />
-                  <div className="special-card__copy">
-                    <span>{item.tag}</span>
-                    <strong>{item.title}</strong>
-                  </div>
-                </button>
-              ))}
-            </div>
           </section>
         ) : null}
 
@@ -10473,102 +10456,14 @@ export default function App() {
 
                 {adminSection === "specials" ? (
                   <>
-                    <div className="admin-grid">
-                      <div className="panel">
-                        <span className="eyebrow">{specialForm.editingId ? "Edit special" : "Upload special"}</span>
-                        <h3>1080 x 1080 offer tile</h3>
-                        {specialForm.editingId && selectedSpecial ? (
-                          <div className="asset-card">
-                            <strong>Editing: {selectedSpecial.title}</strong>
-                            <p>
-                              Tag: {selectedSpecial.tag}
-                              <br />
-                              Leave the image field empty if you only want to change the title or tag.
-                            </p>
-                          </div>
-                        ) : null}
-                        <form className="form" onSubmit={uploadSpecial}>
-                          <label>
-                            <span>Title</span>
-                            <input
-                              value={specialForm.title}
-                              onChange={(event) => setSpecialForm((current) => ({ ...current, title: event.target.value }))}
-                              placeholder="Sportage Lease Offer"
-                            />
-                          </label>
-                          <label>
-                            <span>Tag</span>
-                            <input
-                              value={specialForm.tag}
-                              onChange={(event) => setSpecialForm((current) => ({ ...current, tag: event.target.value }))}
-                              placeholder="Sportage"
-                            />
-                          </label>
-                          <label>
-                            <span>Image file</span>
-                            <input
-                              key={specialUploadKey}
-                              type="file"
-                              accept="image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp"
-                              onChange={(event) =>
-                                setSpecialForm((current) => ({ ...current, file: event.target.files?.[0] || null }))
-                              }
-                            />
-                          </label>
-                          <div className="controls">
-                            <button type="submit" disabled={busy === "upload-special"}>
-                              {busy === "upload-special"
-                                ? specialForm.editingId
-                                  ? "Saving..."
-                                  : "Uploading..."
-                                : specialForm.editingId
-                                  ? "Save Changes"
-                                  : "Upload Special"}
-                            </button>
-                            {specialForm.editingId ? (
-                              <button type="button" className="secondary" onClick={resetSpecialForm}>
-                                Create New Tile
-                              </button>
-                            ) : null}
-                          </div>
-                        </form>
-                      </div>
-
-                      <div className="panel">
-                        <span className="eyebrow">Live specials</span>
-                        <h3>Current uploaded graphics</h3>
-                        <p className="admin-note">Click any tile to edit its title, tag, or replace the image.</p>
-                        <div className="specials-grid specials-grid--admin">
-                          {specials.length ? (
-                            specials.map((item) => (
-                              <button
-                                key={`admin-special-${item.id}`}
-                                type="button"
-                                className={`special-card ${selectedSpecial?.id === item.id ? "is-active" : ""}`}
-                                onClick={() => beginSpecialEdit(item)}
-                              >
-                                <img src={assetUrl(item.image_url)} alt={item.title} />
-                                <div className="special-card__copy">
-                                  <span>{item.tag}</span>
-                                  <strong>{item.title}</strong>
-                                </div>
-                              </button>
-                            ))
-                          ) : (
-                            <div className="empty">No specials uploaded yet.</div>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-
                     <div className="panel special-feed-admin-panel">
                       <div className="special-feed-admin-panel__header">
                         <div>
                           <span className="eyebrow">Website imports</span>
-                          <h3>Refresh Kia and Mazda in one click</h3>
+                          <h3>Refresh Kia, Mazda, and Auto Outlet in one click</h3>
                           <p className="admin-note">
-                            The app now pulls the live Kia specials feed and the live Mazda new-inventory feed for you. This is the
-                            only workflow most people should use.
+                            This is the primary specials workflow now. It pulls the live Kia monthly offers, the live Mazda monthly
+                            offers, and the top used picks from Mission Auto Outlet.
                           </p>
                         </div>
                         {specialsImportStatus ? <div className="special-feed-admin-panel__status">{specialsImportStatus}</div> : null}
@@ -10578,52 +10473,38 @@ export default function App() {
                         <button
                           type="button"
                           onClick={refreshAutomaticSpecials}
-                          disabled={busy === "specials-auto-all" || busy === "specials-auto-kia_new" || busy === "specials-auto-mazda_new"}
+                          disabled={
+                            busy === "specials-auto-all" ||
+                            busy === "specials-auto-kia_new" ||
+                            busy === "specials-auto-mazda_new" ||
+                            busy === "specials-auto-used_srp"
+                          }
                         >
-                          {busy === "specials-auto-all" ? "Refreshing Kia + Mazda..." : "Refresh Kia + Mazda"}
-                        </button>
-                        <button
-                          type="button"
-                          className="secondary"
-                          onClick={() => refreshSpecialFeedSource("kia_new")}
-                          disabled={busy === "specials-auto-all" || busy === "specials-auto-kia_new"}
-                        >
-                          {busy === "specials-auto-kia_new" ? "Refreshing Kia..." : "Refresh Kia Only"}
-                        </button>
-                        <button
-                          type="button"
-                          className="secondary"
-                          onClick={() => refreshSpecialFeedSource("mazda_new")}
-                          disabled={busy === "specials-auto-all" || busy === "specials-auto-mazda_new"}
-                        >
-                          {busy === "specials-auto-mazda_new" ? "Refreshing Mazda..." : "Refresh Mazda Only"}
+                          {busy === "specials-auto-all" ? "Refreshing all live specials..." : "Refresh All Live Specials"}
                         </button>
                       </div>
 
                       <div className="special-feed-admin-grid">
-                        {SPECIAL_FEED_SOURCES.filter((source) => source.key !== "used_srp").map((source) => (
+                        {SPECIAL_FEED_SOURCES.map((source) => {
+                          const sourceSection = specialSectionsByKey[source.key];
+                          const sourceCount = sourceSection?.entries?.length || 0;
+                          const sourceMonth = specialMonthStamp(sourceSection?.imported_ts || latestSpecialImportTs);
+                          return (
                           <article key={`special-source-${source.key}`} className="special-feed-admin-card special-feed-admin-card--auto">
                             <div className="special-feed-admin-card__copy">
                               <span>{source.label}</span>
                               <strong>{source.description}</strong>
+                              <small>
+                                {sourceCount} live tile{sourceCount === 1 ? "" : "s"} · {sourceMonth}
+                                {sourceSection?.imported_ts ? ` · synced ${dateTimeLabel(sourceSection.imported_ts)}` : " · not imported yet"}
+                              </small>
                             </div>
                             <div className="special-feed-admin-card__url">
                               <label>
                                 <span>Source URL</span>
-                                <input
-                                  value={source.key === "used_srp" ? specialsConfigDraft.used_srp_url : specialsSourceUrl(source.key)}
-                                  onChange={(event) =>
-                                    source.key === "used_srp"
-                                      ? setSpecialsConfigDraft({ used_srp_url: event.target.value })
-                                      : null
-                                  }
-                                  readOnly={source.key !== "used_srp"}
-                                  placeholder={source.defaultUrl || "Paste the used SRP URL"}
-                                />
+                                <input value={specialsSourceUrl(source.key)} readOnly placeholder={source.defaultUrl || ""} />
                               </label>
-                              <small>
-                                Fixed live source. No copy, console, or clipboard step anymore.
-                              </small>
+                              <small>Fixed live source. No copy, console, or clipboard step anymore.</small>
                             </div>
                             <div className="special-feed-admin-card__actions">
                               <a href={specialsSourceUrl(source.key)} target="_blank" rel="noreferrer">
@@ -10632,72 +10513,112 @@ export default function App() {
                               <button
                                 type="button"
                                 onClick={() => refreshSpecialFeedSource(source.key)}
-                                disabled={busy === "specials-auto-all" || busy === `specials-auto-${source.key}`}
+                                disabled={busy === "specials-auto-all" || busy === `specials-auto-${source.key}` || busy !== ""}
                               >
                                 {busy === `specials-auto-${source.key}` ? "Refreshing..." : "Refresh Now"}
                               </button>
                             </div>
                           </article>
-                        ))}
+                          );
+                        })}
                       </div>
 
-                      <details className="special-feed-admin-manual">
-                        <summary>Advanced used SRP fallback</summary>
-                        <label>
-                          <span>Used SRP URL</span>
-                          <input
-                            value={specialsConfigDraft.used_srp_url}
-                            onChange={(event) => setSpecialsConfigDraft({ used_srp_url: event.target.value })}
-                            placeholder="Paste the used SRP URL"
-                          />
-                        </label>
-                        <div className="special-feed-admin-card__actions">
-                          <button
-                            type="button"
-                            className="secondary"
-                            onClick={async () => {
-                              try {
-                                const nextConfig = await persistUsedSpecialsUrl();
-                                const sourceUrl = String(nextConfig.used_srp_url || "").trim();
-                                if (!sourceUrl) throw new Error("Add the used SRP URL first.");
-                                if (typeof window !== "undefined") {
-                                  window.open(sourceUrl, "_blank", "noopener,noreferrer");
-                                }
-                              } catch (errorValue) {
-                                setError(errText(errorValue));
-                              }
-                            }}
-                          >
-                            Save URL + Open Used Source
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => importSpecialFeedFromClipboard("used_srp")}
-                            disabled={busy === "specials-import-used_srp"}
-                          >
-                            {busy === "specials-import-used_srp" ? "Importing..." : "Import Used From Clipboard"}
-                          </button>
-                        </div>
-                        <label>
-                          <span>Manual payload paste</span>
-                          <textarea
-                            rows={8}
-                            value={specialsImportPayload}
-                            onChange={(event) => setSpecialsImportPayload(event.target.value)}
-                            placeholder="Paste a used-SRP payload only if you need the manual fallback."
-                          />
-                        </label>
-                        <div className="controls">
-                          <button
-                            type="button"
-                            onClick={() => importSpecialFeedPayload(specialsImportPayload)}
-                            disabled={busy === "specials-import-payload"}
-                          >
-                            {busy === "specials-import-payload" ? "Importing..." : "Import Pasted Payload"}
-                          </button>
-                        </div>
-                      </details>
+                      <p className="admin-note">All three live sources refresh from fixed website feeds now. No manual used-SRP import step remains.</p>
                     </div>
+
+                    <details className="special-feed-admin-manual">
+                      <summary>Optional manual override library</summary>
+                      <div className="admin-grid">
+                        <div className="panel">
+                          <span className="eyebrow">{specialForm.editingId ? "Edit override tile" : "Upload override tile"}</span>
+                          <h3>1080 x 1080 manual promo tile</h3>
+                          <p className="admin-note">
+                            Only use this if you need a custom one-off graphic beyond the live Kia, Mazda, and Auto Outlet feeds.
+                          </p>
+                          {specialForm.editingId && selectedSpecial ? (
+                            <div className="asset-card">
+                              <strong>Editing: {selectedSpecial.title}</strong>
+                              <p>
+                                Tag: {selectedSpecial.tag}
+                                <br />
+                                Leave the image field empty if you only want to change the title or tag.
+                              </p>
+                            </div>
+                          ) : null}
+                          <form className="form" onSubmit={uploadSpecial}>
+                            <label>
+                              <span>Title</span>
+                              <input
+                                value={specialForm.title}
+                                onChange={(event) => setSpecialForm((current) => ({ ...current, title: event.target.value }))}
+                                placeholder="Sportage Lease Offer"
+                              />
+                            </label>
+                            <label>
+                              <span>Tag</span>
+                              <input
+                                value={specialForm.tag}
+                                onChange={(event) => setSpecialForm((current) => ({ ...current, tag: event.target.value }))}
+                                placeholder="Sportage"
+                              />
+                            </label>
+                            <label>
+                              <span>Image file</span>
+                              <input
+                                key={specialUploadKey}
+                                type="file"
+                                accept="image/png,image/jpeg,image/webp,.png,.jpg,.jpeg,.webp"
+                                onChange={(event) =>
+                                  setSpecialForm((current) => ({ ...current, file: event.target.files?.[0] || null }))
+                                }
+                              />
+                            </label>
+                            <div className="controls">
+                              <button type="submit" disabled={busy === "upload-special"}>
+                                {busy === "upload-special"
+                                  ? specialForm.editingId
+                                    ? "Saving..."
+                                    : "Uploading..."
+                                  : specialForm.editingId
+                                    ? "Save Changes"
+                                    : "Upload Special"}
+                              </button>
+                              {specialForm.editingId ? (
+                                <button type="button" className="secondary" onClick={resetSpecialForm}>
+                                  Create New Tile
+                                </button>
+                              ) : null}
+                            </div>
+                          </form>
+                        </div>
+
+                        <div className="panel">
+                          <span className="eyebrow">Manual overrides</span>
+                          <h3>Current uploaded graphics</h3>
+                          <p className="admin-note">Click any tile to edit its title, tag, or replace the image.</p>
+                          <div className="specials-grid specials-grid--admin">
+                            {specials.length ? (
+                              specials.map((item) => (
+                                <button
+                                  key={`admin-special-${item.id}`}
+                                  type="button"
+                                  className={`special-card ${selectedSpecial?.id === item.id ? "is-active" : ""}`}
+                                  onClick={() => beginSpecialEdit(item)}
+                                >
+                                  <img src={assetUrl(item.image_url)} alt={item.title} />
+                                  <div className="special-card__copy">
+                                    <span>{item.tag}</span>
+                                    <strong>{item.title}</strong>
+                                  </div>
+                                </button>
+                              ))
+                            ) : (
+                              <div className="empty">No manual override graphics uploaded yet.</div>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    </details>
                   </>
                 ) : null}
               </>
