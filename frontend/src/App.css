@@ -3846,6 +3846,28 @@ button.days-off-day:hover:not(:disabled) {
   gap: 16px;
 }
 
+.special-feed-admin-panel__steps {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.special-feed-admin-panel__steps span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 34px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(31, 124, 246, 0.12);
+  background: rgba(245, 249, 255, 0.92);
+  color: #35557b;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
 .special-feed-section__header,
 .special-feed-admin-panel__header {
   display: flex;
@@ -3968,6 +3990,11 @@ button.days-off-day:hover:not(:disabled) {
   gap: 10px;
 }
 
+.special-feed-admin-card__url small {
+  color: var(--muted);
+  line-height: 1.5;
+}
+
 .special-feed-admin-card__copy span {
   font-family: "IBM Plex Mono", monospace;
   font-size: 0.72rem;
@@ -3999,6 +4026,30 @@ button.days-off-day:hover:not(:disabled) {
 
 .special-feed-admin-manual textarea {
   min-height: 140px;
+}
+
+.special-feed-admin-manual {
+  border-top: 1px solid rgba(31, 37, 43, 0.08);
+  padding-top: 14px;
+}
+
+.special-feed-admin-manual summary {
+  cursor: pointer;
+  list-style: none;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #5d6675;
+}
+
+.special-feed-admin-manual summary::-webkit-details-marker {
+  display: none;
+}
+
+.special-feed-admin-manual[open] summary {
+  margin-bottom: 10px;
 }
 
 .special-card {
