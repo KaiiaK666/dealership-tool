@@ -5197,6 +5197,60 @@ button.special-card:hover:not(:disabled) {
   color: #3b1e0c;
 }
 
+.sales-automation-admin-panel {
+  display: grid;
+  gap: 16px;
+}
+
+.sales-automation-admin-panel__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.sales-automation-admin-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.sales-automation-admin-card {
+  display: grid;
+  gap: 14px;
+}
+
+.sales-automation-admin-card__copy {
+  display: grid;
+  gap: 6px;
+}
+
+.sales-automation-admin-card__copy span {
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: rgba(83, 67, 46, 0.7);
+}
+
+.sales-automation-admin-card__copy strong {
+  font-size: 1rem;
+}
+
+.sales-automation-admin-card__copy small {
+  color: rgba(63, 49, 31, 0.72);
+  line-height: 1.5;
+}
+
+.sales-automation-admin-card__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: center;
+  font-size: 0.88rem;
+  color: rgba(63, 49, 31, 0.75);
+}
+
 @media (max-width: 1120px) {
   .hero,
   .lead-grid,
@@ -5232,6 +5286,7 @@ button.special-card:hover:not(:disabled) {
   .traffic-toolbar__chips,
   .traffic-summary-grid,
   .traffic-team-grid,
+  .sales-automation-admin-grid,
   .editor-list--two-up,
   .upload-form,
   .specials-hero {
@@ -5246,6 +5301,16 @@ button.special-card:hover:not(:disabled) {
   .note-card__summary-side {
     justify-items: start;
     text-align: left;
+  }
+}
+
+@media (max-width: 860px) {
+  .sales-automation-admin-panel__header {
+    flex-direction: column;
+  }
+
+  .sales-automation-admin-grid {
+    grid-template-columns: 1fr;
   }
 }
 
@@ -7292,6 +7357,27 @@ button.special-card:hover:not(:disabled) {
     linear-gradient(135deg, rgba(255, 252, 247, 0.98), rgba(245, 238, 227, 0.92));
 }
 
+.sales-analytics-variant-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.sales-analytics-variant-tab {
+  border: 1px solid rgba(37, 48, 59, 0.12);
+  background: rgba(255, 255, 255, 0.82);
+  color: var(--deep);
+  border-radius: 999px;
+  padding: 10px 14px;
+  font-weight: 600;
+}
+
+.sales-analytics-variant-tab.is-active {
+  border-color: rgba(196, 102, 52, 0.32);
+  background: linear-gradient(135deg, rgba(196, 102, 52, 0.14), rgba(37, 48, 59, 0.08));
+  box-shadow: 0 10px 24px rgba(37, 48, 59, 0.08);
+}
+
 .sales-analytics-hero h2,
 .sales-analytics-panel__header h3,
 .sales-analytics-empty h3 {
@@ -7743,5 +7829,314 @@ button.special-card:hover:not(:disabled) {
   .bdc-dms-log-history-row,
   .bdc-dms-log-history-row__actions {
     grid-template-columns: 1fr;
+  }
+}
+
+.crm-cleanup-section {
+  display: grid;
+  gap: 18px;
+}
+
+.crm-cleanup-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(260px, 0.7fr);
+  gap: 18px;
+  align-items: start;
+  background:
+    radial-gradient(circle at top right, rgba(31, 124, 246, 0.12), transparent 34%),
+    linear-gradient(135deg, rgba(255, 248, 238, 0.96), rgba(255, 255, 255, 0.98));
+}
+
+.crm-cleanup-hero h2,
+.crm-cleanup-uploader h3,
+.crm-cleanup-rows h3,
+.crm-cleanup-group h3 {
+  margin: 0;
+}
+
+.crm-cleanup-hero__notice {
+  display: grid;
+  gap: 8px;
+  padding: 16px 18px;
+  border-radius: 20px;
+  border: 1px solid rgba(31, 124, 246, 0.16);
+  background: rgba(255, 255, 255, 0.88);
+}
+
+.crm-cleanup-hero__notice strong {
+  font-size: 1rem;
+}
+
+.crm-cleanup-hero__notice span {
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.crm-cleanup-uploader {
+  display: grid;
+  gap: 18px;
+}
+
+.crm-cleanup-uploader__header,
+.crm-cleanup-group__header,
+.crm-cleanup-rows__header {
+  display: flex;
+  gap: 16px;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.crm-cleanup-source-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.crm-cleanup-source {
+  display: grid;
+  gap: 8px;
+  text-align: left;
+  align-items: start;
+  padding: 18px 20px;
+  border-radius: 22px;
+  border: 1px solid rgba(28, 39, 52, 0.08);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(248, 244, 237, 0.92));
+  box-shadow: var(--card-shadow);
+}
+
+.crm-cleanup-source span,
+.crm-cleanup-group__eyebrow span:first-child,
+.crm-cleanup-stat span,
+.crm-cleanup-upload-field span,
+.crm-cleanup-search span {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.72rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.crm-cleanup-source strong {
+  font-size: 1.08rem;
+  line-height: 1.2;
+}
+
+.crm-cleanup-source small {
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.crm-cleanup-source.is-active {
+  border-color: rgba(31, 124, 246, 0.28);
+  box-shadow:
+    0 0 0 4px rgba(31, 124, 246, 0.14),
+    var(--card-shadow);
+  background:
+    radial-gradient(circle at top right, rgba(31, 124, 246, 0.12), transparent 36%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.99), rgba(241, 247, 255, 0.96));
+}
+
+.crm-cleanup-upload-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1.3fr) minmax(240px, 0.7fr);
+  gap: 16px;
+  align-items: end;
+}
+
+.crm-cleanup-upload-field,
+.crm-cleanup-search {
+  display: grid;
+  gap: 8px;
+}
+
+.crm-cleanup-upload-field small,
+.crm-cleanup-upload-actions__summary span {
+  color: var(--muted);
+}
+
+.crm-cleanup-upload-actions {
+  display: grid;
+  gap: 12px;
+}
+
+.crm-cleanup-upload-actions__summary {
+  display: grid;
+  gap: 4px;
+  padding: 14px 16px;
+  border-radius: 18px;
+  border: 1px solid rgba(28, 39, 52, 0.08);
+  background: rgba(247, 243, 236, 0.82);
+}
+
+.crm-cleanup-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.crm-cleanup-stat {
+  display: grid;
+  gap: 8px;
+}
+
+.crm-cleanup-stat strong {
+  font-size: clamp(1.8rem, 3vw, 2.35rem);
+  line-height: 0.95;
+}
+
+.crm-cleanup-stat small {
+  color: var(--muted);
+}
+
+.crm-cleanup-toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 16px;
+  align-items: end;
+}
+
+.crm-cleanup-toolbar__filters {
+  display: grid;
+  gap: 14px;
+}
+
+.crm-cleanup-filter-pills,
+.crm-cleanup-group__eyebrow,
+.crm-cleanup-group__meta,
+.crm-cleanup-rows__legend {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.crm-cleanup-pill {
+  min-width: 88px;
+  justify-content: center;
+  background: rgba(247, 243, 236, 0.88);
+  color: var(--deep);
+}
+
+.crm-cleanup-pill.is-active {
+  background: linear-gradient(135deg, #1f7cf6, #3f95ff);
+  color: #fff;
+}
+
+.crm-cleanup-toolbar__actions {
+  display: grid;
+  gap: 10px;
+  justify-items: end;
+}
+
+.crm-cleanup-toolbar__actions small {
+  color: var(--muted);
+}
+
+.crm-cleanup-groups {
+  display: grid;
+  gap: 16px;
+}
+
+.crm-cleanup-group {
+  display: grid;
+  gap: 16px;
+  border: 1px solid rgba(28, 39, 52, 0.08);
+}
+
+.crm-cleanup-group.is-open {
+  background:
+    radial-gradient(circle at top right, rgba(199, 101, 54, 0.13), transparent 34%),
+    linear-gradient(180deg, rgba(255, 250, 245, 0.98), rgba(255, 255, 255, 0.98));
+  border-color: rgba(199, 101, 54, 0.18);
+}
+
+.crm-cleanup-group.is-cleaned {
+  background:
+    radial-gradient(circle at top right, rgba(40, 153, 110, 0.12), transparent 34%),
+    linear-gradient(180deg, rgba(246, 252, 249, 0.96), rgba(255, 255, 255, 0.98));
+  border-color: rgba(40, 153, 110, 0.16);
+}
+
+.crm-cleanup-group__eyebrow span:first-child {
+  color: var(--muted);
+}
+
+.crm-cleanup-group__meta span {
+  display: inline-flex;
+  align-items: center;
+  padding: 7px 10px;
+  border-radius: 999px;
+  background: rgba(31, 37, 43, 0.06);
+  color: var(--deep);
+  font-size: 0.86rem;
+}
+
+.crm-cleanup-status {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px 10px;
+  border-radius: 999px;
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.crm-cleanup-status.is-open {
+  color: #9a3b27;
+  background: rgba(199, 101, 54, 0.14);
+}
+
+.crm-cleanup-status.is-cleaned {
+  color: #16664d;
+  background: rgba(40, 153, 110, 0.14);
+}
+
+.crm-cleanup-rows {
+  display: grid;
+  gap: 16px;
+}
+
+.crm-cleanup-table--rows tr.crm-cleanup-row--open {
+  background: rgba(255, 245, 240, 0.94);
+}
+
+.crm-cleanup-table--rows tr.crm-cleanup-row--cleaned {
+  background: rgba(244, 251, 247, 0.92);
+}
+
+@media (max-width: 960px) {
+  .crm-cleanup-hero,
+  .crm-cleanup-upload-form,
+  .crm-cleanup-toolbar {
+    grid-template-columns: 1fr;
+  }
+
+  .crm-cleanup-source-grid,
+  .crm-cleanup-summary-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .crm-cleanup-toolbar__actions {
+    justify-items: start;
+  }
+}
+
+@media (max-width: 720px) {
+  .crm-cleanup-source-grid,
+  .crm-cleanup-summary-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .crm-cleanup-uploader__header,
+  .crm-cleanup-group__header,
+  .crm-cleanup-rows__header {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .crm-cleanup-source {
+    padding: 16px;
   }
 }

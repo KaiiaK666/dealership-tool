@@ -22,6 +22,7 @@ import {
   getAdminDaysOff,
   getAdminSession,
   getBdcAgents,
+  getBdcLeadPushConfig,
   getNotificationConfig,
   sendNotificationTestEmail,
   sendNotificationTestSms,
@@ -52,6 +53,7 @@ import {
   undoReynoldsServiceDriveTrafficImport,
   updateBdcAgent,
   updateBdcDistribution,
+  updateBdcLeadPushConfig,
   updateBdcSalesTrackerAgentMetrics,
   updateBdcSalesTrackerEntry,
   updateBdcSalesTrackerMonth,
@@ -78,6 +80,7 @@ import {
   runSalesAnalyticsReport,
   updateBdcSalesTrackerDmsLogEntry,
 } from "./api.js";
+import CrmCleanupSection from "./CrmCleanupSection.jsx";
 import SalesAnalyticsSection from "./SalesAnalyticsSection.jsx";
 import "./App.css";
 
@@ -89,6 +92,7 @@ const TABS = [
   { id: "bdcSalesTracker", label: "BDC Sales Tracker" },
   { id: "salesAnalytics", label: "Sales Analytics" },
   { id: "reports", label: "BDC Reports" },
+  { id: "crmCleanup", label: "CRM Cleanup" },
   { id: "traffic", label: "Service Drive Traffic" },
   { id: "freshUp", label: "Freshup Log" },
   { id: "marketplace", label: "Facebook Marketplace" },
@@ -138,6 +142,7 @@ const ADMIN_SECTIONS = [
   { id: "daysOff", label: "Days Off" },
   { id: "trafficLog", label: "Traffic Log" },
   { id: "bdcDistribution", label: "Lead Distribution Type" },
+  { id: "salesAnalytics", label: "Sales Analytics" },
   { id: "tabs", label: "Page Order" },
   { id: "freshupLinks", label: "Freshup Links" },
   { id: "agentLoops", label: "Agent Loops" },
@@ -348,19 +353,28 @@ const TRAFFIC_VEHICLE_AGE_BANDS = [
   { key: "mature", label: "6 to 8 yrs", min: 6, max: 8 },
   { key: "older", label: "9+ yrs", min: 9, max: Number.POSITIVE_INFINITY },
 ];
+const SALES_ANALYTICS_VARIANTS = [
+  { key: "sales", label: "Sales people" },
+  { key: "sales-manager", label: "Sales managers" },
+  { key: "bdc-staff", label: "BDC staff" },
+];
 
 function emptySalesAnalyticsDashboard() {
   return {
     config: {
+      variant_key: "sales",
+      variant_label: "Sales people",
       schedule_label: "",
       schedule_days: [],
       schedule_times: [],
-      chat_name: "Me",
+      chat_name: "Kau 429-8898 (You)",
       report_name: "BDC Activity Report Sales",
       runner_ready: false,
       can_trigger: false,
     },
     status: {
+      variant_key: "sales",
+      variant_label: "Sales people",
       state: "idle",
       started_at: "",
       finished_at: "",
@@ -371,6 +385,10 @@ function emptySalesAnalyticsDashboard() {
     latest: null,
     history: [],
   };
+}
+
+function emptySalesAnalyticsDashboardMap() {
+  return Object.fromEntries(SALES_ANALYTICS_VARIANTS.map((variant) => [variant.key, emptySalesAnalyticsDashboard()]));
 }
 
 function currentMonth() {
@@ -471,6 +489,12 @@ function errText(error) {
   }
   if (text) return text;
   return "Request failed";
+}
+
+function humanStatusLabel(value) {
+  const text = String(value || "idle").trim();
+  if (!text) return "Idle";
+  return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
 function assetUrl(path) {
@@ -1778,6 +1802,12 @@ export default function App() {
   const [bdcState, setBdcState] = useState(null);
   const [bdcDistribution, setBdcDistribution] = useState({ mode: "franchise" });
   const [bdcUndoSettings, setBdcUndoSettings] = useState({ require_password: true, password_hint: "" });
+  const [bdcLeadPushConfig, setBdcLeadPushConfig] = useState({
+    enabled: true,
+    chat_name: "Kau 429-8898 (You)",
+    runner_ready: false,
+    message_type: "whatsapp-self",
+  });
   const [tabVisibility, setTabVisibility] = useState(() => defaultTabVisibilityState());
   const [bdcUndoPassword, setBdcUndoPassword] = useState("");
   const [bdcLog, setBdcLog] = useState({ total: 0, entries: [] });
@@ -1785,9 +1815,13 @@ export default function App() {
   const [bdcSalesTrackerMonth, setBdcSalesTrackerMonth] = useState(currentMonth());
   const [bdcSalesTracker, setBdcSalesTracker] = useState(null);
   const [bdcSalesTrackerView, setBdcSalesTrackerView] = useState("tracker");
+  const [salesAnalyticsVariant, setSalesAnalyticsVariant] = useState("sales");
   const [salesAnalyticsDashboard, setSalesAnalyticsDashboard] = useState(() => emptySalesAnalyticsDashboard());
+  const [salesAnalyticsAdminDashboards, setSalesAnalyticsAdminDashboards] = useState(() => emptySalesAnalyticsDashboardMap());
   const [salesAnalyticsLoading, setSalesAnalyticsLoading] = useState(false);
+  const [salesAnalyticsAdminLoading, setSalesAnalyticsAdminLoading] = useState(false);
   const [salesAnalyticsFeedback, setSalesAnalyticsFeedback] = useState("");
+  const [salesAnalyticsAdminFeedback, setSalesAnalyticsAdminFeedback] = useState("");
   const [bdcSalesTrackerGoalDraft, setBdcSalesTrackerGoalDraft] = useState("252");
   const [bdcSalesTrackerRulesDraft, setBdcSalesTrackerRulesDraft] = useState(() => defaultBdcSalesTrackerRulesDraft());
   const [bdcSalesTrackerFocusKey, setBdcSalesTrackerFocusKey] = useState(() => readBdcSalesTrackerPreferences().focusKey);
@@ -2072,6 +2106,7 @@ export default function App() {
   const latestBdcNotifications = [
     latestBdcAssignment?.notification_sms_status,
     latestBdcAssignment?.notification_email_status,
+    latestBdcAssignment?.notification_whatsapp_status,
   ].filter(Boolean);
   const agentLoopPresets = agentLoopConfig.presets || [];
   const selectedAgentLoopPreset =
@@ -2362,12 +2397,12 @@ export default function App() {
     setResourceLoadState((current) => ({ ...current, trafficPdfs: true }));
   }
 
-  async function refreshSalesAnalyticsDashboard({ quiet = false } = {}) {
+  async function refreshSalesAnalyticsDashboard({ quiet = false, variant = salesAnalyticsVariant } = {}) {
     if (!quiet) {
       setSalesAnalyticsLoading(true);
     }
     try {
-      const data = await getSalesAnalyticsDashboard({ limit: 18 });
+      const data = await getSalesAnalyticsDashboard({ limit: 18, variant, token: adminToken });
       setSalesAnalyticsDashboard(data);
       setResourceLoadState((current) => ({ ...current, salesAnalytics: true }));
       return data;
@@ -2378,14 +2413,79 @@ export default function App() {
     }
   }
 
-  async function triggerSalesAnalyticsDashboardRun() {
-    setBusy("sales-analytics-run");
+  async function triggerSalesAnalyticsDashboardRun(variant = salesAnalyticsVariant) {
+    setBusy(`sales-analytics-run:${variant}`);
     setError("");
     setSalesAnalyticsFeedback("");
     try {
-      const response = await runSalesAnalyticsReport();
+      const response = await runSalesAnalyticsReport({ variant, token: adminToken });
       setSalesAnalyticsFeedback(response?.message || "Sales activity scrape started.");
-      await refreshSalesAnalyticsDashboard({ quiet: true });
+      await refreshSalesAnalyticsDashboard({ quiet: true, variant });
+    } catch (errorValue) {
+      setError(errText(errorValue));
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function refreshAdminSalesAnalyticsOverview() {
+    if (!adminToken) return;
+    setSalesAnalyticsAdminLoading(true);
+    try {
+      const [dashboards, leadPush] = await Promise.all([
+        Promise.all(
+          SALES_ANALYTICS_VARIANTS.map((variant) =>
+            getSalesAnalyticsDashboard({ limit: 6, variant: variant.key, token: adminToken })
+          )
+        ),
+        getBdcLeadPushConfig(adminToken),
+      ]);
+      setSalesAnalyticsAdminDashboards(
+        Object.fromEntries(dashboards.map((dashboard) => [dashboard?.config?.variant_key || "sales", dashboard]))
+      );
+      setBdcLeadPushConfig(leadPush || {
+        enabled: true,
+        chat_name: "Kau 429-8898 (You)",
+        runner_ready: false,
+        message_type: "whatsapp-self",
+      });
+    } catch (errorValue) {
+      setError(errText(errorValue));
+    } finally {
+      setSalesAnalyticsAdminLoading(false);
+    }
+  }
+
+  async function triggerAdminSalesAnalyticsRun(variant) {
+    setBusy(`admin-sales-analytics-run:${variant}`);
+    setError("");
+    setSalesAnalyticsAdminFeedback("");
+    try {
+      const response = await runSalesAnalyticsReport({ variant, token: adminToken });
+      setSalesAnalyticsAdminFeedback(response?.message || "Sales activity scrape started.");
+      await refreshAdminSalesAnalyticsOverview();
+      if (variant === salesAnalyticsVariant) {
+        await refreshSalesAnalyticsDashboard({ quiet: true, variant });
+      }
+    } catch (errorValue) {
+      setError(errText(errorValue));
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function saveBdcLeadPushEnabled(enabled) {
+    setBusy("bdc-lead-push");
+    setError("");
+    setSalesAnalyticsAdminFeedback("");
+    try {
+      const updated = await updateBdcLeadPushConfig(adminToken, { enabled });
+      setBdcLeadPushConfig(updated);
+      setSalesAnalyticsAdminFeedback(
+        updated?.enabled
+          ? `Lead notifications will be pushed to ${updated.chat_name || "your self chat"}.`
+          : "Lead notifications are paused."
+      );
     } catch (errorValue) {
       setError(errText(errorValue));
     } finally {
@@ -3305,12 +3405,11 @@ export default function App() {
   }, [adminSection, adminSession, selectedAgentLoopIsActive, selectedAgentRunId, tab]);
 
   useEffect(() => {
-    if (resourceLoadState.salesAnalytics) return;
     if (tab !== "salesAnalytics") return;
     let active = true;
     const run = async () => {
       try {
-        const data = await getSalesAnalyticsDashboard({ limit: 18 });
+        const data = await getSalesAnalyticsDashboard({ limit: 18, variant: salesAnalyticsVariant, token: adminToken });
         if (!active) return;
         setSalesAnalyticsDashboard(data);
         setResourceLoadState((current) => ({ ...current, salesAnalytics: true }));
@@ -3325,16 +3424,49 @@ export default function App() {
     return () => {
       active = false;
     };
-  }, [resourceLoadState.salesAnalytics, tab]);
+  }, [adminToken, salesAnalyticsVariant, tab]);
 
   useEffect(() => {
     if (tab !== "salesAnalytics") return undefined;
     if (String(salesAnalyticsDashboard?.status?.state || "").toLowerCase() !== "running") return undefined;
     const intervalId = window.setInterval(() => {
-      refreshSalesAnalyticsDashboard({ quiet: true }).catch(() => {});
+      refreshSalesAnalyticsDashboard({ quiet: true, variant: salesAnalyticsVariant }).catch(() => {});
     }, 15000);
     return () => window.clearInterval(intervalId);
-  }, [salesAnalyticsDashboard?.status?.state, tab]);
+  }, [salesAnalyticsDashboard?.status?.state, salesAnalyticsVariant, tab]);
+
+  useEffect(() => {
+    if (!(tab === "admin" && adminSection === "salesAnalytics" && adminSession && adminToken)) {
+      return undefined;
+    }
+    let active = true;
+    const run = async () => {
+      try {
+        const [dashboards, leadPush] = await Promise.all([
+          Promise.all(
+            SALES_ANALYTICS_VARIANTS.map((variant) =>
+              getSalesAnalyticsDashboard({ limit: 6, variant: variant.key, token: adminToken })
+            )
+          ),
+          getBdcLeadPushConfig(adminToken),
+        ]);
+        if (!active) return;
+        setSalesAnalyticsAdminDashboards(
+          Object.fromEntries(dashboards.map((dashboard) => [dashboard?.config?.variant_key || "sales", dashboard]))
+        );
+        setBdcLeadPushConfig(leadPush);
+      } catch (errorValue) {
+        if (active) setError(errText(errorValue));
+      } finally {
+        if (active) setSalesAnalyticsAdminLoading(false);
+      }
+    };
+    setSalesAnalyticsAdminLoading(true);
+    run();
+    return () => {
+      active = false;
+    };
+  }, [adminSection, adminSession, adminToken, tab]);
 
   useEffect(() => {
     if (!freshUpCardMode) return;
@@ -7723,13 +7855,25 @@ export default function App() {
             dashboard={salesAnalyticsDashboard}
             feedback={salesAnalyticsFeedback}
             loading={salesAnalyticsLoading}
+            onSelectVariant={(nextVariant) => {
+              setError("");
+              setSalesAnalyticsFeedback("");
+              setSalesAnalyticsVariant(nextVariant);
+            }}
             onRefresh={() => {
               setError("");
               setSalesAnalyticsFeedback("");
-              refreshSalesAnalyticsDashboard().catch((errorValue) => setError(errText(errorValue)));
+              refreshSalesAnalyticsDashboard({ variant: salesAnalyticsVariant }).catch((errorValue) =>
+                setError(errText(errorValue))
+              );
             }}
-            onRun={triggerSalesAnalyticsDashboardRun}
-            running={busy === "sales-analytics-run" || String(salesAnalyticsDashboard?.status?.state || "").toLowerCase() === "running"}
+            onRun={() => triggerSalesAnalyticsDashboardRun(salesAnalyticsVariant)}
+            running={
+              busy === `sales-analytics-run:${salesAnalyticsVariant}` ||
+              String(salesAnalyticsDashboard?.status?.state || "").toLowerCase() === "running"
+            }
+            selectedVariant={salesAnalyticsVariant}
+            variants={SALES_ANALYTICS_VARIANTS}
           />
         ) : null}
 
@@ -9313,6 +9457,8 @@ export default function App() {
             )}
           </section>
         ) : null}
+
+        {tab === "crmCleanup" ? <CrmCleanupSection /> : null}
 
         {tab === "admin" ? (
           <section className="stack">
@@ -10911,6 +11057,101 @@ export default function App() {
                       {busy === "bdc-undo-settings" ? "Saving..." : "Save Undo Settings"}
                     </button>
                   </div>
+                ) : null}
+
+                {adminSection === "salesAnalytics" ? (
+                  <>
+                    <div className="panel sales-automation-admin-panel">
+                      <span className="eyebrow">Lead notifications</span>
+                      <h3>Push every BDC assignment to your self chat</h3>
+                      <p className="admin-note">
+                        When this is on, every new lead assigned from the BDC Assign page pushes a WhatsApp message only to{" "}
+                        <strong>{bdcLeadPushConfig.chat_name || "your self chat"}</strong>.
+                      </p>
+                      <div className="distribution-toggle">
+                        <button
+                          type="button"
+                          className={`pill ${bdcLeadPushConfig.enabled ? "is-active" : ""}`}
+                          onClick={() => saveBdcLeadPushEnabled(true)}
+                          disabled={busy === "bdc-lead-push" || !bdcLeadPushConfig.runner_ready}
+                        >
+                          Lead push on
+                        </button>
+                        <button
+                          type="button"
+                          className={`pill ${!bdcLeadPushConfig.enabled ? "is-active" : ""}`}
+                          onClick={() => saveBdcLeadPushEnabled(false)}
+                          disabled={busy === "bdc-lead-push"}
+                        >
+                          Lead push off
+                        </button>
+                      </div>
+                      <div className="notice">
+                        {!bdcLeadPushConfig.runner_ready
+                          ? "The WhatsApp sender is not ready yet on this machine."
+                          : bdcLeadPushConfig.enabled
+                            ? `Lead alerts are live and target only ${bdcLeadPushConfig.chat_name || "your self chat"}.`
+                            : "Lead alerts are paused until you turn them back on."}
+                      </div>
+                    </div>
+
+                    <div className="panel sales-automation-admin-panel">
+                      <div className="sales-automation-admin-panel__header">
+                        <div>
+                          <span className="eyebrow">Manual report pushes</span>
+                          <h3>Send any of the three reports to WhatsApp now</h3>
+                          <p className="admin-note">
+                            These buttons run the live DealerSocket scrape and send the screenshot only to{" "}
+                            <strong>{bdcLeadPushConfig.chat_name || "your self chat"}</strong>.
+                          </p>
+                        </div>
+                        <button
+                          type="button"
+                          className="secondary"
+                          onClick={refreshAdminSalesAnalyticsOverview}
+                          disabled={salesAnalyticsAdminLoading || !adminToken}
+                        >
+                          {salesAnalyticsAdminLoading ? "Refreshing..." : "Refresh Status"}
+                        </button>
+                      </div>
+                      {salesAnalyticsAdminFeedback ? <div className="notice">{salesAnalyticsAdminFeedback}</div> : null}
+                      <div className="sales-automation-admin-grid">
+                        {SALES_ANALYTICS_VARIANTS.map((variant) => {
+                          const dashboard = salesAnalyticsAdminDashboards[variant.key] || emptySalesAnalyticsDashboard();
+                          const config = dashboard?.config || {};
+                          const status = dashboard?.status || {};
+                          const latest = dashboard?.latest || null;
+                          const isRunning = busy === `admin-sales-analytics-run:${variant.key}`;
+                          return (
+                            <article key={`admin-sales-analytics-${variant.key}`} className="sales-automation-admin-card inset-panel">
+                              <div className="sales-automation-admin-card__copy">
+                                <span>{variant.label}</span>
+                                <strong>{latest?.role_name || config.report_name || variant.label}</strong>
+                                <small>
+                                  {config.schedule_label || "Manual only"}
+                                  <br />
+                                  Last success: {dateTimeLabel(status.last_success_at) || "Not available yet"}
+                                </small>
+                              </div>
+                              <div className="sales-automation-admin-card__meta">
+                                <span className={`sales-analytics-state is-${String(status.state || "idle").toLowerCase()}`}>
+                                  {humanStatusLabel(status.state)}
+                                </span>
+                                <span>{latest?.delivery?.chat_name || config.chat_name || "Kau 429-8898 (You)"}</span>
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => triggerAdminSalesAnalyticsRun(variant.key)}
+                                disabled={isRunning || salesAnalyticsAdminLoading || !config.runner_ready || !adminToken}
+                              >
+                                {isRunning ? "Sending..." : "Send To My WhatsApp"}
+                              </button>
+                            </article>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  </>
                 ) : null}
 
                 {adminSection === "tabs" ? (

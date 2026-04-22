@@ -80,18 +80,25 @@ export default function SalesAnalyticsSection({
   dashboard,
   feedback,
   loading,
+  onSelectVariant,
   onRefresh,
   onRun,
   running,
+  selectedVariant,
+  variants,
 }) {
   const config = dashboard?.config || {
+    variant_key: "sales",
+    variant_label: "Sales people",
     schedule_label: "",
     schedule_times: [],
-    chat_name: "Me",
+    chat_name: "Kau 429-8898 (You)",
     runner_ready: false,
     can_trigger: false,
   };
   const status = dashboard?.status || {
+    variant_key: "sales",
+    variant_label: "Sales people",
     state: "idle",
     last_success_at: "",
     last_error: "",
@@ -99,6 +106,11 @@ export default function SalesAnalyticsSection({
   const latest = dashboard?.latest || null;
   const history = dashboard?.history || [];
   const rows = latest?.rows || [];
+  const activeVariant =
+    (variants || []).find((variant) => variant.key === selectedVariant) || {
+      key: config?.variant_key || "sales",
+      label: config?.variant_label || "Sales people",
+    };
   const maxCalls = Math.max(...rows.map((row) => Number(row?.calls_cti || 0)), 1);
   const maxEmails = Math.max(...rows.map((row) => Number(row?.emails_sent || 0)), 1);
   const maxTexts = Math.max(...rows.map((row) => Number(row?.texts_sent || 0)), 1);
@@ -110,10 +122,23 @@ export default function SalesAnalyticsSection({
       <div className="panel sales-analytics-hero">
         <div className="sales-analytics-hero__copy">
           <span className="eyebrow">Sales analytics</span>
-          <h2>BDC Activity Report Sales</h2>
+          <div className="sales-analytics-variant-tabs" role="tablist" aria-label="Sales analytics report filters">
+            {(variants || []).map((variant) => (
+              <button
+                key={variant.key}
+                type="button"
+                className={`sales-analytics-variant-tab ${selectedVariant === variant.key ? "is-active" : ""}`}
+                onClick={() => onSelectVariant?.(variant.key)}
+              >
+                {variant.label}
+              </button>
+            ))}
+          </div>
+          <h2>{activeVariant.label}</h2>
           <p>
-            Runs the DealerSocket BDC Activity Report, sends the condensed table to WhatsApp chat{" "}
-            <strong>{config.chat_name || "Me"}</strong>, and keeps a local run history for this dashboard.
+            Runs the DealerSocket BDC Activity Report for <strong>{latest?.role_name || config.report_name}</strong>,
+            sends the condensed table only to your verified self chat <strong>{config.chat_name}</strong>, and keeps a
+            local run history for this dashboard.
           </p>
 
           <div className="sales-analytics-schedule">
@@ -242,7 +267,7 @@ export default function SalesAnalyticsSection({
                 </div>
                 <div>
                   <span>Delivery target</span>
-                  <strong>{latest?.delivery?.chat_name || config.chat_name || "Me"}</strong>
+                    <strong>{latest?.delivery?.chat_name || config.chat_name || "Me"}</strong>
                   <small>
                     {latest?.delivery?.sent_at
                       ? `Sent ${formatDateTime(latest.delivery.sent_at)}`

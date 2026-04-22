@@ -155,6 +155,10 @@ export const updateBdcAgent = (token, id, payload) =>
   request(`/api/admin/bdc/agents/${id}`, { method: "PUT", body: payload, headers: adminHeaders(token) });
 export const updateBdcDistribution = (token, payload) =>
   request("/api/admin/bdc/distribution", { method: "POST", body: payload, headers: adminHeaders(token) });
+export const getBdcLeadPushConfig = (token) =>
+  request("/api/admin/bdc/lead-push", { headers: adminHeaders(token) });
+export const updateBdcLeadPushConfig = (token, payload) =>
+  request("/api/admin/bdc/lead-push", { method: "POST", body: payload, headers: adminHeaders(token) });
 export const undoLastBdcAssign = (payload) =>
   request("/api/bdc/assign/last", { method: "DELETE", body: payload });
 export const updateBdcUndoSettings = (token, payload) =>
@@ -277,9 +281,15 @@ export const importSpecialFeedSource = (token, sourceKey) =>
 export const getBdcSalesTracker = (params = {}) =>
   request(`/api/bdc-sales-tracker${qs({ month: params.month })}`);
 export const getSalesAnalyticsDashboard = (params = {}) =>
-  request(`/api/sales-analytics/dashboard${qs({ limit: params.limit })}`);
-export const runSalesAnalyticsReport = () =>
-  request("/api/sales-analytics/run", { method: "POST", timeout: 20000 });
+  request(`/api/sales-analytics/dashboard${qs({ limit: params.limit, variant: params.variant })}`, {
+    headers: adminHeaders(params.token),
+  });
+export const runSalesAnalyticsReport = (params = {}) =>
+  request(`/api/sales-analytics/run${qs({ variant: params.variant })}`, {
+    method: "POST",
+    headers: adminHeaders(params.token),
+    timeout: 20000,
+  });
 export const updateBdcSalesTrackerMonth = (token, payload) =>
   request("/api/bdc-sales-tracker/month", { method: "POST", body: payload, headers: adminHeaders(token) });
 export const updateBdcSalesTrackerRules = (token, payload) =>

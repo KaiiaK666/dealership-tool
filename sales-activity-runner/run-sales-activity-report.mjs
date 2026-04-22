@@ -2,10 +2,14 @@ import "dotenv/config";
 import { execFileSync } from "node:child_process";
 import {
   appendFileSync,
+  closeSync,
   copyFileSync,
   existsSync,
   mkdirSync,
+  openSync,
   readFileSync,
+  statSync,
+  unlinkSync,
   writeFileSync,
 } from "node:fs";
 import path from "node:path";
@@ -19,21 +23,49 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, "..");
 const dataRoot = path.resolve(repoRoot, "data");
-const uploadsRoot = path.resolve(dataRoot, "uploads", "sales-analytics");
-const salesAnalyticsRoot = path.resolve(dataRoot, "sales-analytics");
+const storageKey = sanitizeStorageKey(process.env.SALES_ACTIVITY_STORAGE_KEY || "");
+const storageSegment = storageKey && storageKey !== "sales" ? storageKey : "";
+const uploadsRoot = storageSegment
+  ? path.resolve(dataRoot, "uploads", "sales-analytics", storageSegment)
+  : path.resolve(dataRoot, "uploads", "sales-analytics");
+const salesAnalyticsRoot = storageSegment
+  ? path.resolve(dataRoot, "sales-analytics", storageSegment)
+  : path.resolve(dataRoot, "sales-analytics");
 const logsRoot = path.join(salesAnalyticsRoot, "logs");
 const latestRunPath = path.join(salesAnalyticsRoot, "latest.json");
 const historyPath = path.join(salesAnalyticsRoot, "history.json");
 const statusPath = path.join(salesAnalyticsRoot, "status.json");
 const logPath = path.join(logsRoot, "runner.log");
+const browserLockPath = path.join(dataRoot, "sales-activity", "chrome-profile.lock");
 
 for (const dir of [dataRoot, uploadsRoot, salesAnalyticsRoot, logsRoot]) {
   mkdirSync(dir, { recursive: true });
 }
 
-const scheduleDays = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
-const scheduleTimes = ["10:00 AM", "12:00 PM", "2:00 PM", "4:00 PM", "6:00 PM", "8:00 PM"];
-const scheduleLabel = `Monday to Saturday at ${scheduleTimes.join(", ")}`;
+const scheduleDays = parseList(process.env.SALES_ACTIVITY_SCHEDULE_DAYS, [
+  "Monday",
+  "Tuesday",
+  "Wednesday",
+  "Thursday",
+  "Friday",
+  "Saturday",
+]);
+const scheduleTimes = parseList(process.env.SALES_ACTIVITY_SCHEDULE_TIMES, [
+  "10:00 AM",
+  "11:00 AM",
+  "12:00 PM",
+  "1:00 PM",
+  "2:00 PM",
+  "3:00 PM",
+  "4:00 PM",
+  "5:00 PM",
+  "6:00 PM",
+  "7:00 PM",
+  "8:00 PM",
+]);
+const scheduleLabel =
+  process.env.SALES_ACTIVITY_SCHEDULE_LABEL?.trim() ||
+  formatScheduleLabel(scheduleDays, scheduleTimes);
 
 const config = {
   crmUrl: process.env.DEALERSOCKET_URL?.trim() || "https://bb.dealersocket.com",
@@ -44,8 +76,12 @@ const config = {
   dealershipName: process.env.DEALERSOCKET_DEALERSHIP?.trim() || "Bert Ogden Mission Mazda",
   reportName: process.env.DEALERSOCKET_REPORT_NAME?.trim() || "BDC Activity Report Sales",
   roleName: process.env.DEALERSOCKET_ROLE?.trim() || "* All Sales Power Team",
+  filePrefix: sanitizeFilePrefix(process.env.SALES_ACTIVITY_FILE_PREFIX || "bdc-activity-sales"),
+  storageKey: storageSegment || "sales",
   whatsappUrl: process.env.WHATSAPP_URL?.trim() || "https://web.whatsapp.com",
-  whatsappChatName: process.env.WHATSAPP_CHAT_NAME?.trim() || "Me",
+  whatsappChatName: process.env.WHATSAPP_TARGET_LABEL?.trim() || "Kau 429-8898 (You)",
+  whatsappSearchTerms: parseList(process.env.WHATSAPP_SELF_SEARCH_TERMS, ["kau", "956 429 8898", "9564298898"]),
+  whatsappVerifyTokens: parseList(process.env.WHATSAPP_SELF_VERIFY_TOKENS, ["(You)", "429-8898", "Message yourself"]),
   whatsappRequired: String(process.env.WHATSAPP_REQUIRED || "false").trim().toLowerCase() === "true",
   chromeChannel: process.env.CHROME_CHANNEL?.trim() || "chrome",
   chromeProfilePath: resolvePath(process.env.CHROME_PROFILE_PATH || path.join(dataRoot, "sales-activity", "chrome-profile")),
@@ -57,6 +93,38 @@ function resolvePath(value) {
   if (!value) return "";
   if (path.isAbsolute(value)) return value;
   return path.resolve(__dirname, value);
+}
+
+function sanitizeStorageKey(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function sanitizeFilePrefix(value) {
+  const sanitized = String(value || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+  return sanitized || "bdc-activity-sales";
+}
+
+function parseList(value, fallback) {
+  const parts = String(value || "")
+    .split(/[|,]/)
+    .map((entry) => entry.trim())
+    .filter(Boolean);
+  return parts.length ? parts : fallback;
+}
+
+function formatScheduleLabel(days, times) {
+  if (Array.isArray(days) && days.length === 6 && days[0] === "Monday" && days[days.length - 1] === "Saturday") {
+    return `Monday to Saturday at ${times.join(", ")}`;
+  }
+  return `${days.join(", ")} at ${times.join(", ")}`;
 }
 
 function timestampId() {
@@ -90,6 +158,61 @@ function log(message) {
   const line = `[${nowIso()}] ${message}`;
   console.log(line);
   appendFileSync(logPath, `${line}\n`, "utf8");
+}
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function acquireBrowserProfileLock(timeoutMs = 20 * 60 * 1000) {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    try {
+      const handle = openSync(browserLockPath, "wx");
+      const payload = JSON.stringify(
+        {
+          pid: process.pid,
+          report_name: config.reportName,
+          started_at: nowIso(),
+        },
+        null,
+        2
+      );
+      writeFileSync(handle, `${payload}\n`, "utf8");
+      closeSync(handle);
+      log(`Acquired browser profile lock at ${browserLockPath}.`);
+      return;
+    } catch (error) {
+      if (error?.code !== "EEXIST") {
+        throw error;
+      }
+
+      try {
+        const stat = statSync(browserLockPath);
+        if (Date.now() - stat.mtimeMs > timeoutMs) {
+          unlinkSync(browserLockPath);
+          continue;
+        }
+      } catch {
+        // Another process may have released the lock between attempts.
+      }
+
+      await sleep(1000);
+    }
+  }
+
+  throw new Error(`Timed out waiting for browser profile lock: ${browserLockPath}`);
+}
+
+function releaseBrowserProfileLock() {
+  try {
+    unlinkSync(browserLockPath);
+    log(`Released browser profile lock at ${browserLockPath}.`);
+  } catch (error) {
+    if (error?.code !== "ENOENT") {
+      log(`Failed to release browser profile lock: ${String(error?.message || error)}`);
+    }
+  }
 }
 
 function toInt(value) {
@@ -380,6 +503,218 @@ async function saveDebugCapture(page, label) {
   }
 }
 
+function normalizeWhatsAppText(value) {
+  return String(value || "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+function digitsOnly(value) {
+  return String(value || "").replace(/\D+/g, "");
+}
+
+function hasWhatsAppSelfChatCoreMarkers(value) {
+  const normalized = normalizeWhatsAppText(value);
+  const digits = digitsOnly(value);
+  const hasPhoneMarker = digits.includes("4298898");
+  const hasVerifyTokens = config.whatsappVerifyTokens.every((token) => {
+    const tokenDigits = digitsOnly(token);
+    if (tokenDigits) {
+      if (tokenDigits === "4298898") {
+        return hasPhoneMarker;
+      }
+      return digits.includes(tokenDigits);
+    }
+    const normalizedToken = normalizeWhatsAppText(token);
+    if (normalizedToken === "message yourself") {
+      return true;
+    }
+    return normalized.includes(normalizedToken);
+  });
+  return hasPhoneMarker && hasVerifyTokens;
+}
+
+function isExpectedWhatsAppSelfChatRow(value) {
+  return hasWhatsAppSelfChatCoreMarkers(value);
+}
+
+function isExpectedWhatsAppSelfChatHeader(value) {
+  const normalized = normalizeWhatsAppText(value);
+  return hasWhatsAppSelfChatCoreMarkers(value) && normalized.includes("message yourself");
+}
+
+async function setWhatsAppFieldValue(locator, value) {
+  await locator.waitFor({ state: "attached", timeout: 10000 });
+  await locator.evaluate((element, nextValue) => {
+    if (element instanceof HTMLInputElement || element instanceof HTMLTextAreaElement) {
+      const setter =
+        Object.getOwnPropertyDescriptor(Object.getPrototypeOf(element), "value")?.set ||
+        Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, "value")?.set ||
+        Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value")?.set;
+      if (!setter) {
+        throw new Error("Search box value setter not available");
+      }
+      setter.call(element, nextValue);
+      element.dispatchEvent(new Event("input", { bubbles: true }));
+      element.dispatchEvent(new Event("change", { bubbles: true }));
+      return;
+    }
+
+    if (element instanceof HTMLElement && element.isContentEditable) {
+      element.focus();
+      element.textContent = nextValue;
+      element.dispatchEvent(new Event("input", { bubbles: true }));
+      element.dispatchEvent(new Event("change", { bubbles: true }));
+      return;
+    }
+
+    throw new Error("Unsupported WhatsApp search box element");
+  }, String(value || ""));
+}
+
+async function clearWhatsAppSearch(page, searchBox) {
+  await setWhatsAppFieldValue(searchBox, "");
+  await page.waitForTimeout(250);
+}
+
+async function getWhatsAppSearchBox(page) {
+  const scopedSearchBox = page
+    .locator(
+      '[data-testid="chat-list-search-container"] input[role="textbox"], ' +
+        '[data-testid="chat-list-search-container"] input[aria-label="Search or start a new chat"], ' +
+        '[data-testid="chat-list-search-container"] div[contenteditable="true"]'
+    )
+    .first();
+
+  const hasScopedSearchBox = await scopedSearchBox
+    .waitFor({ state: "attached", timeout: 15000 })
+    .then(() => true)
+    .catch(() => false);
+
+  if (hasScopedSearchBox) {
+    return scopedSearchBox;
+  }
+
+  return await waitForFirstVisible(page, [
+    'div[contenteditable="true"][aria-label="Search input textbox"]',
+    'div[contenteditable="true"][title="Search input textbox"]',
+    'input[aria-label="Search input textbox"]',
+    'input[aria-label="Search or start new chat"]',
+    'input[role="textbox"][aria-label="Search or start a new chat"]',
+  ]);
+}
+
+async function getWhatsAppConversationHeaderText(page) {
+  const header = page.locator('[data-testid="conversation-header"]').first();
+  await header.waitFor({ state: "visible", timeout: 10000 });
+  return (((await header.innerText().catch(() => "")) || "").replace(/\s+/g, " ").trim());
+}
+
+async function findWhatsAppSelfChatRow(page, timeoutMs = 5000) {
+  const started = Date.now();
+  while (Date.now() - started < timeoutMs) {
+    const messageYourselfRow = page.locator('[data-testid="message-yourself-row"]').first();
+    const hasPrimaryRow = await messageYourselfRow
+      .waitFor({ state: "visible", timeout: 900 })
+      .then(() => true)
+      .catch(() => false);
+
+    if (hasPrimaryRow) {
+      const rowText = ((await messageYourselfRow.innerText().catch(() => "")) || "").replace(/\s+/g, " ").trim();
+      if (isExpectedWhatsAppSelfChatRow(rowText)) {
+        return messageYourselfRow;
+      }
+    }
+
+    const candidateRows = page.locator('[data-testid="cell-frame-container"], [role="listitem"]');
+    const candidateCount = Math.min(await candidateRows.count().catch(() => 0), 20);
+    for (let index = 0; index < candidateCount; index += 1) {
+      const candidate = candidateRows.nth(index);
+      const rowText = ((await candidate.innerText().catch(() => "")) || "").replace(/\s+/g, " ").trim();
+      if (isExpectedWhatsAppSelfChatRow(rowText)) {
+        return candidate;
+      }
+    }
+
+    await page.waitForTimeout(300);
+  }
+
+  return null;
+}
+
+async function clickWhatsAppSelfChatRow(row) {
+  const clickTargets = [
+    row.locator('[data-testid="cell-frame-title"]').first(),
+    row.locator("span[title*='429-8898']").first(),
+    row,
+  ];
+
+  for (const target of clickTargets) {
+    const isVisible = await target
+      .waitFor({ state: "visible", timeout: 1200 })
+      .then(() => true)
+      .catch(() => false);
+    if (!isVisible) {
+      continue;
+    }
+
+    try {
+      await target.click({ timeout: 4000 });
+      return;
+    } catch {
+      try {
+        await target.click({ force: true, timeout: 4000 });
+        return;
+      } catch {
+        // Try the next candidate target.
+      }
+    }
+  }
+
+  throw new Error("Unable to open the verified WhatsApp self-chat row.");
+}
+
+async function openVerifiedWhatsAppSelfChat(page) {
+  const currentHeader = await getWhatsAppConversationHeaderText(page).catch(() => "");
+  if (isExpectedWhatsAppSelfChatHeader(currentHeader)) {
+    return currentHeader;
+  }
+
+  const searchBox = await getWhatsAppSearchBox(page);
+
+  for (const searchTerm of config.whatsappSearchTerms) {
+    await clearWhatsAppSearch(page, searchBox);
+    await setWhatsAppFieldValue(searchBox, searchTerm);
+    await page.waitForTimeout(1800);
+
+    const selfChatRow = await findWhatsAppSelfChatRow(page, 3500);
+    if (selfChatRow) {
+      await clickWhatsAppSelfChatRow(selfChatRow);
+      await page.waitForTimeout(1200);
+      const headerText = await getWhatsAppConversationHeaderText(page).catch(() => "");
+      if (isExpectedWhatsAppSelfChatHeader(headerText)) {
+        return headerText;
+      }
+    }
+  }
+
+  const mismatchPath = await saveDebugCapture(page, "whatsapp-chat-mismatch");
+  const openHeaderText = await getWhatsAppConversationHeaderText(page).catch(() => "");
+  throw new Error(
+    `WhatsApp self-chat verification failed. Open header: "${openHeaderText || "unknown"}"${mismatchPath ? ` | Screenshot: ${mismatchPath}` : ""}`
+  );
+}
+
+async function focusWhatsAppComposer(page) {
+  const composer = await waitForFirstVisible(page, [
+    'footer [contenteditable="true"][aria-label*="message"]',
+    'footer [contenteditable="true"][data-tab]',
+    'div[contenteditable="true"][aria-placeholder="Type a message"]',
+  ]);
+  await composer.click();
+}
+
 async function waitForManualHomepage(page, reason, timeoutMs = 180000) {
   log(`${reason} Waiting up to ${Math.round(timeoutMs / 1000)} seconds for manual DealerSocket sign-in in the opened Chrome window.`);
   await page.waitForURL("**/homepage", { timeout: timeoutMs });
@@ -663,9 +998,9 @@ async function scrapeReport(reportPage) {
 async function renderScreenshot(context, rows, runId) {
   const html = buildTableHtml(rows);
   const capturePage = await context.newPage();
-  const screenshotFileName = `bdc-activity-sales-${runId}.png`;
+  const screenshotFileName = `${config.filePrefix}-${runId}.png`;
   const screenshotPath = path.join(uploadsRoot, screenshotFileName);
-  const latestScreenshotPath = path.join(uploadsRoot, "latest-bdc-activity-sales.png");
+  const latestScreenshotPath = path.join(uploadsRoot, `latest-${config.filePrefix}.png`);
 
   await capturePage.setViewportSize({ width: 960, height: 720 });
   await capturePage.setContent(html);
@@ -680,36 +1015,27 @@ async function renderScreenshot(context, rows, runId) {
   await capturePage.close();
 
   copyFileSync(screenshotPath, latestScreenshotPath);
+  const screenshotUrl = storageSegment
+    ? `/uploads/sales-analytics/${storageSegment}/${screenshotFileName}`
+    : `/uploads/sales-analytics/${screenshotFileName}`;
   return {
     screenshotPath,
-    screenshotUrl: `/uploads/sales-analytics/${screenshotFileName}`,
+    screenshotUrl,
   };
 }
 
 async function sendToWhatsApp(page, screenshotPath) {
   await page.goto(config.whatsappUrl, { waitUntil: "domcontentloaded" });
-  const searchBox = await waitForFirstVisible(page, [
-    'div[contenteditable="true"][aria-label="Search input textbox"]',
-    'div[contenteditable="true"][title="Search input textbox"]',
-    'input[aria-label="Search input textbox"]',
-    'input[aria-label="Search or start new chat"]',
-    'input[role="textbox"][aria-label="Search or start a new chat"]',
-  ]);
-
-  await searchBox.click();
-  await page.keyboard.press("Control+A");
-  await page.keyboard.press("Backspace");
-  await page.keyboard.type(config.whatsappChatName, { delay: 50 });
-  await page.waitForTimeout(1200);
-  await page.keyboard.press("Enter");
-  await page.waitForTimeout(1800);
+  const headerText = await openVerifiedWhatsAppSelfChat(page);
+  await focusWhatsAppComposer(page);
 
   copyImageToClipboardWindows(screenshotPath);
   await page.keyboard.press("Control+V");
   await page.waitForTimeout(1600);
   await page.keyboard.press("Enter");
   await page.waitForTimeout(3000);
-  log(`WhatsApp screenshot sent to chat "${config.whatsappChatName}".`);
+  log(`WhatsApp screenshot sent to verified self chat "${headerText || config.whatsappChatName}".`);
+  return headerText || config.whatsappChatName;
 }
 
 async function main() {
@@ -722,6 +1048,7 @@ async function main() {
   let primaryPage = null;
   let reportPage = null;
   let runRecord = null;
+  let browserLockHeld = false;
 
   writeStatus({
     state: "running",
@@ -734,6 +1061,9 @@ async function main() {
   log(`Starting ${config.reportName}.`);
 
   try {
+    await acquireBrowserProfileLock();
+    browserLockHeld = true;
+
     context = await chromium.launchPersistentContext(config.chromeProfilePath, {
       channel: config.chromeChannel || undefined,
       headless: false,
@@ -752,11 +1082,11 @@ async function main() {
     reportPage = null;
 
     try {
-      await sendToWhatsApp(primaryPage, screenshotPath);
+      const deliveredChatName = await sendToWhatsApp(primaryPage, screenshotPath);
       runRecord = {
         ...runRecord,
         delivery: {
-          chat_name: config.whatsappChatName,
+          chat_name: deliveredChatName,
           whatsapp_status: "sent",
           sent_at: nowIso(),
           error_message: "",
@@ -831,6 +1161,9 @@ async function main() {
     }
     if (context) {
       await context.close().catch(() => {});
+    }
+    if (browserLockHeld) {
+      releaseBrowserProfileLock();
     }
   }
 }

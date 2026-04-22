@@ -55,6 +55,19 @@ def load_local_env_file(file_path: str) -> None:
 load_local_env_file(os.path.join(os.path.dirname(__file__), ".env"))
 
 
+def build_hourly_schedule_times(start_hour: int, end_hour: int, minute: int = 0) -> List[str]:
+    times: List[str] = []
+    for hour in range(start_hour, end_hour + 1):
+        display_hour = hour % 12 or 12
+        suffix = "AM" if hour < 12 else "PM"
+        times.append(f"{display_hour}:{minute:02d} {suffix}")
+    return times
+
+
+def format_weekday_schedule_label(times: List[str]) -> str:
+    return f"Monday to Saturday at {', '.join(times)}"
+
+
 DB_PATH = os.getenv(
     "DEALER_DB_PATH",
     os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "dealership.db"),
@@ -71,10 +84,58 @@ SALES_ANALYTICS_HISTORY_PATH = os.path.join(SALES_ANALYTICS_ROOT, "history.json"
 SALES_ANALYTICS_STATUS_PATH = os.path.join(SALES_ANALYTICS_ROOT, "status.json")
 SALES_ACTIVITY_RUNNER_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "sales-activity-runner")
 SALES_ACTIVITY_RUNNER_ENTRY = os.path.join(SALES_ACTIVITY_RUNNER_DIR, "run-sales-activity-report.mjs")
+SALES_ACTIVITY_WHATSAPP_MESSAGE_ENTRY = os.path.join(SALES_ACTIVITY_RUNNER_DIR, "send-whatsapp-self-message.mjs")
 SALES_ACTIVITY_RUNNER_BATCH = os.path.join(os.path.dirname(os.path.dirname(__file__)), "Run BDC Activity Report Sales.bat")
 SALES_ACTIVITY_SCHEDULE_DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
-SALES_ACTIVITY_SCHEDULE_TIMES = ["10:00 AM", "12:00 PM", "2:00 PM", "4:00 PM", "6:00 PM", "8:00 PM"]
-SALES_ACTIVITY_SCHEDULE_LABEL = f"Monday to Saturday at {', '.join(SALES_ACTIVITY_SCHEDULE_TIMES)}"
+SALES_ACTIVITY_SCHEDULE_TIMES = build_hourly_schedule_times(10, 20, minute=0)
+SALES_ACTIVITY_SCHEDULE_LABEL = format_weekday_schedule_label(SALES_ACTIVITY_SCHEDULE_TIMES)
+SALES_ACTIVITY_SALES_MANAGER_SCHEDULE_TIMES = build_hourly_schedule_times(9, 20, minute=58)
+SALES_ACTIVITY_SALES_MANAGER_SCHEDULE_LABEL = format_weekday_schedule_label(SALES_ACTIVITY_SALES_MANAGER_SCHEDULE_TIMES)
+SALES_ACTIVITY_BDC_STAFF_SCHEDULE_TIMES = build_hourly_schedule_times(9, 20, minute=59)
+SALES_ACTIVITY_BDC_STAFF_SCHEDULE_LABEL = format_weekday_schedule_label(SALES_ACTIVITY_BDC_STAFF_SCHEDULE_TIMES)
+SALES_ACTIVITY_SELF_CHAT_LABEL = "Kau 429-8898 (You)"
+SALES_ACTIVITY_SELF_SEARCH_TERMS = "kau,956 429 8898,9564298898"
+SALES_ACTIVITY_SELF_VERIFY_TOKENS = "(You),429-8898,Message yourself"
+BDC_WHATSAPP_LEAD_PUSH_META_KEY = "bdc:lead-whatsapp-push"
+SALES_ANALYTICS_VARIANTS: Dict[str, Dict[str, Any]] = {
+    "sales": {
+        "label": "Sales people",
+        "report_name": "BDC Activity Report Sales",
+        "role_name": "* All Sales Power Team",
+        "storage_key": "",
+        "file_prefix": "bdc-activity-sales",
+        "batch_file": "Run BDC Activity Report Sales.bat",
+        "task_name": "Dealership Tool - BDC Activity Report Sales",
+        "schedule_days": list(SALES_ACTIVITY_SCHEDULE_DAYS),
+        "schedule_times": list(SALES_ACTIVITY_SCHEDULE_TIMES),
+        "schedule_label": SALES_ACTIVITY_SCHEDULE_LABEL,
+    },
+    "sales-manager": {
+        "label": "Sales managers",
+        "report_name": "BDC Activity Report Sales Manager",
+        "role_name": "Sales Manager",
+        "storage_key": "sales-manager",
+        "file_prefix": "bdc-activity-sales-manager",
+        "batch_file": "Run BDC Activity Report Sales Manager.bat",
+        "task_name": "Dealership Tool - BDC Activity Report Sales Manager",
+        "schedule_days": list(SALES_ACTIVITY_SCHEDULE_DAYS),
+        "schedule_times": list(SALES_ACTIVITY_SALES_MANAGER_SCHEDULE_TIMES),
+        "schedule_label": SALES_ACTIVITY_SALES_MANAGER_SCHEDULE_LABEL,
+    },
+    "bdc-staff": {
+        "label": "BDC staff",
+        "report_name": "BDC Activity Report BDC Staff",
+        "role_name": "BDC Manager/Internet Manager Power Team",
+        "storage_key": "manager",
+        "file_prefix": "bdc-activity-manager",
+        "batch_file": "Run BDC Activity Report Manager.bat",
+        "task_name": "Dealership Tool - BDC Activity Report Manager",
+        "schedule_days": list(SALES_ACTIVITY_SCHEDULE_DAYS),
+        "schedule_times": list(SALES_ACTIVITY_BDC_STAFF_SCHEDULE_TIMES),
+        "schedule_label": SALES_ACTIVITY_BDC_STAFF_SCHEDULE_LABEL,
+    },
+}
+SALES_ANALYTICS_VARIANT_ORDER = tuple(SALES_ANALYTICS_VARIANTS.keys())
 LOCAL_TRIGGER_HOSTS = {"127.0.0.1", "::1", "localhost"}
 for path in (
     DATA_ROOT,
@@ -120,6 +181,7 @@ TAB_VISIBILITY_IDS = (
     "bdcSalesTracker",
     "salesAnalytics",
     "reports",
+    "crmCleanup",
     "traffic",
     "freshUp",
     "marketplace",
@@ -363,6 +425,18 @@ class BdcAssignmentOut(BaseModel):
     customer_phone: str = ""
     notification_sms_status: str = ""
     notification_email_status: str = ""
+    notification_whatsapp_status: str = ""
+
+
+class BdcLeadPushConfigOut(BaseModel):
+    enabled: bool = True
+    chat_name: str = SALES_ACTIVITY_SELF_CHAT_LABEL
+    runner_ready: bool = False
+    message_type: str = "whatsapp-self"
+
+
+class BdcLeadPushConfigIn(BaseModel):
+    enabled: bool = True
 
 
 class NotificationConfigOut(BaseModel):
@@ -774,7 +848,7 @@ class SalesAnalyticsHighlightOut(BaseModel):
 
 
 class SalesAnalyticsDeliveryOut(BaseModel):
-    chat_name: str = "Me"
+    chat_name: str = SALES_ACTIVITY_SELF_CHAT_LABEL
     whatsapp_status: str = "unknown"
     sent_at: str = ""
     error_message: str = ""
@@ -801,11 +875,13 @@ class SalesAnalyticsRunOut(BaseModel):
 
 
 class SalesAnalyticsStatusOut(BaseModel):
+    variant_key: str = "sales"
+    variant_label: str = "Sales people"
     report_name: str = "BDC Activity Report Sales"
     schedule_label: str = SALES_ACTIVITY_SCHEDULE_LABEL
     schedule_days: List[str] = Field(default_factory=lambda: list(SALES_ACTIVITY_SCHEDULE_DAYS))
     schedule_times: List[str] = Field(default_factory=lambda: list(SALES_ACTIVITY_SCHEDULE_TIMES))
-    chat_name: str = "Me"
+    chat_name: str = SALES_ACTIVITY_SELF_CHAT_LABEL
     state: str = "idle"
     started_at: str = ""
     finished_at: str = ""
@@ -816,11 +892,13 @@ class SalesAnalyticsStatusOut(BaseModel):
 
 
 class SalesAnalyticsConfigOut(BaseModel):
+    variant_key: str = "sales"
+    variant_label: str = "Sales people"
     report_name: str = "BDC Activity Report Sales"
     schedule_label: str = SALES_ACTIVITY_SCHEDULE_LABEL
     schedule_days: List[str] = Field(default_factory=lambda: list(SALES_ACTIVITY_SCHEDULE_DAYS))
     schedule_times: List[str] = Field(default_factory=lambda: list(SALES_ACTIVITY_SCHEDULE_TIMES))
-    chat_name: str = "Me"
+    chat_name: str = SALES_ACTIVITY_SELF_CHAT_LABEL
     runner_ready: bool = False
     can_trigger: bool = False
 
@@ -1532,6 +1610,131 @@ def deliver_assignment_notifications(
     return sms_status, email_status
 
 
+def whatsapp_message_runner_ready() -> bool:
+    return bool(
+        shutil.which("node")
+        and os.path.exists(SALES_ACTIVITY_WHATSAPP_MESSAGE_ENTRY)
+        and os.path.exists(os.path.join(SALES_ACTIVITY_RUNNER_DIR, ".env"))
+        and os.path.exists(os.path.join(SALES_ACTIVITY_RUNNER_DIR, "node_modules", "playwright"))
+    )
+
+
+def bdc_lead_push_enabled() -> bool:
+    saved = str(get_meta(BDC_WHATSAPP_LEAD_PUSH_META_KEY) or "").strip().lower()
+    if not saved:
+        return True
+    return saved not in {"0", "false", "off", "no", "disabled"}
+
+
+def get_bdc_lead_push_config() -> BdcLeadPushConfigOut:
+    return BdcLeadPushConfigOut(
+        enabled=bdc_lead_push_enabled(),
+        chat_name=SALES_ACTIVITY_SELF_CHAT_LABEL,
+        runner_ready=whatsapp_message_runner_ready(),
+    )
+
+
+def update_bdc_lead_push_config(payload: BdcLeadPushConfigIn) -> BdcLeadPushConfigOut:
+    set_meta(BDC_WHATSAPP_LEAD_PUSH_META_KEY, "1" if payload.enabled else "0")
+    return get_bdc_lead_push_config()
+
+
+def build_assignment_whatsapp_message(assignment_row: Dict[str, Any]) -> str:
+    salesperson_name = str(assignment_row.get("salesperson_name") or "").strip() or "the salesperson"
+    customer_name = str(assignment_row.get("customer_name") or "").strip()
+    customer_phone = str(assignment_row.get("customer_phone") or "").strip()
+    lead_store = str(assignment_row.get("lead_store") or assignment_row.get("salesperson_dealership") or "").strip()
+    bdc_agent_name = str(assignment_row.get("bdc_agent_name") or "").strip()
+    assigned_at = str(assignment_row.get("assigned_at") or now_iso()).strip()
+
+    lines = [f"A lead has been assigned to {salesperson_name}."]
+    if customer_name:
+        lines.append(f"Customer: {customer_name}")
+    else:
+        lines.append("Customer: No customer name entered")
+    if customer_phone:
+        lines.append(f"Phone: {customer_phone}")
+    else:
+        lines.append("Phone: No customer phone entered")
+    if lead_store:
+        lines.append(f"Store: {lead_store}")
+    if bdc_agent_name:
+        lines.append(f"Assigned by: {bdc_agent_name}")
+    if assigned_at:
+        lines.append(f"Assigned at: {assigned_at}")
+    return "\n".join(lines)
+
+
+def compact_process_text(stdout: str, stderr: str) -> str:
+    combined = " ".join(part.strip() for part in [stdout, stderr] if str(part or "").strip())
+    return compact_error_text(Exception(combined or "process failed"))
+
+
+def update_bdc_assignment_whatsapp_status(assignment_id: int, status: str) -> None:
+    if assignment_id <= 0:
+        return
+    db_execute(
+        """
+        UPDATE bdc_assignment_log
+        SET notification_whatsapp_status = ?
+        WHERE id = ?
+        """,
+        (status, assignment_id),
+    )
+
+
+def run_self_whatsapp_message(message_text: str, message_tag: str = "bdc-assignment") -> str:
+    node_path = shutil.which("node")
+    if not node_path:
+        raise RuntimeError("Node.js is not installed or not available on PATH")
+    if not os.path.exists(SALES_ACTIVITY_WHATSAPP_MESSAGE_ENTRY):
+        raise RuntimeError("The WhatsApp self-message sender is missing from this workspace")
+    env = sales_analytics_runner_env("sales")
+    env.update(
+        {
+            "WHATSAPP_MESSAGE_TEXT": str(message_text or ""),
+            "WHATSAPP_MESSAGE_TAG": str(message_tag or "bdc-assignment"),
+        }
+    )
+    creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    result = subprocess.run(
+        [node_path, SALES_ACTIVITY_WHATSAPP_MESSAGE_ENTRY],
+        cwd=SALES_ACTIVITY_RUNNER_DIR,
+        env=env,
+        capture_output=True,
+        text=True,
+        timeout=180,
+        creationflags=creation_flags,
+    )
+    if result.returncode != 0:
+        raise RuntimeError(compact_process_text(result.stdout, result.stderr))
+    output = str(result.stdout or "").strip().splitlines()
+    return output[-1].strip() if output else f"WhatsApp push sent to {SALES_ACTIVITY_SELF_CHAT_LABEL}"
+
+
+def deliver_assignment_whatsapp_push_async(assignment_row: Dict[str, Any]) -> str:
+    assignment_id = int(assignment_row.get("id") or 0)
+    if not bdc_lead_push_enabled():
+        return "WhatsApp push disabled"
+    if not whatsapp_message_runner_ready():
+        return "WhatsApp push skipped: sender is not ready"
+    if assignment_id <= 0:
+        return "WhatsApp push skipped: assignment id missing"
+
+    message_text = build_assignment_whatsapp_message(assignment_row)
+    update_bdc_assignment_whatsapp_status(assignment_id, f"WhatsApp push queued to {SALES_ACTIVITY_SELF_CHAT_LABEL}")
+
+    def worker() -> None:
+        try:
+            result_text = run_self_whatsapp_message(message_text, message_tag=f"bdc-assignment-{assignment_id}")
+            update_bdc_assignment_whatsapp_status(assignment_id, result_text or f"WhatsApp push sent to {SALES_ACTIVITY_SELF_CHAT_LABEL}")
+        except Exception as exc:
+            update_bdc_assignment_whatsapp_status(assignment_id, f"WhatsApp push failed: {compact_error_text(exc)}")
+
+    threading.Thread(target=worker, name=f"bdc-whatsapp-push-{assignment_id}", daemon=True).start()
+    return f"WhatsApp push queued to {SALES_ACTIVITY_SELF_CHAT_LABEL}"
+
+
 def normalize_freshup_event_type(value: str) -> str:
     text = normalize_short_text(value, "event_type", max_len=40).lower()
     if text not in ("page_view", "submit", "link_click"):
@@ -2059,31 +2262,102 @@ def is_local_request(request: Request) -> bool:
     return host in LOCAL_TRIGGER_HOSTS
 
 
-def sales_analytics_runner_ready() -> bool:
+def normalize_sales_analytics_variant(value: Optional[str]) -> str:
+    text = str(value or "sales").strip().lower()
+    aliases = {
+        "salespeople": "sales",
+        "sales-people": "sales",
+        "sales_manager": "sales-manager",
+        "salesmanager": "sales-manager",
+        "manager": "bdc-staff",
+        "bdc": "bdc-staff",
+        "bdcstaff": "bdc-staff",
+        "bdc-staff": "bdc-staff",
+    }
+    normalized = aliases.get(text, text or "sales")
+    if normalized not in SALES_ANALYTICS_VARIANTS:
+        raise HTTPException(status_code=400, detail="unknown sales analytics variant")
+    return normalized
+
+
+def sales_analytics_variant_meta(variant: Optional[str] = None) -> Dict[str, Any]:
+    key = normalize_sales_analytics_variant(variant)
+    meta = dict(SALES_ANALYTICS_VARIANTS[key])
+    meta["key"] = key
+    return meta
+
+
+def sales_analytics_paths(variant: Optional[str] = None) -> Dict[str, str]:
+    meta = sales_analytics_variant_meta(variant)
+    root = SALES_ANALYTICS_ROOT
+    storage_key = str(meta.get("storage_key") or "").strip()
+    if storage_key:
+        root = os.path.join(SALES_ANALYTICS_ROOT, storage_key)
+    return {
+        "root": root,
+        "latest": os.path.join(root, "latest.json"),
+        "history": os.path.join(root, "history.json"),
+        "status": os.path.join(root, "status.json"),
+    }
+
+
+def sales_analytics_runner_env(variant: Optional[str] = None) -> Dict[str, str]:
+    meta = sales_analytics_variant_meta(variant)
+    env = os.environ.copy()
+    env.update(
+        {
+            "DEALERSOCKET_REPORT_NAME": str(meta["report_name"]),
+            "DEALERSOCKET_ROLE": str(meta["role_name"]),
+            "SALES_ACTIVITY_STORAGE_KEY": str(meta.get("storage_key") or "sales"),
+            "SALES_ACTIVITY_FILE_PREFIX": str(meta["file_prefix"]),
+            "SALES_ACTIVITY_SCHEDULE_DAYS": ",".join(meta["schedule_days"]),
+            "SALES_ACTIVITY_SCHEDULE_TIMES": ",".join(meta["schedule_times"]),
+            "SALES_ACTIVITY_SCHEDULE_LABEL": str(meta["schedule_label"]),
+            "WHATSAPP_TARGET_LABEL": env.get("WHATSAPP_TARGET_LABEL", SALES_ACTIVITY_SELF_CHAT_LABEL),
+            "WHATSAPP_SELF_SEARCH_TERMS": env.get("WHATSAPP_SELF_SEARCH_TERMS", SALES_ACTIVITY_SELF_SEARCH_TERMS),
+            "WHATSAPP_SELF_VERIFY_TOKENS": env.get("WHATSAPP_SELF_VERIFY_TOKENS", SALES_ACTIVITY_SELF_VERIFY_TOKENS),
+        }
+    )
+    return env
+
+
+def sales_analytics_runner_ready(variant: Optional[str] = None) -> bool:
+    meta = sales_analytics_variant_meta(variant)
+    batch_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), str(meta["batch_file"]))
     return bool(
-        shutil.which("node")
+        whatsapp_message_runner_ready()
         and os.path.exists(SALES_ACTIVITY_RUNNER_ENTRY)
-        and os.path.exists(os.path.join(SALES_ACTIVITY_RUNNER_DIR, ".env"))
-        and os.path.exists(os.path.join(SALES_ACTIVITY_RUNNER_DIR, "node_modules", "playwright"))
+        and os.path.exists(batch_path)
     )
 
 
-def read_sales_analytics_status() -> SalesAnalyticsStatusOut:
-    raw = read_json_file(SALES_ANALYTICS_STATUS_PATH, {})
+def read_sales_analytics_status(variant: Optional[str] = None) -> SalesAnalyticsStatusOut:
+    meta = sales_analytics_variant_meta(variant)
+    paths = sales_analytics_paths(meta["key"])
+    raw = read_json_file(paths["status"], {})
     if not isinstance(raw, dict):
         raw = {}
+    raw.setdefault("variant_key", meta["key"])
+    raw.setdefault("variant_label", meta["label"])
+    raw.setdefault("chat_name", SALES_ACTIVITY_SELF_CHAT_LABEL)
+    raw.setdefault("schedule_label", meta["schedule_label"])
+    raw.setdefault("schedule_days", list(meta["schedule_days"]))
+    raw.setdefault("schedule_times", list(meta["schedule_times"]))
+    raw.setdefault("report_name", meta["report_name"])
     return SalesAnalyticsStatusOut.model_validate(raw)
 
 
-def read_sales_analytics_latest() -> Optional[SalesAnalyticsRunOut]:
-    raw = read_json_file(SALES_ANALYTICS_LATEST_PATH, None)
+def read_sales_analytics_latest(variant: Optional[str] = None) -> Optional[SalesAnalyticsRunOut]:
+    paths = sales_analytics_paths(variant)
+    raw = read_json_file(paths["latest"], None)
     if not isinstance(raw, dict):
         return None
     return SalesAnalyticsRunOut.model_validate(raw)
 
 
-def read_sales_analytics_history(limit: int = 18) -> List[SalesAnalyticsRunOut]:
-    raw = read_json_file(SALES_ANALYTICS_HISTORY_PATH, [])
+def read_sales_analytics_history(limit: int = 18, variant: Optional[str] = None) -> List[SalesAnalyticsRunOut]:
+    paths = sales_analytics_paths(variant)
+    raw = read_json_file(paths["history"], [])
     if not isinstance(raw, list):
         return []
     runs: List[SalesAnalyticsRunOut] = []
@@ -2095,42 +2369,50 @@ def read_sales_analytics_history(limit: int = 18) -> List[SalesAnalyticsRunOut]:
     return runs
 
 
-def build_sales_analytics_config(can_trigger: bool = False) -> SalesAnalyticsConfigOut:
-    latest = read_sales_analytics_latest()
-    status = read_sales_analytics_status()
+def build_sales_analytics_config(variant: Optional[str] = None, can_trigger: bool = False) -> SalesAnalyticsConfigOut:
+    meta = sales_analytics_variant_meta(variant)
+    latest = read_sales_analytics_latest(meta["key"])
+    status = read_sales_analytics_status(meta["key"])
     chat_name = (
-        str((latest.delivery.chat_name if latest else "") or status.chat_name or "Me").strip() or "Me"
+        str((latest.delivery.chat_name if latest else "") or status.chat_name or SALES_ACTIVITY_SELF_CHAT_LABEL).strip()
+        or SALES_ACTIVITY_SELF_CHAT_LABEL
     )
     report_name = (
-        str((latest.report_name if latest else "") or status.report_name or "BDC Activity Report Sales").strip()
-        or "BDC Activity Report Sales"
+        str((latest.report_name if latest else "") or status.report_name or meta["report_name"]).strip() or str(meta["report_name"])
     )
     return SalesAnalyticsConfigOut(
+        variant_key=meta["key"],
+        variant_label=str(meta["label"]),
         report_name=report_name,
-        schedule_label=SALES_ACTIVITY_SCHEDULE_LABEL,
-        schedule_days=list(SALES_ACTIVITY_SCHEDULE_DAYS),
-        schedule_times=list(SALES_ACTIVITY_SCHEDULE_TIMES),
+        schedule_label=str(meta["schedule_label"]),
+        schedule_days=list(meta["schedule_days"]),
+        schedule_times=list(meta["schedule_times"]),
         chat_name=chat_name,
-        runner_ready=sales_analytics_runner_ready(),
+        runner_ready=sales_analytics_runner_ready(meta["key"]),
         can_trigger=can_trigger,
     )
 
 
-def fetch_sales_analytics_dashboard(limit: int = 18, can_trigger: bool = False) -> SalesAnalyticsDashboardOut:
-    latest = read_sales_analytics_latest()
-    history = read_sales_analytics_history(limit=limit)
+def fetch_sales_analytics_dashboard(
+    limit: int = 18, variant: Optional[str] = None, can_trigger: bool = False
+) -> SalesAnalyticsDashboardOut:
+    meta = sales_analytics_variant_meta(variant)
+    latest = read_sales_analytics_latest(meta["key"])
+    history = read_sales_analytics_history(limit=limit, variant=meta["key"])
     if latest and not any(item.run_id == latest.run_id for item in history):
         history = [latest, *history][: max(1, limit)]
     return SalesAnalyticsDashboardOut(
-        config=build_sales_analytics_config(can_trigger=can_trigger),
-        status=read_sales_analytics_status(),
+        config=build_sales_analytics_config(meta["key"], can_trigger=can_trigger),
+        status=read_sales_analytics_status(meta["key"]),
         latest=latest,
         history=history,
     )
 
 
-def trigger_sales_analytics_runner() -> SalesAnalyticsTriggerOut:
-    current_status = read_sales_analytics_status()
+def trigger_sales_analytics_runner(variant: Optional[str] = None) -> SalesAnalyticsTriggerOut:
+    meta = sales_analytics_variant_meta(variant)
+    paths = sales_analytics_paths(meta["key"])
+    current_status = read_sales_analytics_status(meta["key"])
     if str(current_status.state or "").lower() == "running":
         return SalesAnalyticsTriggerOut(
             started=False,
@@ -2153,10 +2435,13 @@ def trigger_sales_analytics_runner() -> SalesAnalyticsTriggerOut:
     next_status = current_status.model_dump()
     next_status.update(
         {
-            "report_name": build_sales_analytics_config().report_name,
-            "schedule_label": SALES_ACTIVITY_SCHEDULE_LABEL,
-            "schedule_days": list(SALES_ACTIVITY_SCHEDULE_DAYS),
-            "schedule_times": list(SALES_ACTIVITY_SCHEDULE_TIMES),
+            "variant_key": meta["key"],
+            "variant_label": meta["label"],
+            "report_name": build_sales_analytics_config(meta["key"]).report_name,
+            "schedule_label": meta["schedule_label"],
+            "schedule_days": list(meta["schedule_days"]),
+            "schedule_times": list(meta["schedule_times"]),
+            "chat_name": SALES_ACTIVITY_SELF_CHAT_LABEL,
             "state": "running",
             "started_at": started_at,
             "finished_at": "",
@@ -2164,14 +2449,14 @@ def trigger_sales_analytics_runner() -> SalesAnalyticsTriggerOut:
             "message": "Sales activity scrape started from the dashboard.",
         }
     )
-    write_json_file(SALES_ANALYTICS_STATUS_PATH, next_status)
+    write_json_file(paths["status"], next_status)
 
     creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
     try:
         subprocess.Popen(
             [node_path, SALES_ACTIVITY_RUNNER_ENTRY],
             cwd=SALES_ACTIVITY_RUNNER_DIR,
-            env=os.environ.copy(),
+            env=sales_analytics_runner_env(meta["key"]),
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
             creationflags=creation_flags,
@@ -2182,7 +2467,7 @@ def trigger_sales_analytics_runner() -> SalesAnalyticsTriggerOut:
     return SalesAnalyticsTriggerOut(
         started=True,
         message="Sales activity scrape started.",
-        status=read_sales_analytics_status(),
+        status=read_sales_analytics_status(meta["key"]),
     )
 
 
@@ -2916,6 +3201,7 @@ def init_db() -> None:
     ensure_column("bdc_assignment_log", "distribution_mode", "TEXT NOT NULL DEFAULT 'franchise'")
     ensure_column("bdc_assignment_log", "notification_sms_status", "TEXT NOT NULL DEFAULT ''")
     ensure_column("bdc_assignment_log", "notification_email_status", "TEXT NOT NULL DEFAULT ''")
+    ensure_column("bdc_assignment_log", "notification_whatsapp_status", "TEXT NOT NULL DEFAULT ''")
     db_execute(
         """
         CREATE TABLE IF NOT EXISTS bdc_sales_tracker_months (
@@ -3339,6 +3625,7 @@ def bdc_log_out(row: Dict[str, Any]) -> BdcAssignmentOut:
         customer_phone=str(row.get("customer_phone") or ""),
         notification_sms_status=str(row.get("notification_sms_status") or ""),
         notification_email_status=str(row.get("notification_email_status") or ""),
+        notification_whatsapp_status=str(row.get("notification_whatsapp_status") or ""),
     )
 
 
@@ -5072,8 +5359,8 @@ def assign_next_lead(payload: BdcLeadAssignIn) -> BdcAssignmentOut:
         INSERT INTO bdc_assignment_log (
             assigned_ts, assigned_at, bdc_agent_id, bdc_agent_name, lead_store, salesperson_id, salesperson_name,
             salesperson_dealership, customer_name, customer_phone, distribution_mode, notification_sms_status,
-            notification_email_status
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            notification_email_status, notification_whatsapp_status
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
             time.time(),
@@ -5089,25 +5376,29 @@ def assign_next_lead(payload: BdcLeadAssignIn) -> BdcAssignmentOut:
             distribution_mode,
             "",
             "",
+            "",
         ),
     )
     set_meta(bdc_pointer_key(pool_key), str(next_pointer))
     row = db_query_one("SELECT * FROM bdc_assignment_log WHERE id = ?", (created_id,))
     if not row:
         raise HTTPException(status_code=500, detail="failed to create assignment log")
+    whatsapp_status = deliver_assignment_whatsapp_push_async(row)
     salesperson_row = get_salesperson_row(salesperson.id)
+    sms_status = ""
+    email_status = ""
     if salesperson_row:
         sms_status, email_status = deliver_assignment_notifications(salesperson_row, row)
-        if sms_status or email_status:
-            db_execute(
-                """
-                UPDATE bdc_assignment_log
-                SET notification_sms_status = ?, notification_email_status = ?
-                WHERE id = ?
-                """,
-                (sms_status, email_status, created_id),
-            )
-            row = db_query_one("SELECT * FROM bdc_assignment_log WHERE id = ?", (created_id,)) or row
+    if sms_status or email_status or whatsapp_status:
+        db_execute(
+            """
+            UPDATE bdc_assignment_log
+            SET notification_sms_status = ?, notification_email_status = ?, notification_whatsapp_status = ?
+            WHERE id = ?
+            """,
+            (sms_status, email_status, whatsapp_status, created_id),
+        )
+        row = db_query_one("SELECT * FROM bdc_assignment_log WHERE id = ?", (created_id,)) or row
     return bdc_log_out(row)
 
 
@@ -8119,6 +8410,21 @@ def get_bdc_undo_settings_public() -> BdcUndoSettingsOut:
     return get_bdc_undo_settings()
 
 
+@app.get("/api/admin/bdc/lead-push", response_model=BdcLeadPushConfigOut)
+def get_bdc_lead_push_settings(x_admin_token: Optional[str] = Header(default=None)) -> BdcLeadPushConfigOut:
+    require_admin(x_admin_token)
+    return get_bdc_lead_push_config()
+
+
+@app.post("/api/admin/bdc/lead-push", response_model=BdcLeadPushConfigOut)
+def post_bdc_lead_push_settings(
+    payload: BdcLeadPushConfigIn,
+    x_admin_token: Optional[str] = Header(default=None),
+) -> BdcLeadPushConfigOut:
+    require_admin(x_admin_token)
+    return update_bdc_lead_push_config(payload)
+
+
 @app.get("/api/tabs/visibility", response_model=TabVisibilityOut)
 def get_tabs_visibility_public() -> TabVisibilityOut:
     return get_tab_visibility()
@@ -8128,21 +8434,23 @@ def get_tabs_visibility_public() -> TabVisibilityOut:
 def get_sales_analytics_dashboard(
     request: Request,
     limit: int = 18,
+    variant: str = "sales",
     x_admin_token: Optional[str] = Header(default=None),
 ) -> SalesAnalyticsDashboardOut:
     safe_limit = max(1, min(60, int(limit or 18)))
     can_trigger = is_local_request(request) or has_admin_session(x_admin_token)
-    return fetch_sales_analytics_dashboard(limit=safe_limit, can_trigger=can_trigger)
+    return fetch_sales_analytics_dashboard(limit=safe_limit, variant=variant, can_trigger=can_trigger)
 
 
 @app.post("/api/sales-analytics/run", response_model=SalesAnalyticsTriggerOut)
 def post_sales_analytics_run(
     request: Request,
+    variant: str = "sales",
     x_admin_token: Optional[str] = Header(default=None),
 ) -> SalesAnalyticsTriggerOut:
     if not is_local_request(request) and not has_admin_session(x_admin_token):
         raise HTTPException(status_code=403, detail="admin login required")
-    return trigger_sales_analytics_runner()
+    return trigger_sales_analytics_runner(variant=variant)
 
 
 @app.get("/api/freshup/log", response_model=FreshUpLogListOut)
