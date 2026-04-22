@@ -202,8 +202,9 @@ const MARKETPLACE_PREVIEW_SAMPLE = {
 };
 const TRAFFIC_ANALYSIS_PROMPTS = [
   "What day was busiest this month?",
-  "Which traffic rows still need notes?",
-  "Compare Kia vs Mazda traffic.",
+  "Which weekdays carry the most traffic?",
+  "How many rows are 100k miles or older?",
+  "Where are the best upgrade opportunities?",
   "Who owns the most appointments?",
 ];
 const FRESH_UP_STORAGE_KEY = "dealer_tool_fresh_up_form";
@@ -319,6 +320,27 @@ const CREDIT_TIERS = [
 ];
 const TRAFFIC_URL = import.meta.env.VITE_TRAFFIC_URL || "https://bokbbui-production.up.railway.app/";
 const CALENDAR_WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const CALENDAR_WEEKDAY_LONG = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+const TRAFFIC_TIME_WINDOWS = [
+  { key: "early", label: "Before 9a", min: 0, max: 8 },
+  { key: "morning", label: "9a to 11a", min: 9, max: 11 },
+  { key: "midday", label: "Noon to 2p", min: 12, max: 14 },
+  { key: "afternoon", label: "3p to 5p", min: 15, max: 17 },
+  { key: "late", label: "After 5p", min: 18, max: 23 },
+];
+const TRAFFIC_ODOMETER_BANDS = [
+  { key: "under30", label: "Under 30k", min: 0, max: 29999 },
+  { key: "30to60", label: "30k to 59k", min: 30000, max: 59999 },
+  { key: "60to90", label: "60k to 89k", min: 60000, max: 89999 },
+  { key: "90to120", label: "90k to 119k", min: 90000, max: 119999 },
+  { key: "120plus", label: "120k+", min: 120000, max: Number.POSITIVE_INFINITY },
+];
+const TRAFFIC_VEHICLE_AGE_BANDS = [
+  { key: "late", label: "0 to 2 yrs", min: 0, max: 2 },
+  { key: "mid", label: "3 to 5 yrs", min: 3, max: 5 },
+  { key: "mature", label: "6 to 8 yrs", min: 6, max: 8 },
+  { key: "older", label: "9+ yrs", min: 9, max: Number.POSITIVE_INFINITY },
+];
 
 function currentMonth() {
   const now = new Date();
@@ -345,6 +367,14 @@ function dateParts(value) {
     monthShort: new Intl.DateTimeFormat("en-US", { month: "short" }).format(parsed),
     weekdayIndex: parsed.getDay(),
   };
+}
+
+function weekdayShortLabel(index) {
+  return CALENDAR_WEEKDAYS[index] || "";
+}
+
+function weekdayLongLabel(index) {
+  return CALENDAR_WEEKDAY_LONG[index] || "";
 }
 
 function dateTimeLabel(value) {
@@ -470,6 +500,66 @@ function odometerLabel(value) {
   const text = String(value || "").trim();
   if (!text) return "Miles n/a";
   return text.toLowerCase().includes("mi") ? text : `${text} mi`;
+}
+
+function formatWholeNumber(value) {
+  const numeric = Number(value || 0);
+  if (!Number.isFinite(numeric)) return "0";
+  return Math.round(numeric).toLocaleString("en-US");
+}
+
+function parseTrafficYearValue(value) {
+  const match = String(value || "").match(/\b(19|20)\d{2}\b/);
+  if (!match) return 0;
+  const year = Number(match[0]);
+  return Number.isFinite(year) ? year : 0;
+}
+
+function medianNumber(values) {
+  const list = (values || []).filter((value) => Number.isFinite(Number(value))).map((value) => Number(value)).sort((a, b) => a - b);
+  if (!list.length) return 0;
+  const middle = Math.floor(list.length / 2);
+  if (list.length % 2 === 1) return list[middle];
+  return (list[middle - 1] + list[middle]) / 2;
+}
+
+function averageNumber(values) {
+  const list = (values || []).filter((value) => Number.isFinite(Number(value))).map((value) => Number(value));
+  if (!list.length) return 0;
+  return list.reduce((sum, value) => sum + value, 0) / list.length;
+}
+
+function trafficEntryAppointmentHour(entry) {
+  const appointmentTs = Number(entry?.appointment_ts || 0);
+  if (appointmentTs > 0) {
+    return new Date(appointmentTs * 1000).getHours();
+  }
+  const match = String(entry?.appointment_label || "").match(/(\d{1,2})(?::(\d{2}))?\s*(AM|PM)/i);
+  if (!match) return null;
+  let hours = Number(match[1] || 0);
+  const meridiem = String(match[3] || "").toUpperCase();
+  if (meridiem === "PM" && hours < 12) hours += 12;
+  if (meridiem === "AM" && hours === 12) hours = 0;
+  return Number.isFinite(hours) ? hours : null;
+}
+
+function trafficTimeWindowForEntry(entry) {
+  const hour = trafficEntryAppointmentHour(entry);
+  if (hour === null) return "";
+  return TRAFFIC_TIME_WINDOWS.find((window) => hour >= window.min && hour <= window.max)?.key || "";
+}
+
+function trafficSourceLabelFromOffer(details = {}) {
+  const raw = String(details.imported || "").toLowerCase();
+  if (!raw) return "Manual";
+  if (raw.includes("reynolds")) return "Reynolds";
+  if (raw.includes("mastermind")) return "Mastermind";
+  return "Imported";
+}
+
+function trafficModelFamilyLabel(modelMake, vehicleYear) {
+  const base = String(modelMake || "").replace(new RegExp(`^${String(vehicleYear || "").trim()}\\s+`), "").trim();
+  return base || String(modelMake || "").trim() || "Unknown vehicle";
 }
 
 function numericValue(value) {
@@ -975,31 +1065,102 @@ function formatAnalysisList(items, emptyLabel = "None") {
   return `${items.slice(0, -1).join(", ")}, and ${items[items.length - 1]}`;
 }
 
-function buildTrafficAnalysis(entries, countsByDate) {
+function buildTrafficAnalysis(entries, countsByDate, monthKey) {
   const rows = Array.isArray(entries) ? entries : [];
-  const dateCountsDescending = Object.entries(countsByDate || {})
-    .map(([date, count]) => ({ date, count: Number(count || 0) }))
-    .sort((left, right) => right.count - left.count || left.date.localeCompare(right.date));
-  const dateCountsChronological = [...dateCountsDescending].sort((left, right) => left.date.localeCompare(right.date));
+  const analysisYear = Number(String(monthKey || currentMonth()).split("-")[0]) || new Date().getFullYear();
   const brandCounts = { Kia: 0, Mazda: 0 };
   const notesByBrand = { Kia: 0, Mazda: 0 };
+  const brandOdometerValues = { Kia: [], Mazda: [] };
   const assigneeCounts = {};
   const statusCounts = {};
+  const sourceCounts = {};
+  const transportationCounts = {};
   const noteAuthorCounts = {};
   const noteTermCounts = {};
+  const modelCounts = {};
+  const dayStats = new Map();
+  const weekdayStats = new Map();
   const pendingRows = [];
+  const odometerValues = [];
+  const vehicleAgeValues = [];
+  const odometerBandCounts = Object.fromEntries(TRAFFIC_ODOMETER_BANDS.map((item) => [item.key, 0]));
+  const vehicleAgeBandCounts = Object.fromEntries(TRAFFIC_VEHICLE_AGE_BANDS.map((item) => [item.key, 0]));
+  const timeWindowCounts = Object.fromEntries(TRAFFIC_TIME_WINDOWS.map((item) => [item.key, 0]));
   let rowsWithNotes = 0;
+  let highMileageCount = 0;
+  let tradeCycleCount = 0;
+  let openTradeCycleCount = 0;
+  let lateModelEquityCount = 0;
+  let olderVehicleCount = 0;
+
+  for (let index = 0; index < 7; index += 1) {
+    weekdayStats.set(index, { weekdayIndex: index, label: weekdayLongLabel(index), shortLabel: weekdayShortLabel(index), count: 0, notes: 0 });
+  }
 
   for (const entry of rows) {
     const brand = entry.brand === "Mazda" ? "Mazda" : "Kia";
     brandCounts[brand] = (brandCounts[brand] || 0) + 1;
     const details = trafficOfferIdeaLookup(entry.offer_idea);
     const assignee = String(details.assignee || details.advisor || details["appointment taker"] || "").trim();
-    const status = String(details["deal status"] || details.status || details["overall status"] || "").trim();
+    const status = String(details["deal status"] || details.status || details["overall status"] || details["customer type"] || "").trim();
+    const sourceLabel = trafficSourceLabelFromOffer(details);
+    const transportationLabel = String(details.transportation || details.outreach || "").trim();
     const hasNotes = Boolean(String(entry.sales_notes || "").trim());
+    const trafficDate = String(entry.traffic_date || "");
+    const weekdayIndex = trafficDate ? dateParts(trafficDate).weekdayIndex : 0;
+    const dayCurrent = dayStats.get(trafficDate) || { date: trafficDate, count: 0, notes: 0 };
+    dayCurrent.count += 1;
+    if (hasNotes) dayCurrent.notes += 1;
+    dayStats.set(trafficDate, dayCurrent);
+    const weekdayCurrent = weekdayStats.get(weekdayIndex) || {
+      weekdayIndex,
+      label: weekdayLongLabel(weekdayIndex),
+      shortLabel: weekdayShortLabel(weekdayIndex),
+      count: 0,
+      notes: 0,
+    };
+    weekdayCurrent.count += 1;
+    if (hasNotes) weekdayCurrent.notes += 1;
+    weekdayStats.set(weekdayIndex, weekdayCurrent);
 
     if (assignee) assigneeCounts[assignee] = (assigneeCounts[assignee] || 0) + 1;
     if (status) statusCounts[status] = (statusCounts[status] || 0) + 1;
+    sourceCounts[sourceLabel] = (sourceCounts[sourceLabel] || 0) + 1;
+    if (transportationLabel) transportationCounts[transportationLabel] = (transportationCounts[transportationLabel] || 0) + 1;
+
+    const timeWindowKey = trafficTimeWindowForEntry(entry);
+    if (timeWindowKey) {
+      timeWindowCounts[timeWindowKey] = (timeWindowCounts[timeWindowKey] || 0) + 1;
+    }
+
+    const odometerValue = numericValue(entry.odometer || details.odometer || details["current mileage"] || "");
+    if (odometerValue > 0) {
+      odometerValues.push(odometerValue);
+      brandOdometerValues[brand].push(odometerValue);
+      const odometerBand = TRAFFIC_ODOMETER_BANDS.find((band) => odometerValue >= band.min && odometerValue <= band.max);
+      if (odometerBand) odometerBandCounts[odometerBand.key] = (odometerBandCounts[odometerBand.key] || 0) + 1;
+      if (odometerValue >= 100000) highMileageCount += 1;
+    }
+
+    const vehicleYearValue = parseTrafficYearValue(
+      entry.vehicle_year || entry.model_make || details["current vehicle"] || details["replacement vehicle"] || ""
+    );
+    const vehicleAge = vehicleYearValue && vehicleYearValue <= analysisYear + 1 ? Math.max(0, analysisYear - vehicleYearValue) : null;
+    if (vehicleAge !== null) {
+      vehicleAgeValues.push(vehicleAge);
+      const ageBand = TRAFFIC_VEHICLE_AGE_BANDS.find((band) => vehicleAge >= band.min && vehicleAge <= band.max);
+      if (ageBand) vehicleAgeBandCounts[ageBand.key] = (vehicleAgeBandCounts[ageBand.key] || 0) + 1;
+      if (vehicleAge >= 9) olderVehicleCount += 1;
+    }
+
+    const modelLabel = trafficModelFamilyLabel(entry.model_make, vehicleYearValue || entry.vehicle_year);
+    modelCounts[modelLabel] = (modelCounts[modelLabel] || 0) + 1;
+
+    const isTradeCycle = odometerValue >= 60000 || (vehicleAge !== null && vehicleAge >= 5);
+    const isLateModelEquity = (vehicleAge !== null && vehicleAge <= 3) && (odometerValue === 0 || odometerValue <= 45000);
+    if (isTradeCycle) tradeCycleCount += 1;
+    if (isTradeCycle && !hasNotes) openTradeCycleCount += 1;
+    if (isLateModelEquity) lateModelEquityCount += 1;
 
     if (hasNotes) {
       rowsWithNotes += 1;
@@ -1014,31 +1175,62 @@ function buildTrafficAnalysis(entries, countsByDate) {
     }
   }
 
-  const sortedAssignees = Object.entries(assigneeCounts)
-    .map(([label, count]) => ({ label, count }))
-    .sort((left, right) => right.count - left.count || left.label.localeCompare(right.label));
-  const sortedStatuses = Object.entries(statusCounts)
-    .map(([label, count]) => ({ label, count }))
-    .sort((left, right) => right.count - left.count || left.label.localeCompare(right.label));
-  const sortedAuthors = Object.entries(noteAuthorCounts)
-    .map(([label, count]) => ({ label, count }))
-    .sort((left, right) => right.count - left.count || left.label.localeCompare(right.label));
-  const sortedTerms = Object.entries(noteTermCounts)
-    .map(([label, count]) => ({ label, count }))
-    .sort((left, right) => right.count - left.count || left.label.localeCompare(right.label));
+  const allDates = Array.from(
+    new Set([
+      ...Object.keys(countsByDate || {}),
+      ...Array.from(dayStats.keys()).filter(Boolean),
+    ])
+  );
+  const dateCountsChronological = allDates
+    .map((date) => {
+      const count = Number((countsByDate || {})[date] || dayStats.get(date)?.count || 0);
+      const notes = Number(dayStats.get(date)?.notes || 0);
+      const parts = dateParts(date);
+      return {
+        date,
+        count,
+        notes,
+        noteCoverage: count ? Math.round((notes / count) * 100) : 0,
+        weekdayIndex: parts.weekdayIndex,
+        weekdayShort: weekdayShortLabel(parts.weekdayIndex),
+        weekdayLong: weekdayLongLabel(parts.weekdayIndex),
+      };
+    })
+    .sort((left, right) => left.date.localeCompare(right.date));
+  const dateCountsDescending = [...dateCountsChronological].sort(
+    (left, right) => right.count - left.count || left.date.localeCompare(right.date)
+  );
+
+  const sortCountMap = (sourceMap) =>
+    Object.entries(sourceMap)
+      .map(([label, count]) => ({ label, count }))
+      .sort((left, right) => right.count - left.count || left.label.localeCompare(right.label));
+
+  const sortedAssignees = sortCountMap(assigneeCounts);
+  const sortedStatuses = sortCountMap(statusCounts);
+  const sortedAuthors = sortCountMap(noteAuthorCounts);
+  const sortedTerms = sortCountMap(noteTermCounts);
+  const sortedSources = sortCountMap(sourceCounts);
+  const sortedTransportation = sortCountMap(transportationCounts);
+  const sortedModels = sortCountMap(modelCounts);
   const sortedPendingRows = [...pendingRows].sort((left, right) => {
     const leftDate = `${left.traffic_date || ""} ${left.appointment_label || ""}`.trim();
     const rightDate = `${right.traffic_date || ""} ${right.appointment_label || ""}`.trim();
     return leftDate.localeCompare(rightDate) || String(left.customer_name || "").localeCompare(String(right.customer_name || ""));
   });
   const totalRows = rows.length;
-  const activeDays = dateCountsChronological.length;
+  const activeDays = dateCountsChronological.filter((item) => item.count > 0).length;
   const noteCoverage = totalRows ? Math.round((rowsWithNotes / totalRows) * 100) : 0;
   const pendingCount = totalRows - rowsWithNotes;
   const busiestDay = dateCountsDescending[0] || null;
   const kiaRows = brandCounts.Kia || 0;
   const mazdaRows = brandCounts.Mazda || 0;
   const totalBrandRows = kiaRows + mazdaRows || 1;
+  const avgOdometer = averageNumber(odometerValues);
+  const medianOdometer = medianNumber(odometerValues);
+  const avgVehicleAge = averageNumber(vehicleAgeValues);
+  const medianVehicleAge = medianNumber(vehicleAgeValues);
+  const weekdayOrder = [1, 2, 3, 4, 5, 6, 0];
 
   return {
     totalRows,
@@ -1048,34 +1240,108 @@ function buildTrafficAnalysis(entries, countsByDate) {
     activeDays,
     avgPerDay: activeDays ? (totalRows / activeDays).toFixed(1) : "0.0",
     busiestDay,
+    avgOdometer,
+    medianOdometer,
+    avgVehicleAge,
+    medianVehicleAge,
+    tradeCycleCount,
+    openTradeCycleCount,
+    highMileageCount,
+    lateModelEquityCount,
+    olderVehicleCount,
     topDays: dateCountsDescending.slice(0, 5),
     timeline: dateCountsChronological,
+    weekdayCards: weekdayOrder.map((index) => {
+      const item = weekdayStats.get(index) || { label: weekdayLongLabel(index), shortLabel: weekdayShortLabel(index), count: 0, notes: 0 };
+      return {
+        ...item,
+        noteCoverage: item.count ? Math.round((item.notes / item.count) * 100) : 0,
+        share: totalRows ? Math.round((item.count / totalRows) * 100) : 0,
+      };
+    }),
+    timeWindowCards: TRAFFIC_TIME_WINDOWS.map((window) => ({
+      key: window.key,
+      label: window.label,
+      count: Number(timeWindowCounts[window.key] || 0),
+      share: totalRows ? Math.round((Number(timeWindowCounts[window.key] || 0) / totalRows) * 100) : 0,
+    })),
     brandCards: [
       {
         brand: "Kia",
         rows: kiaRows,
         noteCoverage: kiaRows ? Math.round(((notesByBrand.Kia || 0) / kiaRows) * 100) : 0,
         share: Math.round((kiaRows / totalBrandRows) * 100),
+        avgOdometer: averageNumber(brandOdometerValues.Kia),
       },
       {
         brand: "Mazda",
         rows: mazdaRows,
         noteCoverage: mazdaRows ? Math.round(((notesByBrand.Mazda || 0) / mazdaRows) * 100) : 0,
         share: Math.round((mazdaRows / totalBrandRows) * 100),
+        avgOdometer: averageNumber(brandOdometerValues.Mazda),
+      },
+    ],
+    odometerBands: TRAFFIC_ODOMETER_BANDS.map((band) => ({
+      key: band.key,
+      label: band.label,
+      count: Number(odometerBandCounts[band.key] || 0),
+      share: odometerValues.length ? Math.round((Number(odometerBandCounts[band.key] || 0) / odometerValues.length) * 100) : 0,
+    })),
+    vehicleAgeBands: TRAFFIC_VEHICLE_AGE_BANDS.map((band) => ({
+      key: band.key,
+      label: band.label,
+      count: Number(vehicleAgeBandCounts[band.key] || 0),
+      share: vehicleAgeValues.length ? Math.round((Number(vehicleAgeBandCounts[band.key] || 0) / vehicleAgeValues.length) * 100) : 0,
+    })),
+    opportunityCards: [
+      {
+        key: "trade-cycle",
+        label: "Trade-cycle rows",
+        count: tradeCycleCount,
+        share: totalRows ? Math.round((tradeCycleCount / totalRows) * 100) : 0,
+        tone: "warm",
+        description: "60k+ miles or 5+ model years. These are the cleanest service-to-sales upgrade rows.",
+      },
+      {
+        key: "open-trade-cycle",
+        label: "Open upgrade rows",
+        count: openTradeCycleCount,
+        share: tradeCycleCount ? Math.round((openTradeCycleCount / tradeCycleCount) * 100) : 0,
+        tone: openTradeCycleCount ? "hot" : "cool",
+        description: "Trade-cycle customers still missing salesperson notes or follow-up.",
+      },
+      {
+        key: "high-mileage",
+        label: "100k+ mileage",
+        count: highMileageCount,
+        share: totalRows ? Math.round((highMileageCount / totalRows) * 100) : 0,
+        tone: "hot",
+        description: "High-mileage visits usually carry stronger replacement urgency and trade conversations.",
+      },
+      {
+        key: "late-model",
+        label: "Late-model equity",
+        count: lateModelEquityCount,
+        share: totalRows ? Math.round((lateModelEquityCount / totalRows) * 100) : 0,
+        tone: "cool",
+        description: "Newer, lower-mileage vehicles that may still have equity or pull-forward potential.",
       },
     ],
     topAssignees: sortedAssignees.slice(0, 5),
-    statuses: sortedStatuses.slice(0, 5),
+    statuses: sortedStatuses.slice(0, 6),
     topAuthors: sortedAuthors.slice(0, 5),
     topTerms: sortedTerms.slice(0, 8),
-    pendingRows: sortedPendingRows.slice(0, 6),
+    topModels: sortedModels.slice(0, 6),
+    sources: sortedSources.slice(0, 4),
+    transportationMix: sortedTransportation.slice(0, 5),
+    pendingRows: sortedPendingRows.slice(0, 8),
   };
 }
 
 function answerTrafficAnalysisQuestion(question, analysis, monthKey) {
   const rawQuestion = String(question || "").trim();
   if (!rawQuestion) {
-    return "Ask about busiest days, note coverage, Kia vs Mazda traffic, or which appointments still need follow-up.";
+    return "Ask about busiest days, weekday rhythm, mileage bands, or which service rows look strongest for sales follow-up.";
   }
   if (!analysis.totalRows) {
     return "There is no service drive traffic loaded for that month yet, so there is nothing to analyze.";
@@ -1090,6 +1356,16 @@ function answerTrafficAnalysisQuestion(question, analysis, monthKey) {
   if (normalized.includes("busiest") || normalized.includes("busy") || normalized.includes("peak")) {
     const topDays = analysis.topDays.map((item) => `${longDateLabel(item.date)} (${item.count})`);
     return `${monthName} peaked on ${busiestLabel}. The strongest days were ${formatAnalysisList(topDays.slice(0, 3))}.`;
+  }
+
+  if (normalized.includes("weekday") || normalized.includes("monday") || normalized.includes("tuesday") || normalized.includes("wednesday") || normalized.includes("thursday") || normalized.includes("friday") || normalized.includes("saturday")) {
+    const weekdayLeaders = analysis.weekdayCards
+      .filter((item) => item.count > 0)
+      .sort((left, right) => right.count - left.count || left.weekdayIndex - right.weekdayIndex)
+      .map((item) => `${item.label} (${item.count})`);
+    return weekdayLeaders.length
+      ? `The busiest weekday pattern in ${monthName} is ${formatAnalysisList(weekdayLeaders.slice(0, 3))}.`
+      : "No weekday pattern is available yet because the month has no traffic rows.";
   }
 
   if (
@@ -1140,6 +1416,28 @@ function answerTrafficAnalysisQuestion(question, analysis, monthKey) {
       : "This month does not have enough imported status data to summarize yet.";
   }
 
+  if (
+    normalized.includes("mile") ||
+    normalized.includes("odometer") ||
+    normalized.includes("100k") ||
+    normalized.includes("mileage")
+  ) {
+    return analysis.avgOdometer
+      ? `${monthName} is averaging ${formatWholeNumber(analysis.avgOdometer)} miles, with a midpoint around ${formatWholeNumber(
+          analysis.medianOdometer
+        )} miles. ${analysis.highMileageCount} row${analysis.highMileageCount === 1 ? "" : "s"} are already at 100k+ miles.`
+      : "This month does not have enough odometer data yet to summarize mileage patterns.";
+  }
+
+  if (
+    normalized.includes("upgrade") ||
+    normalized.includes("trade") ||
+    normalized.includes("opportunity") ||
+    normalized.includes("equity")
+  ) {
+    return `${analysis.tradeCycleCount} row${analysis.tradeCycleCount === 1 ? "" : "s"} already fall into the trade cycle based on miles or vehicle age. ${analysis.openTradeCycleCount} of those still have no salesperson note, and ${analysis.lateModelEquityCount} look like late-model equity conversations.`;
+  }
+
   if (normalized.includes("theme") || normalized.includes("trend") || normalized.includes("talking about")) {
     const terms = analysis.topTerms.map((item) => `${item.label} (${item.count})`);
     return terms.length
@@ -1148,7 +1446,7 @@ function answerTrafficAnalysisQuestion(question, analysis, monthKey) {
   }
 
   const strongestOwner = analysis.topAssignees[0]?.label || "the assigned team";
-  return `${monthName} currently shows ${analysis.totalRows} traffic rows across ${analysis.activeDays} active day${analysis.activeDays === 1 ? "" : "s"}, with ${analysis.noteCoverage}% note coverage. The busiest day was ${busiestLabel}, and ${strongestOwner} is carrying the largest appointment load right now.`;
+  return `${monthName} currently shows ${analysis.totalRows} traffic rows across ${analysis.activeDays} active day${analysis.activeDays === 1 ? "" : "s"}, with ${analysis.noteCoverage}% note coverage. The busiest day was ${busiestLabel}, ${analysis.tradeCycleCount} rows are already in the trade cycle, and ${strongestOwner} is carrying the largest appointment load right now.`;
 }
 
 function TrafficAnalysisHint({ text }) {
@@ -1355,7 +1653,7 @@ export default function App() {
   const [trafficAnalysisMessages, setTrafficAnalysisMessages] = useState([
     {
       role: "assistant",
-      text: "Ask about busiest days, follow-up gaps, Kia vs Mazda mix, or who owns the most appointments.",
+      text: "Ask about busiest days, weekday rhythm, odometer buckets, or which service rows look strongest for sales follow-up.",
     },
   ]);
   const [trafficAnalysisLoading, setTrafficAnalysisLoading] = useState(false);
@@ -1552,15 +1850,26 @@ export default function App() {
   const visibleTrafficCount = visibleTrafficEntries.length;
   const serviceNotesSavedCount = visibleTrafficEntries.filter((entry) => String(entry.sales_notes || "").trim()).length;
   const serviceNotesPendingCount = Math.max(0, visibleTrafficCount - serviceNotesSavedCount);
-  const trafficAnalysis = buildTrafficAnalysis(trafficAnalysisData.entries, trafficAnalysisData.counts_by_date);
+  const trafficAnalysis = buildTrafficAnalysis(
+    trafficAnalysisData.entries,
+    trafficAnalysisData.counts_by_date,
+    trafficAnalysisData.month || trafficMonth
+  );
   const trafficAnalysisMaxDayCount = Math.max(...trafficAnalysis.timeline.map((item) => item.count), 1);
+  const trafficAnalysisMaxWeekdayCount = Math.max(...trafficAnalysis.weekdayCards.map((item) => item.count), 1);
+  const trafficAnalysisMaxTimeWindowCount = Math.max(...trafficAnalysis.timeWindowCards.map((item) => item.count), 1);
+  const trafficAnalysisMaxOdometerBandCount = Math.max(...trafficAnalysis.odometerBands.map((item) => item.count), 1);
+  const trafficAnalysisMaxVehicleAgeBandCount = Math.max(...trafficAnalysis.vehicleAgeBands.map((item) => item.count), 1);
   const trafficAnalysisInsights = trafficAnalysis.totalRows
     ? [
-        `The board holds ${trafficAnalysis.totalRows} traffic rows for ${monthLabel(trafficAnalysisData.month || trafficMonth)}.`,
+        `The board holds ${trafficAnalysis.totalRows} service-drive rows for ${monthLabel(trafficAnalysisData.month || trafficMonth)} across ${trafficAnalysis.activeDays} active days.`,
         trafficAnalysis.busiestDay
-          ? `${longDateLabel(trafficAnalysis.busiestDay.date)} is the busiest day right now with ${trafficAnalysis.busiestDay.count} rows.`
+          ? `${longDateLabel(trafficAnalysis.busiestDay.date)} is the peak traffic day with ${trafficAnalysis.busiestDay.count} rows and ${trafficAnalysis.busiestDay.noteCoverage}% note coverage.`
           : "No busiest day yet because there is no traffic in the selected month.",
-        `${trafficAnalysis.noteCoverage}% of the month already has saved salesperson notes, leaving ${trafficAnalysis.pendingCount} rows still open for follow-up.`,
+        `${trafficAnalysis.tradeCycleCount} rows already sit in the trade cycle, and ${trafficAnalysis.openTradeCycleCount} of those still need follow-up notes.`,
+        trafficAnalysis.avgOdometer
+          ? `Average odometer across rows with mileage is ${formatWholeNumber(trafficAnalysis.avgOdometer)} miles.`
+          : "Mileage is not imported consistently enough this month to score odometer patterns yet.",
       ]
     : [];
   const selectedTrafficFilterLabel =
@@ -2648,7 +2957,7 @@ export default function App() {
     setTrafficAnalysisMessages([
       {
         role: "assistant",
-        text: `Loaded ${monthLabel(trafficAnalysisData.month || trafficMonth)}. Ask about busiest days, follow-up gaps, Kia vs Mazda split, or appointment ownership.`,
+        text: `Loaded ${monthLabel(trafficAnalysisData.month || trafficMonth)}. Ask about busiest days, weekday rhythm, odometer buckets, or where the best service-to-sales opportunities sit.`,
       },
     ]);
     setTrafficAnalysisQuestion("");
@@ -6457,8 +6766,8 @@ export default function App() {
                 <span className="eyebrow">Service drive intelligence</span>
                 <h2>Traffic analysis command center</h2>
                 <p>
-                  A denser month view for traffic volume, note coverage, owner load, and unanswered follow-up. Ask the
-                  page direct questions about the notes and rows already on the board.
+                  Built for service-to-sales follow-up. Read the month by day, weekday, mileage, vehicle age, and owner
+                  load so the team can see where the strongest upgrade conversations sit.
                 </p>
               </div>
               <div className="traffic-analysis-hero__controls">
@@ -6493,21 +6802,59 @@ export default function App() {
               </article>
               <article className="traffic-analysis-stat">
                 <div className="traffic-analysis-stat__label">
-                  <span>Open Follow-Ups</span>
-                  <TrafficAnalysisHint text="Traffic rows that still do not have any saved salesperson notes." />
-                </div>
-                <strong>{trafficAnalysis.pendingCount}</strong>
-                <small>Rows still missing salesperson notes</small>
-              </article>
-              <article className="traffic-analysis-stat">
-                <div className="traffic-analysis-stat__label">
                   <span>Busiest Day</span>
                   <TrafficAnalysisHint text="The highest-volume traffic day in the selected month, based on imported and manually added rows." />
                 </div>
                 <strong>{trafficAnalysis.busiestDay ? trafficAnalysis.busiestDay.count : 0}</strong>
                 <small>
-                  {trafficAnalysis.busiestDay ? longDateLabel(trafficAnalysis.busiestDay.date) : "No traffic yet"}
+                  {trafficAnalysis.busiestDay
+                    ? `${trafficAnalysis.busiestDay.weekdayLong} ${dateParts(trafficAnalysis.busiestDay.date).monthShort} ${dateParts(trafficAnalysis.busiestDay.date).dayNumber}`
+                    : "No traffic yet"}
                 </small>
+              </article>
+              <article className="traffic-analysis-stat">
+                <div className="traffic-analysis-stat__label">
+                  <span>Avg Odometer</span>
+                  <TrafficAnalysisHint text="Average mileage across rows where odometer data was imported from the service-drive source." />
+                </div>
+                <strong>{trafficAnalysis.avgOdometer ? formatWholeNumber(trafficAnalysis.avgOdometer) : "n/a"}</strong>
+                <small>
+                  {trafficAnalysis.medianOdometer ? `Median ${formatWholeNumber(trafficAnalysis.medianOdometer)} miles` : "Mileage is sparse this month"}
+                </small>
+              </article>
+              <article className="traffic-analysis-stat">
+                <div className="traffic-analysis-stat__label">
+                  <span>Avg Vehicle Age</span>
+                  <TrafficAnalysisHint text="Average model-year age across rows where the imported vehicle year was available." />
+                </div>
+                <strong>{trafficAnalysis.avgVehicleAge ? trafficAnalysis.avgVehicleAge.toFixed(1) : "n/a"}</strong>
+                <small>
+                  {trafficAnalysis.medianVehicleAge ? `Median ${trafficAnalysis.medianVehicleAge.toFixed(1)} yrs` : "Model-year data is sparse this month"}
+                </small>
+              </article>
+              <article className="traffic-analysis-stat">
+                <div className="traffic-analysis-stat__label">
+                  <span>Trade-Cycle Now</span>
+                  <TrafficAnalysisHint text="Rows already in the likely upgrade cycle using a simple rule: 60k+ miles or 5+ model years old." />
+                </div>
+                <strong>{trafficAnalysis.tradeCycleCount}</strong>
+                <small>{percentOfTotal(trafficAnalysis.tradeCycleCount, trafficAnalysis.totalRows).toFixed(0)}% of visible month traffic</small>
+              </article>
+              <article className="traffic-analysis-stat">
+                <div className="traffic-analysis-stat__label">
+                  <span>Open Upgrade Rows</span>
+                  <TrafficAnalysisHint text="Trade-cycle customers that still do not have a saved salesperson note." />
+                </div>
+                <strong>{trafficAnalysis.openTradeCycleCount}</strong>
+                <small>{trafficAnalysis.pendingCount} total rows still missing salesperson notes</small>
+              </article>
+              <article className="traffic-analysis-stat">
+                <div className="traffic-analysis-stat__label">
+                  <span>100k+ Mileage</span>
+                  <TrafficAnalysisHint text="High-mileage service visits that usually carry stronger replacement urgency." />
+                </div>
+                <strong>{trafficAnalysis.highMileageCount}</strong>
+                <small>{trafficAnalysis.olderVehicleCount} rows are 9+ model years old</small>
               </article>
             </div>
 
@@ -6526,16 +6873,24 @@ export default function App() {
                       <div
                         key={item.date}
                         className="traffic-analysis-bars__item"
-                        title={`${longDateLabel(item.date)}: ${item.count} traffic row${item.count === 1 ? "" : "s"}`}
+                        title={`${longDateLabel(item.date)}: ${item.count} traffic row${item.count === 1 ? "" : "s"} with ${item.noteCoverage}% note coverage`}
                       >
-                        <span>{dateParts(item.date).dayNumber}</span>
+                        <div className="traffic-analysis-bars__label">
+                          <strong>{item.weekdayShort}</strong>
+                          <small>
+                            {dateParts(item.date).monthShort} {dateParts(item.date).dayNumber}
+                          </small>
+                        </div>
                         <div className="traffic-analysis-bars__track">
                           <div
                             className="traffic-analysis-bars__fill"
                             style={{ width: `${Math.max(10, Math.round((item.count / trafficAnalysisMaxDayCount) * 100))}%` }}
                           />
                         </div>
-                        <strong>{item.count}</strong>
+                        <div className="traffic-analysis-bars__metric">
+                          <strong>{item.count}</strong>
+                          <small>{item.noteCoverage}% notes</small>
+                        </div>
                       </div>
                     ))}
                   </div>
@@ -6552,6 +6907,197 @@ export default function App() {
                   </div>
                 ) : null}
               </div>
+
+              <TrafficAnalysisSection
+                className="traffic-analysis-panel traffic-analysis-panel--wide"
+                eyebrow="Service-to-sales lens"
+                title="Opportunity buckets for upgrade conversations"
+                summary={`${trafficAnalysis.tradeCycleCount} trade-cycle rows in ${monthLabel(trafficAnalysisData.month || trafficMonth)}`}
+                hint="These are working heuristics for service-to-sales. They do not guarantee a sale, but they surface where the month likely deserves more sales attention."
+                defaultOpen
+              >
+                <div className="traffic-analysis-opportunity-grid">
+                  {trafficAnalysis.opportunityCards.map((item) => (
+                    <article
+                      key={item.key}
+                      className={`traffic-analysis-opportunity-card traffic-analysis-opportunity-card--${item.tone}`}
+                    >
+                      <span>{item.label}</span>
+                      <strong>{item.count}</strong>
+                      <small>{item.share}% of visible traffic</small>
+                      <p>{item.description}</p>
+                    </article>
+                  ))}
+                </div>
+                <div className="traffic-analysis-two-column">
+                  <div className="traffic-analysis-subpanel">
+                    <div className="row">
+                      <div>
+                        <span className="eyebrow">Vehicle mix</span>
+                        <h4>Top models in service this month</h4>
+                      </div>
+                    </div>
+                    {trafficAnalysis.topModels.length ? (
+                      <div className="traffic-analysis-list">
+                        {trafficAnalysis.topModels.map((item) => (
+                          <div key={item.label} className="traffic-analysis-list__item">
+                            <div>
+                              <strong>{item.label}</strong>
+                              <small>Most common service-drive vehicle family</small>
+                            </div>
+                            <b>{item.count}</b>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="empty">Model data has not populated yet for this month.</div>
+                    )}
+                  </div>
+                  <div className="traffic-analysis-subpanel">
+                    <div className="row">
+                      <div>
+                        <span className="eyebrow">Imported pipeline</span>
+                        <h4>Source and status mix</h4>
+                      </div>
+                    </div>
+                    <div className="traffic-analysis-list">
+                      {trafficAnalysis.sources.map((item) => (
+                        <div key={`source-${item.label}`} className="traffic-analysis-list__item">
+                          <div>
+                            <strong>{item.label}</strong>
+                            <small>Traffic source rows in scope</small>
+                          </div>
+                          <b>{item.count}</b>
+                        </div>
+                      ))}
+                      {trafficAnalysis.statuses.map((item) => (
+                        <div key={`status-${item.label}`} className="traffic-analysis-list__item">
+                          <div>
+                            <strong>{item.label}</strong>
+                            <small>Imported status signal</small>
+                          </div>
+                          <b>{item.count}</b>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </TrafficAnalysisSection>
+
+              <TrafficAnalysisSection
+                className="traffic-analysis-panel traffic-analysis-panel--wide"
+                eyebrow="Vehicle profile"
+                title="Mileage and vehicle-age spread"
+                summary={`${trafficAnalysis.odometerBands.reduce((sum, item) => sum + item.count, 0)} rows with mileage / ${trafficAnalysis.vehicleAgeBands.reduce((sum, item) => sum + item.count, 0)} rows with model year`}
+                hint="This is the cleanest service-to-sales view of the cars in lane right now: how many are high mileage, how many are older, and where the month clusters."
+              >
+                <div className="traffic-analysis-two-column">
+                  <div className="traffic-analysis-subpanel">
+                    <div className="row">
+                      <div>
+                        <span className="eyebrow">Odometer bands</span>
+                        <h4>How deep the mileage sits</h4>
+                      </div>
+                      <small>
+                        {trafficAnalysis.avgOdometer ? `Avg ${formatWholeNumber(trafficAnalysis.avgOdometer)} miles` : "No mileage average yet"}
+                      </small>
+                    </div>
+                    <div className="traffic-analysis-bars">
+                      {trafficAnalysis.odometerBands.map((item) => (
+                        <div key={item.key} className="traffic-analysis-bars__item">
+                          <div className="traffic-analysis-bars__label">
+                            <strong>{item.label}</strong>
+                            <small>{item.share}% of rows with mileage</small>
+                          </div>
+                          <div className="traffic-analysis-bars__track">
+                            <div
+                              className="traffic-analysis-bars__fill"
+                              style={{ width: `${Math.max(8, Math.round((item.count / trafficAnalysisMaxOdometerBandCount) * 100))}%` }}
+                            />
+                          </div>
+                          <div className="traffic-analysis-bars__metric">
+                            <strong>{item.count}</strong>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="traffic-analysis-subpanel">
+                    <div className="row">
+                      <div>
+                        <span className="eyebrow">Vehicle age bands</span>
+                        <h4>How old the fleet in lane is</h4>
+                      </div>
+                      <small>
+                        {trafficAnalysis.avgVehicleAge ? `Avg ${trafficAnalysis.avgVehicleAge.toFixed(1)} yrs` : "No age average yet"}
+                      </small>
+                    </div>
+                    <div className="traffic-analysis-bars">
+                      {trafficAnalysis.vehicleAgeBands.map((item) => (
+                        <div key={item.key} className="traffic-analysis-bars__item">
+                          <div className="traffic-analysis-bars__label">
+                            <strong>{item.label}</strong>
+                            <small>{item.share}% of rows with model year</small>
+                          </div>
+                          <div className="traffic-analysis-bars__track">
+                            <div
+                              className="traffic-analysis-bars__fill"
+                              style={{ width: `${Math.max(8, Math.round((item.count / trafficAnalysisMaxVehicleAgeBandCount) * 100))}%` }}
+                            />
+                          </div>
+                          <div className="traffic-analysis-bars__metric">
+                            <strong>{item.count}</strong>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              </TrafficAnalysisSection>
+
+              <TrafficAnalysisSection
+                eyebrow="Weekday rhythm"
+                title="Weekday load and appointment windows"
+                summary={`${trafficAnalysis.weekdayCards.filter((item) => item.count > 0).length} weekdays active in the month`}
+                hint="Shows where the month clusters by weekday and where appointments are stacking inside the day."
+                className="traffic-analysis-panel traffic-analysis-panel--wide"
+              >
+                <div className="traffic-analysis-weekday-grid">
+                  {trafficAnalysis.weekdayCards.map((item) => (
+                    <div key={item.label} className="traffic-analysis-weekday-card">
+                      <div className="traffic-analysis-weekday-card__top">
+                        <strong>{item.label}</strong>
+                        <span>{item.share}% of month</span>
+                      </div>
+                      <div className="traffic-analysis-weekday-card__track">
+                        <div
+                          className="traffic-analysis-weekday-card__fill"
+                          style={{ width: `${Math.max(8, Math.round((item.count / trafficAnalysisMaxWeekdayCount) * 100))}%` }}
+                        />
+                      </div>
+                      <div className="traffic-analysis-weekday-card__meta">
+                        <b>{item.count}</b>
+                        <small>{item.noteCoverage}% notes</small>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+                <div className="traffic-analysis-time-grid">
+                  {trafficAnalysis.timeWindowCards.map((item) => (
+                    <div key={item.key} className="traffic-analysis-time-card">
+                      <span>{item.label}</span>
+                      <strong>{item.count}</strong>
+                      <div className="traffic-analysis-time-card__track">
+                        <div
+                          className="traffic-analysis-time-card__fill"
+                          style={{ width: `${Math.max(8, Math.round((item.count / trafficAnalysisMaxTimeWindowCount) * 100))}%` }}
+                        />
+                      </div>
+                      <small>{item.share}% of month traffic</small>
+                    </div>
+                  ))}
+                </div>
+              </TrafficAnalysisSection>
 
               <TrafficAnalysisSection
                 eyebrow="Brand split"
@@ -6693,7 +7239,7 @@ export default function App() {
                     rows={3}
                     value={trafficAnalysisQuestion}
                     onChange={(event) => setTrafficAnalysisQuestion(event.target.value)}
-                    placeholder="Ask: Which days were busiest, who still needs follow-up, or how Kia compares to Mazda."
+                    placeholder="Ask: Which weekdays are busiest, how many rows are 100k+ miles, or where the best upgrade opportunities sit."
                   />
                   <button type="submit" disabled={!trafficAnalysisQuestion.trim()}>
                     Ask About This Month

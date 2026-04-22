@@ -6163,13 +6163,26 @@ button.special-card:hover:not(:disabled) {
 .traffic-analysis-bars__item {
   display: grid;
   gap: 0.65rem;
-  grid-template-columns: 2rem minmax(0, 1fr) 2.5rem;
+  grid-template-columns: minmax(92px, 0.9fr) minmax(0, 1fr) minmax(64px, auto);
   align-items: center;
 }
 
-.traffic-analysis-bars__item span {
-  font-size: 0.82rem;
+.traffic-analysis-bars__label,
+.traffic-analysis-bars__metric {
+  display: grid;
+  gap: 0.2rem;
+}
+
+.traffic-analysis-bars__label strong,
+.traffic-analysis-bars__metric strong {
+  font-size: 0.92rem;
+  color: #172033;
+}
+
+.traffic-analysis-bars__label small,
+.traffic-analysis-bars__metric small {
   color: #7e8794;
+  font-size: 0.76rem;
 }
 
 .traffic-analysis-bars__track {
@@ -6185,8 +6198,135 @@ button.special-card:hover:not(:disabled) {
   background: linear-gradient(90deg, #c76536, #f19f58);
 }
 
-.traffic-analysis-bars__item strong {
+.traffic-analysis-bars__metric {
   text-align: right;
+}
+
+.traffic-analysis-two-column {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.traffic-analysis-subpanel {
+  display: grid;
+  gap: 0.9rem;
+  padding: 1rem;
+  border-radius: 1rem;
+  background: rgba(23, 32, 51, 0.04);
+}
+
+.traffic-analysis-opportunity-grid {
+  display: grid;
+  gap: 1rem;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.traffic-analysis-opportunity-card {
+  display: grid;
+  gap: 0.45rem;
+  padding: 1rem;
+  border-radius: 1rem;
+  border: 1px solid rgba(23, 32, 51, 0.08);
+  background: rgba(255, 255, 255, 0.8);
+}
+
+.traffic-analysis-opportunity-card span {
+  font-size: 0.72rem;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: #7e8794;
+}
+
+.traffic-analysis-opportunity-card strong {
+  font-size: 1.9rem;
+  line-height: 1;
+  color: #172033;
+}
+
+.traffic-analysis-opportunity-card small {
+  color: #667085;
+}
+
+.traffic-analysis-opportunity-card p {
+  margin: 0;
+  color: #374151;
+  line-height: 1.45;
+}
+
+.traffic-analysis-opportunity-card--hot {
+  background:
+    radial-gradient(circle at top right, rgba(199, 101, 54, 0.14), transparent 36%),
+    rgba(255, 255, 255, 0.84);
+}
+
+.traffic-analysis-opportunity-card--warm {
+  background:
+    radial-gradient(circle at top right, rgba(241, 165, 55, 0.16), transparent 38%),
+    rgba(255, 255, 255, 0.84);
+}
+
+.traffic-analysis-opportunity-card--cool {
+  background:
+    radial-gradient(circle at top right, rgba(31, 124, 246, 0.12), transparent 36%),
+    rgba(255, 255, 255, 0.84);
+}
+
+.traffic-analysis-weekday-grid,
+.traffic-analysis-time-grid {
+  display: grid;
+  gap: 0.9rem;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+}
+
+.traffic-analysis-weekday-card,
+.traffic-analysis-time-card {
+  display: grid;
+  gap: 0.55rem;
+  padding: 0.95rem 1rem;
+  border-radius: 1rem;
+  background: rgba(246, 240, 232, 0.7);
+}
+
+.traffic-analysis-weekday-card__top,
+.traffic-analysis-weekday-card__meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.traffic-analysis-weekday-card__track,
+.traffic-analysis-time-card__track {
+  height: 0.72rem;
+  border-radius: 999px;
+  overflow: hidden;
+  background: rgba(23, 32, 51, 0.08);
+}
+
+.traffic-analysis-weekday-card__fill,
+.traffic-analysis-time-card__fill {
+  height: 100%;
+  border-radius: 999px;
+  background: linear-gradient(90deg, #1f2f46, #c76536);
+}
+
+.traffic-analysis-weekday-card__meta small,
+.traffic-analysis-time-card small,
+.traffic-analysis-weekday-card__top span,
+.traffic-analysis-time-card span {
+  color: #667085;
+}
+
+.traffic-analysis-time-card span {
+  font-size: 0.76rem;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.traffic-analysis-time-card strong {
+  font-size: 1.55rem;
+  line-height: 1;
   color: #172033;
 }
 
@@ -6330,6 +6470,10 @@ button.special-card:hover:not(:disabled) {
   .traffic-analysis-panel--wide,
   .traffic-analysis-panel--chat {
     grid-column: 1 / -1;
+  }
+
+  .traffic-analysis-two-column {
+    grid-template-columns: 1fr;
   }
 
   .bdc-sales-tracker-hero {
