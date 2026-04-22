@@ -90,6 +90,8 @@ const TABS = [
   { id: "specials", label: "Specials" },
   { id: "admin", label: "Admin" },
 ];
+const NON_ADMIN_TABS = TABS.filter((item) => item.id !== "admin");
+const TAB_INDEX = Object.fromEntries(TABS.map((item, index) => [item.id, index]));
 
 const SPECIAL_FEED_SOURCES = [
   {
@@ -130,13 +132,43 @@ const ADMIN_SECTIONS = [
   { id: "daysOff", label: "Days Off" },
   { id: "trafficLog", label: "Traffic Log" },
   { id: "bdcDistribution", label: "Lead Distribution Type" },
-  { id: "tabs", label: "Tab Visibility" },
+  { id: "tabs", label: "Page Order" },
   { id: "freshupLinks", label: "Freshup Links" },
   { id: "agentLoops", label: "Agent Loops" },
   { id: "marketplace", label: "Marketplace" },
   { id: "quoteRates", label: "Quote Rates" },
   { id: "specials", label: "Specials" },
 ];
+
+function defaultTabVisibilityState() {
+  return {
+    entries: NON_ADMIN_TABS.map((item, index) => ({ tab_id: item.id, visible: true, position: index })),
+  };
+}
+
+function sortTabVisibilityEntries(entries = []) {
+  const fallbackEntries = NON_ADMIN_TABS.map((item, index) => ({
+    tab_id: item.id,
+    visible: true,
+    position: index,
+  }));
+  const incomingById = new Map(
+    (entries || [])
+      .filter((entry) => NON_ADMIN_TABS.some((item) => item.id === entry.tab_id))
+      .map((entry) => [entry.tab_id, entry])
+  );
+  return fallbackEntries
+    .map((fallback) => ({
+      ...fallback,
+      ...(incomingById.get(fallback.tab_id) || {}),
+    }))
+    .sort((left, right) => {
+      const leftPosition = Number.isFinite(Number(left.position)) ? Number(left.position) : TAB_INDEX[left.tab_id] ?? 0;
+      const rightPosition = Number.isFinite(Number(right.position)) ? Number(right.position) : TAB_INDEX[right.tab_id] ?? 0;
+      return leftPosition - rightPosition || (TAB_INDEX[left.tab_id] ?? 0) - (TAB_INDEX[right.tab_id] ?? 0);
+    })
+    .map((entry, index) => ({ ...entry, position: index }));
+}
 
 const DEALERSHIP_ORDER = ["Kia", "Mazda", "Outlet"];
 const TRAFFIC_BRANDS = ["Kia", "Mazda"];
@@ -1343,9 +1375,7 @@ export default function App() {
   const [bdcState, setBdcState] = useState(null);
   const [bdcDistribution, setBdcDistribution] = useState({ mode: "franchise" });
   const [bdcUndoSettings, setBdcUndoSettings] = useState({ require_password: true, password_hint: "" });
-  const [tabVisibility, setTabVisibility] = useState({
-    entries: TABS.filter((item) => item.id !== "admin").map((item) => ({ tab_id: item.id, visible: true })),
-  });
+  const [tabVisibility, setTabVisibility] = useState(() => defaultTabVisibilityState());
   const [bdcUndoPassword, setBdcUndoPassword] = useState("");
   const [bdcLog, setBdcLog] = useState({ total: 0, entries: [] });
   const [bdcReport, setBdcReport] = useState(null);
@@ -1604,14 +1634,19 @@ export default function App() {
     marketplaceBuilderTemplate.description_template,
     marketplacePreviewData
   );
-  const visibleTabIds = new Set(
-    (tabVisibility.entries || []).filter((entry) => entry.visible).map((entry) => entry.tab_id)
-  );
+  const orderedTabEntries = sortTabVisibilityEntries(tabVisibility.entries || []);
+  const orderedTabs = orderedTabEntries
+    .map((entry) => TABS.find((item) => item.id === entry.tab_id))
+    .filter(Boolean);
+  const visibleTabIds = new Set(orderedTabEntries.filter((entry) => entry.visible).map((entry) => entry.tab_id));
   const defaultVisibleTabId =
     (visibleTabIds.has("serviceNotes") && "serviceNotes") ||
-    TABS.find((item) => item.id !== "admin" && visibleTabIds.has(item.id))?.id ||
+    orderedTabs.find((item) => visibleTabIds.has(item.id))?.id ||
     "serviceNotes";
-  const tabsToShow = TABS.filter((item) => item.id === "admin" || adminSession || visibleTabIds.has(item.id));
+  const tabsToShow = [
+    ...orderedTabs.filter((item) => adminSession || visibleTabIds.has(item.id)),
+    TABS.find((item) => item.id === "admin"),
+  ].filter(Boolean);
   const latestBdcAssignment = lastAssignment || bdcLog.entries?.[0] || null;
   const latestBdcNotifications = [
     latestBdcAssignment?.notification_sms_status,
@@ -1845,7 +1880,7 @@ export default function App() {
     setBdcReport(report);
     setBdcDistribution(distribution);
     setBdcUndoSettings(undoSettings);
-    setTabVisibility(tabs);
+    setTabVisibility({ entries: sortTabVisibilityEntries(tabs.entries || []) });
   }
 
   async function refreshBdcState(nextLeadStore = leadForm.leadStore) {
@@ -2445,16 +2480,51 @@ export default function App() {
 
   function setTabVisibilityValue(tabId, visible) {
     setTabVisibility((current) => ({
-      entries: (current.entries || []).map((entry) => (entry.tab_id === tabId ? { ...entry, visible } : entry)),
+      entries: sortTabVisibilityEntries(
+        (current.entries || []).map((entry) => (entry.tab_id === tabId ? { ...entry, visible } : entry))
+      ),
     }));
+  }
+
+  function moveTabVisibility(tabId, direction) {
+    setTabVisibility((current) => {
+      const ordered = sortTabVisibilityEntries(current.entries || []);
+      const currentIndex = ordered.findIndex((entry) => entry.tab_id === tabId);
+      if (currentIndex < 0) return current;
+      const targetIndex = direction === "up" ? currentIndex - 1 : currentIndex + 1;
+      if (targetIndex < 0 || targetIndex >= ordered.length) return current;
+      const nextEntries = [...ordered];
+      const [movedEntry] = nextEntries.splice(currentIndex, 1);
+      nextEntries.splice(targetIndex, 0, movedEntry);
+      return {
+        entries: nextEntries.map((entry, index) => ({ ...entry, position: index })),
+      };
+    });
+  }
+
+  function resetTabVisibilityOrder() {
+    setTabVisibility((current) => {
+      const visibilityMap = new Map((current.entries || []).map((entry) => [entry.tab_id, Boolean(entry.visible)]));
+      return {
+        entries: NON_ADMIN_TABS.map((item, index) => ({
+          tab_id: item.id,
+          visible: visibilityMap.get(item.id) ?? true,
+          position: index,
+        })),
+      };
+    });
   }
 
   async function saveTabVisibilitySettings() {
     setBusy("tab-visibility");
     setError("");
     try {
-      const updated = await updateTabVisibility(adminToken, tabVisibility);
-      setTabVisibility(updated);
+      const updated = await updateTabVisibility(adminToken, {
+        entries: sortTabVisibilityEntries(tabVisibility.entries || []),
+      });
+      setTabVisibility({
+        entries: sortTabVisibilityEntries(updated.entries || []),
+      });
     } catch (errorValue) {
       setError(errText(errorValue));
     } finally {
@@ -9220,30 +9290,63 @@ export default function App() {
 
                 {adminSection === "tabs" ? (
                   <div className="panel">
-                    <span className="eyebrow">Tab visibility</span>
-                    <h3>Choose which tabs non-admin users can see</h3>
+                    <span className="eyebrow">Page order</span>
+                    <h3>Choose the tab order and who can see each page</h3>
                     <p className="admin-note">
-                      Hidden tabs stay visible when you are logged in as admin. Everyone else will only see the tabs you
-                      leave enabled here. The Admin tab always stays visible so you can still sign in.
+                      Move the pages into the order you want, then save once. Hidden tabs stay visible for admin, and the
+                      public navigation follows this same saved order everywhere else.
                     </p>
-                    <div className="editor-list editor-list--two-up">
-                      {TABS.filter((item) => item.id !== "admin").map((item) => {
-                        const visible = (tabVisibility.entries || []).find((entry) => entry.tab_id === item.id)?.visible ?? true;
+                    <div className="admin-tab-order-list">
+                      {orderedTabEntries.map((entry, index) => {
+                        const item = TABS.find((tabItem) => tabItem.id === entry.tab_id);
+                        if (!item) return null;
                         return (
-                          <label key={item.id} className="checkbox panel inset-panel">
-                            <input
-                              type="checkbox"
-                              checked={visible}
-                              onChange={(event) => setTabVisibilityValue(item.id, event.target.checked)}
-                            />
-                            <span>{item.label}</span>
-                          </label>
+                          <div key={entry.tab_id} className="admin-tab-order-row panel inset-panel">
+                            <div className="admin-tab-order-row__meta">
+                              <span className="admin-tab-order-row__position">{index + 1}</span>
+                              <div>
+                                <strong>{item.label}</strong>
+                                <small>{entry.visible ? "Visible to everyone" : "Hidden from non-admin users"}</small>
+                              </div>
+                            </div>
+                            <label className="checkbox admin-tab-order-row__toggle">
+                              <input
+                                type="checkbox"
+                                checked={entry.visible}
+                                onChange={(event) => setTabVisibilityValue(entry.tab_id, event.target.checked)}
+                              />
+                              <span>{entry.visible ? "Visible" : "Hidden"}</span>
+                            </label>
+                            <div className="admin-tab-order-row__actions">
+                              <button
+                                type="button"
+                                className="secondary"
+                                onClick={() => moveTabVisibility(entry.tab_id, "up")}
+                                disabled={index === 0}
+                              >
+                                Move Up
+                              </button>
+                              <button
+                                type="button"
+                                className="secondary"
+                                onClick={() => moveTabVisibility(entry.tab_id, "down")}
+                                disabled={index === orderedTabEntries.length - 1}
+                              >
+                                Move Down
+                              </button>
+                            </div>
+                          </div>
                         );
                       })}
                     </div>
-                    <button type="button" onClick={saveTabVisibilitySettings} disabled={busy === "tab-visibility"}>
-                      {busy === "tab-visibility" ? "Saving..." : "Save Tab Visibility"}
-                    </button>
+                    <div className="controls">
+                      <button type="button" className="secondary" onClick={resetTabVisibilityOrder}>
+                        Reset Default Order
+                      </button>
+                      <button type="button" onClick={saveTabVisibilitySettings} disabled={busy === "tab-visibility"}>
+                        {busy === "tab-visibility" ? "Saving..." : "Save Page Order"}
+                      </button>
+                    </div>
                   </div>
                 ) : null}
 

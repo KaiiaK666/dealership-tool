@@ -3082,6 +3082,61 @@ th {
   align-self: start;
 }
 
+.admin-tab-order-list {
+  display: grid;
+  gap: 12px;
+}
+
+.admin-tab-order-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) auto auto;
+  gap: 14px;
+  align-items: center;
+}
+
+.admin-tab-order-row__meta {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 12px;
+  align-items: center;
+}
+
+.admin-tab-order-row__meta strong,
+.admin-tab-order-row__meta small {
+  display: block;
+}
+
+.admin-tab-order-row__meta small {
+  margin-top: 4px;
+  color: var(--muted);
+}
+
+.admin-tab-order-row__position {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 38px;
+  height: 38px;
+  border-radius: 14px;
+  background: rgba(196, 102, 52, 0.12);
+  color: var(--accent-deep);
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+.admin-tab-order-row__toggle {
+  justify-self: start;
+}
+
+.admin-tab-order-row__actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
 .notes-list {
   display: grid;
   gap: 16px;
@@ -6811,6 +6866,23 @@ button.special-card:hover:not(:disabled) {
   .notification-test-actions {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .admin-tab-order-row {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-tab-order-row__toggle,
+  .admin-tab-order-row__actions {
+    justify-self: stretch;
+  }
+
+  .admin-tab-order-row__actions {
+    justify-content: stretch;
+  }
+
+  .admin-tab-order-row__actions > * {
+    flex: 1 1 0;
   }
 
   .bdc-sales-entry__actions,

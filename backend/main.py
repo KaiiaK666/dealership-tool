@@ -687,6 +687,7 @@ class BdcSalesTrackerOut(BaseModel):
 class TabVisibilityItem(BaseModel):
     tab_id: str
     visible: bool = True
+    position: int = 0
 
 
 class TabVisibilityOut(BaseModel):
@@ -1421,13 +1422,35 @@ def set_bdc_undo_settings(settings: BdcUndoSettingsIn) -> BdcUndoSettingsOut:
 
 
 def default_tab_visibility() -> TabVisibilityOut:
-    return TabVisibilityOut(entries=[TabVisibilityItem(tab_id=tab_id, visible=True) for tab_id in TAB_VISIBILITY_IDS])
+    return TabVisibilityOut(
+        entries=[TabVisibilityItem(tab_id=tab_id, visible=True, position=index) for index, tab_id in enumerate(TAB_VISIBILITY_IDS)]
+    )
 
 
 def normalize_tab_visibility_entries(entries: List[TabVisibilityItem]) -> TabVisibilityOut:
-    incoming = {str(entry.tab_id): bool(entry.visible) for entry in entries if str(entry.tab_id) in TAB_VISIBILITY_IDS}
+    incoming_visibility = {
+        str(entry.tab_id): bool(entry.visible) for entry in entries if str(entry.tab_id) in TAB_VISIBILITY_IDS
+    }
+    order_weights: Dict[str, Tuple[int, int]] = {}
+    for index, entry in enumerate(entries):
+        tab_id = str(entry.tab_id)
+        if tab_id not in TAB_VISIBILITY_IDS:
+            continue
+        try:
+            position = int(entry.position)
+        except (TypeError, ValueError):
+            position = index
+        order_weights[tab_id] = (position, index)
+    default_index = {tab_id: index for index, tab_id in enumerate(TAB_VISIBILITY_IDS)}
+    ordered_ids = sorted(
+        TAB_VISIBILITY_IDS,
+        key=lambda tab_id: order_weights.get(tab_id, (default_index[tab_id], default_index[tab_id])),
+    )
     return TabVisibilityOut(
-        entries=[TabVisibilityItem(tab_id=tab_id, visible=incoming.get(tab_id, True)) for tab_id in TAB_VISIBILITY_IDS]
+        entries=[
+            TabVisibilityItem(tab_id=tab_id, visible=incoming_visibility.get(tab_id, True), position=index)
+            for index, tab_id in enumerate(ordered_ids)
+        ]
     )
 
 
@@ -1439,16 +1462,31 @@ def get_tab_visibility() -> TabVisibilityOut:
         parsed = json.loads(raw)
     except Exception:
         return default_tab_visibility()
+    if isinstance(parsed, list):
+        try:
+            return normalize_tab_visibility_entries([TabVisibilityItem(**entry) for entry in parsed if isinstance(entry, dict)])
+        except Exception:
+            return default_tab_visibility()
+    if isinstance(parsed, dict) and isinstance(parsed.get("entries"), list):
+        try:
+            return normalize_tab_visibility_entries(
+                [TabVisibilityItem(**entry) for entry in parsed["entries"] if isinstance(entry, dict)]
+            )
+        except Exception:
+            return default_tab_visibility()
     if not isinstance(parsed, dict):
         return default_tab_visibility()
     return TabVisibilityOut(
-        entries=[TabVisibilityItem(tab_id=tab_id, visible=bool(parsed.get(tab_id, True))) for tab_id in TAB_VISIBILITY_IDS]
+        entries=[
+            TabVisibilityItem(tab_id=tab_id, visible=bool(parsed.get(tab_id, True)), position=index)
+            for index, tab_id in enumerate(TAB_VISIBILITY_IDS)
+        ]
     )
 
 
 def set_tab_visibility(payload: TabVisibilityIn) -> TabVisibilityOut:
     normalized = normalize_tab_visibility_entries(payload.entries or [])
-    data = {entry.tab_id: entry.visible for entry in normalized.entries}
+    data = {"entries": [entry.model_dump() for entry in normalized.entries]}
     set_meta(TAB_VISIBILITY_META_KEY, json.dumps(data))
     return normalized
 
