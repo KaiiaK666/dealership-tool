@@ -115,6 +115,7 @@ SPECIALS_KIA_NEW_URL = "https://www.bertogdenmissionkia.com/new-specials/"
 SPECIALS_MAZDA_NEW_URL = "https://www.bertogdenmissionmazda.com/new-vehicles/"
 SPECIALS_KIA_JIRA_ID = "OGDENMIKIA"
 SPECIALS_KIA_OFFERS_JS_URL = "https://d2dhakgqu1upap.cloudfront.net/specials/offers.js"
+SPECIALS_AUTO_REFRESH_SECONDS = 4 * 60 * 60
 SPECIALS_SOURCE_DEFINITIONS: Dict[str, Dict[str, str]] = {
     "kia_new": {
         "label": "Kia New Specials",
@@ -2271,6 +2272,68 @@ def import_auto_vehicle_special_source(source_key: str) -> SpecialsListOut:
     else:
         raise HTTPException(status_code=400, detail="Automatic import is only available for Kia and Mazda website sources")
     return import_vehicle_special_feed(payload)
+
+
+MONTH_NAME_LOOKUP = {
+    "january": "January",
+    "february": "February",
+    "march": "March",
+    "april": "April",
+    "may": "May",
+    "june": "June",
+    "july": "July",
+    "august": "August",
+    "september": "September",
+    "october": "October",
+    "november": "November",
+    "december": "December",
+}
+
+
+def month_label_from_text(value: Any) -> str:
+    text = str(value or "").strip().lower()
+    return MONTH_NAME_LOOKUP.get(text, "")
+
+
+def normalize_special_month_tags() -> None:
+    rows = db_query_all("SELECT id, tag, created_ts FROM specials ORDER BY created_ts DESC, id DESC")
+    month_rows: List[Tuple[int, str, str, float]] = []
+    counts: Dict[str, int] = {}
+    latest_ts: Dict[str, float] = {}
+    for row in rows:
+        raw_tag = str(row.get("tag") or "")
+        month_label = month_label_from_text(raw_tag)
+        if not month_label:
+            continue
+        row_id = int(row.get("id") or 0)
+        created_ts = float(row.get("created_ts") or 0.0)
+        month_rows.append((row_id, raw_tag, month_label, created_ts))
+        counts[month_label] = counts.get(month_label, 0) + 1
+        latest_ts[month_label] = max(latest_ts.get(month_label, 0.0), created_ts)
+    if not month_rows:
+        return
+    target_month = sorted(counts.keys(), key=lambda item: (-counts[item], -latest_ts.get(item, 0.0), item))[0]
+    updates = [(target_month, row_id) for row_id, raw_tag, current_month, _ in month_rows if raw_tag != target_month or current_month != target_month]
+    if updates:
+        for tag_value, row_id in updates:
+            db_execute("UPDATE specials SET tag = ? WHERE id = ?", (tag_value, row_id))
+
+
+def latest_special_feed_import_ts(source_key: str) -> float:
+    row = db_query_one("SELECT MAX(imported_ts) AS imported_ts FROM special_feed_entries WHERE source_key = ?", (source_key,))
+    return float((row or {}).get("imported_ts") or 0.0)
+
+
+def maybe_auto_refresh_special_sources() -> None:
+    now_ts = time.time()
+    for source_key in ("kia_new", "mazda_new"):
+        imported_ts = latest_special_feed_import_ts(source_key)
+        if imported_ts and (now_ts - imported_ts) < SPECIALS_AUTO_REFRESH_SECONDS:
+            continue
+        try:
+            import_auto_vehicle_special_source(source_key)
+        except Exception:
+            continue
 
 
 def init_db() -> None:
@@ -6704,7 +6767,10 @@ def fetch_vehicle_special_sections() -> List[VehicleSpecialSectionOut]:
     return sections
 
 
-def fetch_specials() -> SpecialsListOut:
+def fetch_specials(*, auto_refresh: bool = True) -> SpecialsListOut:
+    normalize_special_month_tags()
+    if auto_refresh:
+        maybe_auto_refresh_special_sources()
     rows = db_query_all("SELECT * FROM specials ORDER BY created_ts DESC, id DESC")
     return SpecialsListOut(
         entries=[special_out(row) for row in rows],
@@ -6800,7 +6866,7 @@ def import_vehicle_special_feed(payload: VehicleSpecialImportIn) -> SpecialsList
             """,
             row,
         )
-    return fetch_specials()
+    return fetch_specials(auto_refresh=False)
 
 
 def create_special(title: str, tag: str, upload: UploadFile) -> SpecialOut:
