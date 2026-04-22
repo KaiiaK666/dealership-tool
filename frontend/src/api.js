@@ -268,6 +268,12 @@ export const getBdcReport = (params = {}) =>
     start_date: params.startDate,
     end_date: params.endDate,
   })}`);
+export const importSpecialFeedSource = (token, sourceKey) =>
+  request(`/api/admin/specials/import-source/${encodeURIComponent(sourceKey)}`, {
+    method: "POST",
+    headers: adminHeaders(token),
+    timeout: 120000,
+  });
 export const getBdcSalesTracker = (params = {}) =>
   request(`/api/bdc-sales-tracker${qs({ month: params.month })}`);
 export const updateBdcSalesTrackerMonth = (token, payload) =>

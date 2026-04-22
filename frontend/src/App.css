@@ -3868,6 +3868,14 @@ button.days-off-day:hover:not(:disabled) {
   gap: 12px;
 }
 
+.specials-panel-header__actions,
+.special-feed-admin-panel__actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
 .specials-panel-header__chips,
 .special-feed-card__chips {
   display: flex;
@@ -3899,28 +3907,6 @@ button.days-off-day:hover:not(:disabled) {
 .special-feed-admin-panel {
   display: grid;
   gap: 16px;
-}
-
-.special-feed-admin-panel__steps {
-  display: flex;
-  gap: 10px;
-  flex-wrap: wrap;
-}
-
-.special-feed-admin-panel__steps span {
-  display: inline-flex;
-  align-items: center;
-  min-height: 34px;
-  padding: 0 12px;
-  border-radius: 999px;
-  border: 1px solid rgba(31, 124, 246, 0.12);
-  background: rgba(245, 249, 255, 0.92);
-  color: #35557b;
-  font-family: "IBM Plex Mono", monospace;
-  font-size: 0.72rem;
-  font-weight: 700;
-  letter-spacing: 0.08em;
-  text-transform: uppercase;
 }
 
 .special-feed-section__header,
@@ -4030,6 +4016,10 @@ button.days-off-day:hover:not(:disabled) {
 .special-feed-card__chips span {
   min-height: 30px;
   background: rgba(245, 249, 255, 0.92);
+}
+
+.special-feed-admin-card--auto {
+  align-content: start;
 }
 
 .special-feed-admin-card {
@@ -6763,11 +6753,15 @@ button.special-card:hover:not(:disabled) {
     grid-template-columns: 1fr;
   }
 
+  .specials-panel-header__actions,
+  .special-feed-admin-panel__actions,
   .special-feed-admin-card__actions {
     display: grid;
     grid-template-columns: 1fr;
   }
 
+  .specials-panel-header__actions button,
+  .special-feed-admin-panel__actions button,
   .special-feed-admin-card__actions a,
   .special-feed-admin-card__actions button {
     width: 100%;

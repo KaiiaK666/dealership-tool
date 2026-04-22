@@ -35,6 +35,7 @@ import {
   getBdcDistribution,
   getBdcUndoSettings,
   importSpecialFeed,
+  importSpecialFeedSource,
   getMarketplaceTemplate,
   getQuoteRates,
   getSalespeople,
@@ -1820,8 +1821,6 @@ export default function App() {
   const selectedSpecial = specials.find((item) => item.id === selectedSpecialId) || specials[0] || null;
   const specialFeedSourceMap = Object.fromEntries(SPECIAL_FEED_SOURCES.map((item) => [item.key, item]));
   const populatedSpecialVehicleSections = specialVehicleSections.filter((section) => (section.entries || []).length);
-  const specialsUsedUrlDirty =
-    String(specialsConfigDraft.used_srp_url || "").trim() !== String(specialsConfig.used_srp_url || "").trim();
   const selectedTrafficSalesperson =
     activeSales.find((person) => String(person.id) === String(selectedTrafficSalesId)) || null;
   const selectedTrafficSalesStore =
@@ -2242,8 +2241,7 @@ export default function App() {
     setResourceLoadState((current) => ({ ...current, trafficPdfs: true }));
   }
 
-  async function refreshSpecials() {
-    const data = await getSpecials();
+  function syncSpecialsState(data) {
     setSpecials(data.entries || []);
     setSpecialVehicleSections(data.vehicle_sections || []);
     const nextConfig = data.config || {
@@ -2254,6 +2252,11 @@ export default function App() {
     setSpecialsConfig(nextConfig);
     setSpecialsConfigDraft({ used_srp_url: nextConfig.used_srp_url || "" });
     setResourceLoadState((current) => ({ ...current, specials: true }));
+  }
+
+  async function refreshSpecials() {
+    const data = await getSpecials();
+    syncSpecialsState(data);
   }
 
   async function refreshQuoteRates() {
@@ -3940,6 +3943,58 @@ export default function App() {
     return specialsConfigDraft.used_srp_url || specialsConfig.used_srp_url || specialFeedSourceMap.used_srp?.defaultUrl || "";
   }
 
+  async function persistUsedSpecialsUrl() {
+    const draftUrl = String(specialsConfigDraft.used_srp_url || "").trim();
+    const savedUrl = String(specialsConfig.used_srp_url || "").trim();
+    if (!draftUrl || draftUrl === savedUrl) return specialsConfig;
+    const nextConfig = await updateSpecialsConfig(adminToken, { used_srp_url: draftUrl });
+    setSpecialsConfig(nextConfig);
+    setSpecialsConfigDraft({ used_srp_url: nextConfig.used_srp_url || "" });
+    return nextConfig;
+  }
+
+  async function refreshSpecialFeedSource(sourceKey) {
+    setBusy(`specials-auto-${sourceKey}`);
+    setError("");
+    try {
+      if (sourceKey === "used_srp") {
+        const nextConfig = await persistUsedSpecialsUrl();
+        const sourceUrl = String(nextConfig.used_srp_url || "").trim();
+        if (!sourceUrl) throw new Error("Add the used SRP URL first.");
+        setSpecialsImportStatus("Used deal picks still use the manual fallback. Kia and Mazda are now one-click refreshes.");
+        return;
+      }
+      const saved = await importSpecialFeedSource(adminToken, sourceKey);
+      syncSpecialsState(saved);
+      const refreshedSection = (saved.vehicle_sections || []).find((section) => section.key === sourceKey);
+      const refreshedCount = refreshedSection?.entries?.length || 0;
+      setSpecialsImportStatus(`Refreshed ${specialFeedSourceMap[sourceKey]?.label || "website specials"} with ${refreshedCount} live tile${refreshedCount === 1 ? "" : "s"}.`);
+    } catch (errorValue) {
+      setError(errText(errorValue));
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function refreshAutomaticSpecials() {
+    setBusy("specials-auto-all");
+    setError("");
+    try {
+      const kiaSaved = await importSpecialFeedSource(adminToken, "kia_new");
+      syncSpecialsState(kiaSaved);
+      const mazdaSaved = await importSpecialFeedSource(adminToken, "mazda_new");
+      syncSpecialsState(mazdaSaved);
+      const sections = mazdaSaved.vehicle_sections || [];
+      const kiaCount = sections.find((section) => section.key === "kia_new")?.entries?.length || 0;
+      const mazdaCount = sections.find((section) => section.key === "mazda_new")?.entries?.length || 0;
+      setSpecialsImportStatus(`Refreshed Kia (${kiaCount}) and Mazda (${mazdaCount}) website sections from the live feeds.`);
+    } catch (errorValue) {
+      setError(errText(errorValue));
+    } finally {
+      setBusy("");
+    }
+  }
+
   async function startSpecialImportFlow(sourceKey) {
     setBusy(`specials-prepare-${sourceKey}`);
     setError("");
@@ -3996,13 +4051,7 @@ export default function App() {
         source_url: parsed.source_url || specialsSourceUrl(sourceKey),
         entries: Array.isArray(parsed.entries) ? parsed.entries : [],
       });
-      setSpecials(saved.entries || []);
-      setSpecialVehicleSections(saved.vehicle_sections || []);
-      if (saved.config) {
-        setSpecialsConfig(saved.config);
-        setSpecialsConfigDraft({ used_srp_url: saved.config.used_srp_url || "" });
-      }
-      setResourceLoadState((current) => ({ ...current, specials: true }));
+      syncSpecialsState(saved);
       setSpecialsImportPayload("");
       setSpecialsImportStatus(`Imported ${(parsed.entries || []).length} ${specialFeedSourceMap[sourceKey]?.label || "special"} entries.`);
     } catch (errorValue) {
@@ -8110,16 +8159,44 @@ export default function App() {
           <section className="stack">
             <div className="panel specials-panel-header">
               <span className="eyebrow">Specials</span>
-              <h2>Live website specials and graphic tiles</h2>
+              <h2>Live website specials with one-click Kia and Mazda refresh</h2>
               <p className="admin-note">
-                Kia and Mazda website picks can now live here alongside your manual 1080 x 1080 graphics. Used vehicles get their own
-                scored deal-pick section once the SRP feed is imported.
+                Kia pulls straight from the live specials feed, Mazda pulls straight from the live new-inventory feed, and both land
+                here automatically. Manual graphic tiles still live underneath for anything custom.
               </p>
               <div className="specials-panel-header__chips">
                 <span>{populatedSpecialVehicleSections.length} live source section{populatedSpecialVehicleSections.length === 1 ? "" : "s"}</span>
                 <span>{specials.length} manual tile{specials.length === 1 ? "" : "s"}</span>
                 <span>{specialsConfig.used_srp_url ? "Used SRP configured" : "Used SRP waiting on URL"}</span>
               </div>
+              {adminToken ? (
+                <div className="specials-panel-header__actions">
+                  <button
+                    type="button"
+                    onClick={refreshAutomaticSpecials}
+                    disabled={busy === "specials-auto-all" || busy === "specials-auto-kia_new" || busy === "specials-auto-mazda_new"}
+                  >
+                    {busy === "specials-auto-all" ? "Refreshing Kia + Mazda..." : "Refresh Kia + Mazda"}
+                  </button>
+                  <button
+                    type="button"
+                    className="secondary"
+                    onClick={() => refreshSpecialFeedSource("kia_new")}
+                    disabled={busy === "specials-auto-all" || busy === "specials-auto-kia_new"}
+                  >
+                    {busy === "specials-auto-kia_new" ? "Refreshing Kia..." : "Refresh Kia"}
+                  </button>
+                  <button
+                    type="button"
+                    className="secondary"
+                    onClick={() => refreshSpecialFeedSource("mazda_new")}
+                    disabled={busy === "specials-auto-all" || busy === "specials-auto-mazda_new"}
+                  >
+                    {busy === "specials-auto-mazda_new" ? "Refreshing Mazda..." : "Refresh Mazda"}
+                  </button>
+                </div>
+              ) : null}
+              {specialsImportStatus ? <div className="special-feed-admin-panel__status">{specialsImportStatus}</div> : null}
             </div>
 
             {specialVehicleSections.map((section) => {
@@ -8187,8 +8264,10 @@ export default function App() {
                   ) : (
                     <div className="empty">
                       {section.key === "used_srp" && !sectionUrl
-                        ? "Add the used SRP URL in Admin > Specials, then import the live page payload."
-                        : "No imported entries yet for this source. Use Admin > Specials to bring in the live page data."}
+                        ? "Add the used SRP URL in Admin > Specials, then import the used feed if you need those deal picks."
+                        : adminToken
+                          ? "No imported entries yet for this source. Use the refresh buttons above."
+                          : "No imported entries yet for this source. Ask an admin to refresh the live feeds."}
                     </div>
                   )}
                 </div>
@@ -10486,25 +10565,44 @@ export default function App() {
                       <div className="special-feed-admin-panel__header">
                         <div>
                           <span className="eyebrow">Website imports</span>
-                          <h3>Bring Kia, Mazda, and used SRP specials into the tab</h3>
+                          <h3>Refresh Kia and Mazda in one click</h3>
                           <p className="admin-note">
-                            Keep this simple: open the live source, let the app copy the import script for you, run it in the
-                            browser console, then come back and import from clipboard. The raw JSON fallback is below only if
-                            you actually need it.
+                            The app now pulls the live Kia specials feed and the live Mazda new-inventory feed for you. This is the
+                            only workflow most people should use.
                           </p>
                         </div>
                         {specialsImportStatus ? <div className="special-feed-admin-panel__status">{specialsImportStatus}</div> : null}
                       </div>
 
-                      <div className="special-feed-admin-panel__steps">
-                        <span>1. Open source + copy script</span>
-                        <span>2. Paste in browser console</span>
-                        <span>3. Import clipboard</span>
+                      <div className="special-feed-admin-panel__actions">
+                        <button
+                          type="button"
+                          onClick={refreshAutomaticSpecials}
+                          disabled={busy === "specials-auto-all" || busy === "specials-auto-kia_new" || busy === "specials-auto-mazda_new"}
+                        >
+                          {busy === "specials-auto-all" ? "Refreshing Kia + Mazda..." : "Refresh Kia + Mazda"}
+                        </button>
+                        <button
+                          type="button"
+                          className="secondary"
+                          onClick={() => refreshSpecialFeedSource("kia_new")}
+                          disabled={busy === "specials-auto-all" || busy === "specials-auto-kia_new"}
+                        >
+                          {busy === "specials-auto-kia_new" ? "Refreshing Kia..." : "Refresh Kia Only"}
+                        </button>
+                        <button
+                          type="button"
+                          className="secondary"
+                          onClick={() => refreshSpecialFeedSource("mazda_new")}
+                          disabled={busy === "specials-auto-all" || busy === "specials-auto-mazda_new"}
+                        >
+                          {busy === "specials-auto-mazda_new" ? "Refreshing Mazda..." : "Refresh Mazda Only"}
+                        </button>
                       </div>
 
                       <div className="special-feed-admin-grid">
-                        {SPECIAL_FEED_SOURCES.map((source) => (
-                          <article key={`special-source-${source.key}`} className="special-feed-admin-card">
+                        {SPECIAL_FEED_SOURCES.filter((source) => source.key !== "used_srp").map((source) => (
+                          <article key={`special-source-${source.key}`} className="special-feed-admin-card special-feed-admin-card--auto">
                             <div className="special-feed-admin-card__copy">
                               <span>{source.label}</span>
                               <strong>{source.description}</strong>
@@ -10524,33 +10622,19 @@ export default function App() {
                                 />
                               </label>
                               <small>
-                                {source.key === "used_srp"
-                                  ? "Paste the used SRP once. The open button below will save it for you automatically."
-                                  : "Fixed source URL. No extra save step needed."}
+                                Fixed live source. No copy, console, or clipboard step anymore.
                               </small>
                             </div>
                             <div className="special-feed-admin-card__actions">
+                              <a href={specialsSourceUrl(source.key)} target="_blank" rel="noreferrer">
+                                Open Source
+                              </a>
                               <button
                                 type="button"
-                                className="secondary"
-                                onClick={() => startSpecialImportFlow(source.key)}
-                                disabled={
-                                  busy === `specials-prepare-${source.key}` ||
-                                  (source.key === "used_srp" && !specialsSourceUrl(source.key).trim())
-                                }
+                                onClick={() => refreshSpecialFeedSource(source.key)}
+                                disabled={busy === "specials-auto-all" || busy === `specials-auto-${source.key}`}
                               >
-                                {busy === `specials-prepare-${source.key}`
-                                  ? "Opening..."
-                                  : source.key === "used_srp" && specialsUsedUrlDirty
-                                    ? "Save URL + Open Source"
-                                    : "Open Source + Copy Script"}
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => importSpecialFeedFromClipboard(source.key)}
-                                disabled={busy === `specials-import-${source.key}`}
-                              >
-                                {busy === `specials-import-${source.key}` ? "Importing..." : "Import From Clipboard"}
+                                {busy === `specials-auto-${source.key}` ? "Refreshing..." : "Refresh Now"}
                               </button>
                             </div>
                           </article>
@@ -10558,14 +10642,49 @@ export default function App() {
                       </div>
 
                       <details className="special-feed-admin-manual">
-                        <summary>Manual payload fallback</summary>
+                        <summary>Advanced used SRP fallback</summary>
+                        <label>
+                          <span>Used SRP URL</span>
+                          <input
+                            value={specialsConfigDraft.used_srp_url}
+                            onChange={(event) => setSpecialsConfigDraft({ used_srp_url: event.target.value })}
+                            placeholder="Paste the used SRP URL"
+                          />
+                        </label>
+                        <div className="special-feed-admin-card__actions">
+                          <button
+                            type="button"
+                            className="secondary"
+                            onClick={async () => {
+                              try {
+                                const nextConfig = await persistUsedSpecialsUrl();
+                                const sourceUrl = String(nextConfig.used_srp_url || "").trim();
+                                if (!sourceUrl) throw new Error("Add the used SRP URL first.");
+                                if (typeof window !== "undefined") {
+                                  window.open(sourceUrl, "_blank", "noopener,noreferrer");
+                                }
+                              } catch (errorValue) {
+                                setError(errText(errorValue));
+                              }
+                            }}
+                          >
+                            Save URL + Open Used Source
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => importSpecialFeedFromClipboard("used_srp")}
+                            disabled={busy === "specials-import-used_srp"}
+                          >
+                            {busy === "specials-import-used_srp" ? "Importing..." : "Import Used From Clipboard"}
+                          </button>
+                        </div>
                         <label>
                           <span>Manual payload paste</span>
                           <textarea
                             rows={8}
                             value={specialsImportPayload}
                             onChange={(event) => setSpecialsImportPayload(event.target.value)}
-                            placeholder='Paste the JSON payload copied from the browser import script here only if you need the fallback path.'
+                            placeholder="Paste a used-SRP payload only if you need the manual fallback."
                           />
                         </label>
                         <div className="controls">
