@@ -1,6 +1,7 @@
 frontend/node_modules/
 frontend/dist/
 facebook-marketplace-extension/node_modules/
+sales-activity-runner/node_modules/
 
 backend/__pycache__/
 frontend/.vite/
@@ -16,11 +17,16 @@ backend/.env
 frontend/.env
 frontend/.env.local
 frontend/.env.production
+sales-activity-runner/.env
 
 data/*.db
 data/*.db-shm
 data/*.db-wal
 data/orgtool-store.json
+data/launcher/
+data/sales-activity/
+data/sales-analytics/
+data/uploads/
 
 .DS_Store
 Thumbs.db
