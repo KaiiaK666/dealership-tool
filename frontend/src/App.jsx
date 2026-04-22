@@ -2703,20 +2703,6 @@ export default function App() {
     setResourceLoadState((current) => ({ ...current, freshUpAnalytics: true }));
   }
 
-  async function refreshNotificationConfig() {
-    if (!adminToken) {
-      setNotificationConfig({
-        sms_provider: "Twilio",
-        sms_configured: false,
-        email_provider: "Resend",
-        email_configured: false,
-      });
-      return;
-    }
-    const data = await getNotificationConfig(adminToken);
-    setNotificationConfig(data);
-  }
-
   async function refreshBdcSalesTracker(nextMonth = bdcSalesTrackerMonth) {
     const data = await getBdcSalesTracker({ month: nextMonth });
     applyBdcSalesTrackerData(data);
@@ -2875,7 +2861,7 @@ export default function App() {
         customer_phone: draft.customer_phone,
         notes: draft.notes,
         sold: false,
-      });
+      }, adminToken);
       applyBdcSalesTrackerData(data);
       setBdcSalesTrackerEntryDrafts((current) => ({
         ...current,
@@ -2902,7 +2888,7 @@ export default function App() {
         agent_id: agent.agent_id,
         notes: draft,
         sold: false,
-      });
+      }, adminToken);
       applyBdcSalesTrackerData(data);
       setBdcSalesTrackerNoteDrafts((current) => ({
         ...current,
@@ -2926,7 +2912,7 @@ export default function App() {
         customer_phone: entry.customer_phone,
         notes: entry.notes,
         sold: Boolean(entry.sold),
-      });
+      }, adminToken);
       applyBdcSalesTrackerData(data);
     } catch (errorValue) {
       setError(errText(errorValue));
@@ -2946,7 +2932,7 @@ export default function App() {
         customer_phone: entry.customer_phone,
         notes: entry.notes,
         sold: !entry.sold,
-      });
+      }, adminToken);
       applyBdcSalesTrackerData(data);
     } catch (errorValue) {
       setError(errText(errorValue));
@@ -2959,7 +2945,7 @@ export default function App() {
     setBusy(`bdc-sales-delete-${entryId}`);
     setError("");
     try {
-      const data = await deleteBdcSalesTrackerEntry(entryId);
+      const data = await deleteBdcSalesTrackerEntry(entryId, adminToken);
       applyBdcSalesTrackerData(data);
     } catch (errorValue) {
       setError(errText(errorValue));
@@ -2977,7 +2963,7 @@ export default function App() {
         customer_name: bdcSalesTrackerDmsLogDraft.customer_name,
         apt_set_under: bdcSalesTrackerDmsLogDraft.apt_set_under || selectedTrackerFocus?.label || "",
         notes: bdcSalesTrackerDmsLogDraft.notes,
-      });
+      }, adminToken);
       applyBdcSalesTrackerData(data);
       setBdcSalesTrackerDmsLogDraft({
         ...emptyBdcSalesTrackerDmsLogDraft(),
@@ -3016,7 +3002,7 @@ export default function App() {
         notes: entry.notes || "",
         logged,
         logged_at: loggedAt,
-      });
+      }, adminToken);
       applyBdcSalesTrackerData(data);
     } catch (errorValue) {
       setError(errText(errorValue));
@@ -3029,7 +3015,7 @@ export default function App() {
     setBusy(`bdc-dms-sold-${entryId}`);
     setError("");
     try {
-      const data = await markBdcSalesTrackerDmsLogEntrySold(entryId);
+      const data = await markBdcSalesTrackerDmsLogEntrySold(entryId, adminToken);
       applyBdcSalesTrackerData(data);
     } catch (errorValue) {
       setError(errText(errorValue));
@@ -3042,7 +3028,7 @@ export default function App() {
     setBusy(`bdc-dms-delete-${entryId}`);
     setError("");
     try {
-      const data = await deleteBdcSalesTrackerDmsLogEntry(entryId);
+      const data = await deleteBdcSalesTrackerDmsLogEntry(entryId, adminToken);
       applyBdcSalesTrackerData(data);
     } catch (errorValue) {
       setError(errText(errorValue));
@@ -3145,36 +3131,6 @@ export default function App() {
       await refreshAgentLoopRuns({ preserveSelection: true });
     } catch (errorValue) {
       setAgentLoopFeedback({ kind: "error", message: errText(errorValue) });
-    } finally {
-      setBusy("");
-    }
-  }
-
-  async function submitSmsTest(event) {
-    event.preventDefault();
-    setBusy("notification-sms-test");
-    setSmsTestFeedback(null);
-    try {
-      const result = await sendNotificationTestSms(adminToken, { phone_number: smsTestPhone });
-      setSmsTestPhone(result.phone_number);
-      setSmsTestFeedback({ kind: "success", message: result.status });
-    } catch (errorValue) {
-      setSmsTestFeedback({ kind: "error", message: errText(errorValue) });
-    } finally {
-      setBusy("");
-    }
-  }
-
-  async function submitEmailTest(event) {
-    event.preventDefault();
-    setBusy("notification-email-test");
-    setEmailTestFeedback(null);
-    try {
-      const result = await sendNotificationTestEmail(adminToken, { email: emailTestAddress });
-      setEmailTestAddress(result.email);
-      setEmailTestFeedback({ kind: "success", message: result.status });
-    } catch (errorValue) {
-      setEmailTestFeedback({ kind: "error", message: errText(errorValue) });
     } finally {
       setBusy("");
     }
@@ -3915,17 +3871,12 @@ export default function App() {
     let active = true;
     const run = async () => {
       if (!adminSession || !adminToken) {
-        setNotificationConfig({
-          sms_provider: "Twilio",
-          sms_configured: false,
-          email_provider: "Resend",
-          email_configured: false,
-        });
+        setBdcLeadPushConfig(DEFAULT_BDC_LEAD_PUSH_CONFIG);
         return;
       }
       try {
-        const data = await getNotificationConfig(adminToken);
-        if (active) setNotificationConfig(data);
+        const data = await getBdcLeadPushConfig(adminToken);
+        if (active) setBdcLeadPushConfig(data || DEFAULT_BDC_LEAD_PUSH_CONFIG);
       } catch (errorValue) {
         if (active) setError(errText(errorValue));
       }
@@ -3943,7 +3894,7 @@ export default function App() {
         refreshServiceTraffic(trafficMonth, selectedTrafficDate),
         refreshBdcState(leadForm.leadStore),
       ];
-      if (adminSession && adminToken) tasks.push(refreshNotificationConfig());
+      if (adminSession && adminToken) tasks.push(refreshBdcLeadPushConfig({ quiet: true }));
       await Promise.all(tasks);
     } catch (errorValue) {
       setError(errText(errorValue));
@@ -6134,12 +6085,7 @@ export default function App() {
                 {latestBdcNotifications.length ? (
                   <div className="bdc-last-assigned__notifications">
                     {latestBdcNotifications.map((item) => (
-                      <span
-                        key={item}
-                        className={`bdc-last-assigned__notification ${
-                          item.toLowerCase().includes("sent") ? "is-success" : "is-warning"
-                        }`}
-                      >
+                      <span key={item} className={`bdc-last-assigned__notification ${bdcNotificationToneClass(item)}`}>
                         {item}
                       </span>
                     ))}
@@ -6202,27 +6148,27 @@ export default function App() {
                     : "Choose your name to open your BDC sales tracker"}
                 </h2>
                 <p className="admin-note">
-                  Pick the BDC agent first. Keep quick tracing notes in the collapsible note stack, then work the actual CRM / Opp
-                  ID / DMS sale rows underneath.
+                  Pick the BDC agent first. The selected view stays in one order: simple input at the top, tracking rows in
+                  the middle, and read-only Reynolds sold rows at the bottom.
                 </p>
                 <div className="bdc-sales-tracker-hero__meta">
                   <span className="bdc-sales-meta-chip">{monthLabel(bdcSalesTrackerMonth)}</span>
                   <span className="bdc-sales-meta-chip">
-                    {selectedTrackerAgent ? `${selectedTrackerExpectedCount} sale rows tracked` : "Choose a BDC agent"}
+                    {selectedTrackerAgent ? `${selectedTrackerTrackingCount} live tracking rows` : "Choose a BDC agent"}
                   </span>
                   <span className="bdc-sales-meta-chip">
                     {selectedTrackerAgent
-                      ? `${selectedTrackerPendingCount} pending / ${selectedTrackerConfirmedCount} apt sold`
+                      ? `${selectedTrackerPendingCount} pending deals / ${selectedTrackerConfirmedCount} DMS sold`
                       : "Tracker narrows to one agent at a time"}
                   </span>
                   <span className="bdc-sales-meta-chip">
-                    {selectedTrackerAgent ? `${selectedTrackerNoteCount} tracing notes` : "Notes stay in one collapsible stack"}
+                    {selectedTrackerAgent ? `${selectedTrackerNoteCount} note-only rows` : "Notes and deals stack together"}
                   </span>
                   <span className="bdc-sales-meta-chip">
                     {trackerDaysWorked} worked / {trackerDaysLeft} left
                   </span>
                   <span className="bdc-sales-meta-chip">
-                    {selectedTrackerIsKai ? "Kai can open DMS Log too" : "Only Kai sees DMS Log"}
+                    {trackerCanViewDmsLog ? "Admin DMS log unlocked" : "DMS log is admin only"}
                   </span>
                 </div>
               </div>
@@ -6301,20 +6247,20 @@ export default function App() {
                 {selectedTrackerAgent ? (
                   <div className="bdc-sales-workspace-panel__stats">
                     <span>
-                      <b>{selectedTrackerExpectedCount}</b>
-                      Expected
+                      <b>{selectedTrackerTrackingCount}</b>
+                      Tracking
                     </span>
                     <span>
                       <b>{selectedTrackerPendingCount}</b>
-                      Pending
+                      Pending deals
                     </span>
                     <span>
                       <b>{selectedTrackerConfirmedCount}</b>
-                      Apt sold
+                      DMS sold
                     </span>
                     <span>
                       <b>{selectedTrackerActualSold}</b>
-                      Apt sold
+                      Manual sold
                     </span>
                   </div>
                 ) : null}
@@ -7051,8 +6997,8 @@ export default function App() {
                   <div className="bdc-sales-leaderboard">
                     {trackerLeaderboardAgents.length ? (
                       trackerLeaderboardAgents.map((agent, index) => {
-                        const pendingCount = Number(agent.entries?.length || 0);
-                        const pipelineCount = Number(agent.sold_count || 0) + pendingCount;
+                        const pendingCount = trackerPendingSaleEntries(agent.entries || []).length;
+                        const pipelineCount = trackerPipelineCount(agent);
                         return (
                           <article key={`tracker-leaderboard-${agent.agent_id}`} className="bdc-sales-leaderboard__row">
                             <div className="bdc-sales-leaderboard__identity">
@@ -7068,11 +7014,15 @@ export default function App() {
                             <div className="bdc-sales-leaderboard__totals">
                               <span>
                                 <b>{Number(agent.actual_sold || 0)}</b>
-                                Apt sold
+                                Manual sold
+                              </span>
+                              <span>
+                                <b>{Number(agent.sold_count || 0)}</b>
+                                DMS sold
                               </span>
                               <span>
                                 <b>{pendingCount}</b>
-                                Pending
+                                Pending deals
                               </span>
                               <span>
                                 <b>{formatPercent(agent.sold_from_shown_rate || 0)}</b>
@@ -7108,7 +7058,7 @@ export default function App() {
                                   />
                                 </div>
                                 <small>
-                                  {Number(agent.sold_count || 0)} apt sold / {pendingCount} pending
+                                  {Number(agent.sold_count || 0)} DMS sold / {pendingCount} pending deals
                                 </small>
                               </div>
                             </div>
@@ -8305,8 +8255,8 @@ export default function App() {
                 <div className="panel bdc-sales-summary-panel">
                   <div className="bdc-sales-summary-panel__header">
                     <div>
-                      <span className="eyebrow">Worksheet recreation</span>
-                      <h3>DMS log quick entry and dated history</h3>
+                      <span className="eyebrow">Admin Reynolds log</span>
+                      <h3>DMS sold entry and dated history</h3>
                     </div>
                     <div className="bdc-sales-inline-summary bdc-sales-inline-summary--soft">
                       <span>Current {trackerDmsLog.current_entries.length}</span>
@@ -8315,8 +8265,8 @@ export default function App() {
                     </div>
                   </div>
                   <p className="admin-note">
-                    New rows log immediately. Paste one line as Customer / Opp ID / DMS No and the log will split it into the customer,
-                    opportunity, and DMS fields for you before payroll review.
+                    Use this admin-only log for Reynolds-confirmed deals. Marking a row sold pushes it into the selected
+                    agent's read-only DMS sold section on the tracker.
                   </p>
                 </div>
 
@@ -10384,115 +10334,82 @@ export default function App() {
                       <div className="row">
                         <div>
                           <span className="eyebrow">Lead notifications</span>
-                          <h3>Assignment alerts setup</h3>
-                        </div>
-                      </div>
-                      <div className="notification-status-grid">
-                        <div className={`notification-status-card ${notificationConfig.sms_configured ? "is-ready" : "is-missing"}`}>
-                          <span className="eyebrow">Text</span>
-                          <strong>{notificationConfig.sms_provider}</strong>
-                          <small>
-                            {notificationConfig.sms_configured
-                              ? "Ready to send assignment texts."
-                              : "Needs Twilio env vars before texts can go out."}
-                          </small>
+                          <h3>WhatsApp assignment push</h3>
+                          <p className="admin-note">
+                            Twilio and email are off for BDC Assign. New lead assignments now push only to{" "}
+                            <strong>{bdcLeadPushConfig.chat_name || "your self chat"}</strong> through the local controlled
+                            Chrome WhatsApp session.
+                          </p>
                         </div>
                         <div
-                          className={`notification-status-card ${notificationConfig.email_configured ? "is-ready" : "is-missing"}`}
+                          className="controls"
                         >
-                          <span className="eyebrow">Email</span>
-                          <strong>{notificationConfig.email_provider}</strong>
+                          <button
+                            type="button"
+                            className="secondary"
+                            onClick={() => refreshBdcLeadPushConfig()}
+                            disabled={busy === "bdc-lead-push-refresh"}
+                          >
+                            {busy === "bdc-lead-push-refresh" ? "Refreshing..." : "Refresh Status"}
+                          </button>
+                        </div>
+                      </div>
+                      <div className="notification-status-grid notification-status-grid--single">
+                        <div
+                          className={`notification-status-card ${
+                            !bdcLeadPushConfig.runner_ready
+                              ? "is-missing"
+                              : bdcLeadPushConfig.enabled
+                                ? "is-ready"
+                                : "is-paused"
+                          }`}
+                        >
+                          <span className="eyebrow">WhatsApp</span>
+                          <strong>{bdcLeadPushConfig.chat_name || "Self chat"}</strong>
                           <small>
-                            {notificationConfig.email_configured
-                              ? "Ready to send assignment emails."
-                              : "Needs Resend env vars before emails can go out."}
+                            {!bdcLeadPushConfig.runner_ready
+                              ? "The local WhatsApp Web sender is not ready on this machine yet."
+                              : bdcLeadPushConfig.enabled
+                                ? "BDC Assign is set to push new leads into your self chat."
+                                : "Lead push is paused, but Twilio and email stay off."}
                           </small>
                         </div>
+                      </div>
+                      <div className="distribution-toggle">
+                        <button
+                          type="button"
+                          className={`pill ${bdcLeadPushConfig.enabled ? "is-active" : ""}`}
+                          onClick={() => saveBdcLeadPushEnabled(true)}
+                          disabled={busy === "bdc-lead-push" || !bdcLeadPushConfig.runner_ready}
+                        >
+                          Lead push on
+                        </button>
+                        <button
+                          type="button"
+                          className={`pill ${!bdcLeadPushConfig.enabled ? "is-active" : ""}`}
+                          onClick={() => saveBdcLeadPushEnabled(false)}
+                          disabled={busy === "bdc-lead-push"}
+                        >
+                          Lead push off
+                        </button>
+                      </div>
+                      <div className="notice">
+                        {!bdcLeadPushConfig.runner_ready
+                          ? "Keep the controlled Chrome profile signed into WhatsApp Web on this machine, then refresh the status here."
+                          : bdcLeadPushConfig.enabled
+                            ? `Every new BDC assignment will push only to ${bdcLeadPushConfig.chat_name || "your self chat"}.`
+                            : "Lead push is paused until you turn it back on."}
                       </div>
                       <div className="notification-setup-list">
                         <div>
-                          <strong>Text setup</strong>
-                          <small>`TWILIO_ACCOUNT_SID`, `TWILIO_AUTH_TOKEN`, `TWILIO_FROM_NUMBER`</small>
+                          <strong>Delivery path</strong>
+                          <small>BDC Assign → local WhatsApp Web self chat</small>
                         </div>
                         <div>
-                          <strong>Email setup</strong>
-                          <small>`RESEND_API_KEY`, `BDC_NOTIFY_EMAIL_FROM`, `BDC_NOTIFY_EMAIL_REPLY_TO` (optional)</small>
+                          <strong>Sender session</strong>
+                          <small>The runner must stay signed into WhatsApp Web in the controlled Chrome profile.</small>
                         </div>
                       </div>
-                      <div className="notification-test-grid">
-                        <form className="notification-test-form" onSubmit={submitSmsTest}>
-                          <label>
-                            <span>Send a test text</span>
-                            <input
-                              type="tel"
-                              value={smsTestPhone}
-                              onChange={(event) => {
-                                setSmsTestPhone(event.target.value);
-                                setSmsTestFeedback(null);
-                              }}
-                              placeholder="(956) 555-1234 or +19565551234"
-                            />
-                          </label>
-                          <div className="notification-test-actions">
-                            <button
-                              type="submit"
-                            disabled={
-                              busy === "notification-sms-test" ||
-                              !notificationConfig.sms_configured ||
-                              !smsTestPhone.trim()
-                            }
-                          >
-                            {busy === "notification-sms-test" ? "Sending..." : "Send test text"}
-                          </button>
-                          <small>Uses the current Twilio sender number from Render.</small>
-                        </div>
-                        {smsTestFeedback ? (
-                          <div
-                            className={`notification-test-feedback ${
-                              smsTestFeedback.kind === "error" ? "is-error" : "is-success"
-                            }`}
-                          >
-                            {smsTestFeedback.message}
-                          </div>
-                        ) : null}
-                      </form>
-                      <form className="notification-test-form" onSubmit={submitEmailTest}>
-                        <label>
-                          <span>Send a test email</span>
-                          <input
-                            type="email"
-                            value={emailTestAddress}
-                            onChange={(event) => {
-                              setEmailTestAddress(event.target.value);
-                              setEmailTestFeedback(null);
-                            }}
-                            placeholder="you@example.com"
-                          />
-                        </label>
-                        <div className="notification-test-actions">
-                          <button
-                            type="submit"
-                            disabled={
-                              busy === "notification-email-test" ||
-                              !notificationConfig.email_configured ||
-                              !emailTestAddress.trim()
-                            }
-                          >
-                            {busy === "notification-email-test" ? "Sending..." : "Send test email"}
-                          </button>
-                          <small>Uses the current Resend sender from Render.</small>
-                        </div>
-                        {emailTestFeedback ? (
-                          <div
-                            className={`notification-test-feedback ${
-                              emailTestFeedback.kind === "error" ? "is-error" : "is-success"
-                            }`}
-                          >
-                            {emailTestFeedback.message}
-                          </div>
-                        ) : null}
-                      </form>
-                    </div>
                     </div>
 
                     <div className="panel">
@@ -11823,40 +11740,6 @@ export default function App() {
 
                 {adminSection === "salesAnalytics" ? (
                   <>
-                    <div className="panel sales-automation-admin-panel">
-                      <span className="eyebrow">Lead notifications</span>
-                      <h3>Push every BDC assignment to your self chat</h3>
-                      <p className="admin-note">
-                        When this is on, every new lead assigned from the BDC Assign page pushes a WhatsApp message only to{" "}
-                        <strong>{bdcLeadPushConfig.chat_name || "your self chat"}</strong>.
-                      </p>
-                      <div className="distribution-toggle">
-                        <button
-                          type="button"
-                          className={`pill ${bdcLeadPushConfig.enabled ? "is-active" : ""}`}
-                          onClick={() => saveBdcLeadPushEnabled(true)}
-                          disabled={busy === "bdc-lead-push" || !bdcLeadPushConfig.runner_ready}
-                        >
-                          Lead push on
-                        </button>
-                        <button
-                          type="button"
-                          className={`pill ${!bdcLeadPushConfig.enabled ? "is-active" : ""}`}
-                          onClick={() => saveBdcLeadPushEnabled(false)}
-                          disabled={busy === "bdc-lead-push"}
-                        >
-                          Lead push off
-                        </button>
-                      </div>
-                      <div className="notice">
-                        {!bdcLeadPushConfig.runner_ready
-                          ? "The WhatsApp sender is not ready yet on this machine."
-                          : bdcLeadPushConfig.enabled
-                            ? `Lead alerts are live and target only ${bdcLeadPushConfig.chat_name || "your self chat"}.`
-                            : "Lead alerts are paused until you turn them back on."}
-                      </div>
-                    </div>
-
                     <div className="panel sales-automation-admin-panel">
                       <div className="sales-automation-admin-panel__header">
                         <div>

@@ -300,20 +300,37 @@ export const updateBdcSalesTrackerAgentMetrics = (token, agentId, payload) =>
     body: payload,
     headers: adminHeaders(token),
   });
-export const createBdcSalesTrackerEntry = (payload) =>
-  request("/api/bdc-sales-tracker/entries", { method: "POST", body: payload });
-export const updateBdcSalesTrackerEntry = (entryId, payload) =>
-  request(`/api/bdc-sales-tracker/entries/${encodeURIComponent(entryId)}`, { method: "PUT", body: payload });
-export const deleteBdcSalesTrackerEntry = (entryId) =>
-  request(`/api/bdc-sales-tracker/entries/${encodeURIComponent(entryId)}`, { method: "DELETE" });
-export const createBdcSalesTrackerDmsLogEntry = (payload) =>
-  request("/api/bdc-sales-tracker/dms-log", { method: "POST", body: payload });
-export const updateBdcSalesTrackerDmsLogEntry = (entryId, payload) =>
-  request(`/api/bdc-sales-tracker/dms-log/${encodeURIComponent(entryId)}`, { method: "PUT", body: payload });
-export const markBdcSalesTrackerDmsLogEntrySold = (entryId) =>
-  request(`/api/bdc-sales-tracker/dms-log/${encodeURIComponent(entryId)}/sold`, { method: "POST" });
-export const deleteBdcSalesTrackerDmsLogEntry = (entryId) =>
-  request(`/api/bdc-sales-tracker/dms-log/${encodeURIComponent(entryId)}`, { method: "DELETE" });
+export const createBdcSalesTrackerEntry = (payload, token) =>
+  request("/api/bdc-sales-tracker/entries", { method: "POST", body: payload, headers: adminHeaders(token) });
+export const updateBdcSalesTrackerEntry = (entryId, payload, token) =>
+  request(`/api/bdc-sales-tracker/entries/${encodeURIComponent(entryId)}`, {
+    method: "PUT",
+    body: payload,
+    headers: adminHeaders(token),
+  });
+export const deleteBdcSalesTrackerEntry = (entryId, token) =>
+  request(`/api/bdc-sales-tracker/entries/${encodeURIComponent(entryId)}`, {
+    method: "DELETE",
+    headers: adminHeaders(token),
+  });
+export const createBdcSalesTrackerDmsLogEntry = (payload, token) =>
+  request("/api/bdc-sales-tracker/dms-log", { method: "POST", body: payload, headers: adminHeaders(token) });
+export const updateBdcSalesTrackerDmsLogEntry = (entryId, payload, token) =>
+  request(`/api/bdc-sales-tracker/dms-log/${encodeURIComponent(entryId)}`, {
+    method: "PUT",
+    body: payload,
+    headers: adminHeaders(token),
+  });
+export const markBdcSalesTrackerDmsLogEntrySold = (entryId, token) =>
+  request(`/api/bdc-sales-tracker/dms-log/${encodeURIComponent(entryId)}/sold`, {
+    method: "POST",
+    headers: adminHeaders(token),
+  });
+export const deleteBdcSalesTrackerDmsLogEntry = (entryId, token) =>
+  request(`/api/bdc-sales-tracker/dms-log/${encodeURIComponent(entryId)}`, {
+    method: "DELETE",
+    headers: adminHeaders(token),
+  });
 export const updateBdcSalesTrackerFocusNote = (payload) =>
   request("/api/bdc-sales-tracker/focus-note", { method: "POST", body: payload });
 export const clearBdcHistory = (token) =>

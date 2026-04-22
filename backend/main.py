@@ -1742,11 +1742,12 @@ def bdc_lead_push_enabled() -> bool:
 
 def get_bdc_lead_push_config() -> BdcLeadPushConfigOut:
     state = remote_runner_state()
+    local_ready = local_whatsapp_message_runner_ready()
     return BdcLeadPushConfigOut(
         enabled=bdc_lead_push_enabled(),
         chat_name=SALES_ACTIVITY_SELF_CHAT_LABEL,
         runner_ready=whatsapp_message_runner_ready(),
-        runner_online=state.online if remote_runner_broker_enabled() and not local_whatsapp_message_runner_ready() else True,
+        runner_online=local_ready or state.online,
         runner_label=state.label or REMOTE_RUNNER_LABEL,
         runner_status_text=whatsapp_runner_status_text(),
     )
@@ -1834,12 +1835,24 @@ def deliver_assignment_whatsapp_push_async(assignment_row: Dict[str, Any]) -> st
     assignment_id = int(assignment_row.get("id") or 0)
     if not bdc_lead_push_enabled():
         return "WhatsApp push disabled"
-    if not whatsapp_message_runner_ready():
-        return "WhatsApp push skipped: sender is not ready"
     if assignment_id <= 0:
         return "WhatsApp push skipped: assignment id missing"
 
     message_text = build_assignment_whatsapp_message(assignment_row)
+    if not local_whatsapp_message_runner_ready():
+        if not remote_runner_broker_enabled():
+            return "WhatsApp push skipped: sender is not ready"
+        queue_remote_runner_job(
+            job_type="whatsapp-self-message",
+            message_text=message_text,
+            message_tag=f"bdc-assignment-{assignment_id}",
+            assignment_id=assignment_id,
+            requested_by="bdc-assignment",
+        )
+        queued_text = f"WhatsApp push queued for {remote_runner_label()}"
+        update_bdc_assignment_whatsapp_status(assignment_id, queued_text)
+        return queued_text
+
     update_bdc_assignment_whatsapp_status(assignment_id, f"WhatsApp push queued to {SALES_ACTIVITY_SELF_CHAT_LABEL}")
 
     def worker() -> None:
@@ -1851,6 +1864,188 @@ def deliver_assignment_whatsapp_push_async(assignment_row: Dict[str, Any]) -> st
 
     threading.Thread(target=worker, name=f"bdc-whatsapp-push-{assignment_id}", daemon=True).start()
     return f"WhatsApp push queued to {SALES_ACTIVITY_SELF_CHAT_LABEL}"
+
+
+def upload_url_to_path(value: str) -> Optional[str]:
+    text = str(value or "").strip()
+    if not text.startswith("/uploads/"):
+        return None
+    parts = [part for part in text[len("/uploads/") :].split("/") if part]
+    if not parts:
+        return None
+    return os.path.join(UPLOADS_ROOT, *parts)
+
+
+def local_sales_analytics_ready_variants() -> List[str]:
+    return [
+        key
+        for key in SALES_ANALYTICS_VARIANT_ORDER
+        if local_sales_analytics_runner_ready(key)
+    ]
+
+
+def remote_runner_bridge_request(
+    method: str,
+    path: str,
+    *,
+    json_body: Optional[Dict[str, Any]] = None,
+    data: Optional[Dict[str, Any]] = None,
+    files: Optional[Dict[str, Any]] = None,
+    timeout: int = 30,
+) -> Dict[str, Any]:
+    response = curl_requests.request(
+        method.upper(),
+        f"{REMOTE_RUNNER_BASE_URL}{path}",
+        headers={"x-runner-token": REMOTE_RUNNER_TOKEN},
+        json=json_body,
+        data=data,
+        files=files,
+        timeout=timeout,
+    )
+    response.raise_for_status()
+    if not response.content:
+        return {}
+    payload = response.json()
+    return payload if isinstance(payload, dict) else {}
+
+
+def execute_local_sales_analytics_runner(
+    variant: Optional[str] = None,
+) -> Tuple[subprocess.CompletedProcess[str], Dict[str, Any], Optional[Dict[str, Any]], Optional[str]]:
+    meta = sales_analytics_variant_meta(variant)
+    node_path = shutil.which("node")
+    if not node_path:
+        raise RuntimeError("Node.js is not installed or not available on PATH.")
+    if not os.path.exists(SALES_ACTIVITY_RUNNER_ENTRY):
+        raise RuntimeError("The sales activity runner is missing from this workspace.")
+    if not os.path.exists(os.path.join(SALES_ACTIVITY_RUNNER_DIR, ".env")):
+        raise RuntimeError("Create sales-activity-runner/.env before starting the sales activity scraper.")
+    creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+    result = subprocess.run(
+        [node_path, SALES_ACTIVITY_RUNNER_ENTRY],
+        cwd=SALES_ACTIVITY_RUNNER_DIR,
+        env=sales_analytics_runner_env(meta["key"]),
+        capture_output=True,
+        text=True,
+        timeout=20 * 60,
+        creationflags=creation_flags,
+    )
+    paths = sales_analytics_paths(meta["key"])
+    status_payload = read_json_file(paths["status"], {})
+    latest_payload = read_json_file(paths["latest"], None)
+    latest_dict = latest_payload if isinstance(latest_payload, dict) else None
+    screenshot_path = upload_url_to_path(latest_dict.get("screenshot_url")) if latest_dict else None
+    return result, status_payload if isinstance(status_payload, dict) else {}, latest_dict, screenshot_path
+
+
+def sync_remote_sales_analytics_snapshot(
+    variant: Optional[str],
+    status_payload: Dict[str, Any],
+    latest_payload: Optional[Dict[str, Any]],
+    screenshot_path: Optional[str],
+) -> None:
+    data = {
+        "variant": normalize_sales_analytics_variant(variant),
+        "status_json": json.dumps(status_payload or {}),
+        "latest_json": json.dumps(latest_payload or {}) if latest_payload else "",
+    }
+    if screenshot_path and os.path.exists(screenshot_path):
+        with open(screenshot_path, "rb") as handle:
+            remote_runner_bridge_request(
+                "POST",
+                "/api/internal/runner/sales-analytics/sync",
+                data=data,
+                files={"screenshot_file": (os.path.basename(screenshot_path), handle, "image/png")},
+                timeout=120,
+            )
+        return
+    remote_runner_bridge_request(
+        "POST",
+        "/api/internal/runner/sales-analytics/sync",
+        data=data,
+        timeout=60,
+    )
+
+
+def process_remote_runner_job(job: Dict[str, Any]) -> None:
+    job_id = int(job.get("id") or 0)
+    job_type = str(job.get("job_type") or "")
+    label = REMOTE_RUNNER_LABEL
+    try:
+        if job_type == "whatsapp-self-message":
+            result_text = run_self_whatsapp_message(
+                str(job.get("message_text") or ""),
+                message_tag=str(job.get("message_tag") or "remote-runner"),
+            )
+            remote_runner_bridge_request(
+                "POST",
+                f"/api/internal/runner/jobs/{job_id}/complete",
+                json_body={"label": label, "message": result_text},
+                timeout=30,
+            )
+            return
+
+        if job_type == "sales-analytics-run":
+            variant_key = str(job.get("variant_key") or "sales")
+            result, status_payload, latest_payload, screenshot_path = execute_local_sales_analytics_runner(variant_key)
+            sync_remote_sales_analytics_snapshot(variant_key, status_payload, latest_payload, screenshot_path)
+            if result.returncode != 0:
+                raise RuntimeError(compact_process_text(result.stdout, result.stderr))
+            completion_message = str(status_payload.get("message") or "Sales activity scrape completed.").strip()
+            remote_runner_bridge_request(
+                "POST",
+                f"/api/internal/runner/jobs/{job_id}/complete",
+                json_body={"label": label, "message": completion_message},
+                timeout=30,
+            )
+            return
+
+        raise RuntimeError(f"Unknown remote runner job type: {job_type}")
+    except Exception as exc:
+        error_text = compact_error_text(exc)
+        try:
+            remote_runner_bridge_request(
+                "POST",
+                f"/api/internal/runner/jobs/{job_id}/failed",
+                json_body={"label": label, "message": error_text},
+                timeout=30,
+            )
+        except Exception:
+            pass
+        raise
+
+
+def remote_runner_worker_loop() -> None:
+    while True:
+        try:
+            payload = {
+                "label": REMOTE_RUNNER_LABEL,
+                "whatsapp_ready": local_whatsapp_message_runner_ready(),
+                "sales_analytics_variants_ready": local_sales_analytics_ready_variants(),
+            }
+            response = remote_runner_bridge_request(
+                "POST",
+                "/api/internal/runner/poll",
+                json_body=payload,
+                timeout=30,
+            )
+            job = response.get("job") if isinstance(response, dict) else None
+            if isinstance(job, dict) and int(job.get("id") or 0) > 0:
+                process_remote_runner_job(job)
+                continue
+        except Exception:
+            pass
+        time.sleep(REMOTE_RUNNER_POLL_SECONDS)
+
+
+def start_remote_runner_worker() -> None:
+    if not remote_runner_worker_enabled():
+        return
+    if getattr(start_remote_runner_worker, "_started", False):
+        return
+    thread = threading.Thread(target=remote_runner_worker_loop, name="remote-runner-worker", daemon=True)
+    thread.start()
+    start_remote_runner_worker._started = True
 
 
 def normalize_freshup_event_type(value: str) -> str:
@@ -2644,11 +2839,266 @@ def upsert_sales_analytics_run_record(variant: Optional[str], run_payload: Dict[
     return run
 
 
+def remote_runner_job_out(row: Dict[str, Any]) -> RemoteRunnerJobOut:
+    assignment_id = row.get("assignment_id")
+    try:
+        assignment_id = int(assignment_id) if assignment_id is not None else None
+    except (TypeError, ValueError):
+        assignment_id = None
+    return RemoteRunnerJobOut(
+        id=int(row.get("id") or 0),
+        job_type=str(row.get("job_type") or ""),
+        status=str(row.get("status") or "queued"),
+        variant_key=str(row.get("variant_key") or ""),
+        message_text=str(row.get("message_text") or ""),
+        message_tag=str(row.get("message_tag") or ""),
+        assignment_id=assignment_id,
+        requested_at=str(row.get("requested_at") or ""),
+        requested_by=str(row.get("requested_by") or ""),
+    )
+
+
+def get_remote_runner_job_row(job_id: int) -> Optional[Dict[str, Any]]:
+    return db_query_one("SELECT * FROM remote_runner_jobs WHERE id = ?", (int(job_id),))
+
+
+def queue_remote_runner_job(
+    *,
+    job_type: str,
+    variant_key: str = "",
+    message_text: str = "",
+    message_tag: str = "",
+    assignment_id: Optional[int] = None,
+    requested_by: str = "",
+) -> RemoteRunnerJobOut:
+    now_ts = time.time()
+    now_at = now_iso()
+    job_id = db_insert(
+        """
+        INSERT INTO remote_runner_jobs (
+            job_type, status, variant_key, message_text, message_tag, assignment_id,
+            requested_by, requested_ts, requested_at
+        )
+        VALUES (?, 'queued', ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            str(job_type or "").strip(),
+            normalize_sales_analytics_variant(variant_key) if variant_key else "",
+            str(message_text or ""),
+            str(message_tag or ""),
+            int(assignment_id) if assignment_id else None,
+            str(requested_by or ""),
+            now_ts,
+            now_at,
+        ),
+    )
+    row = get_remote_runner_job_row(job_id)
+    if not row:
+        raise RuntimeError("Remote runner job was queued but could not be reloaded.")
+    return remote_runner_job_out(row)
+
+
+def find_active_remote_runner_sales_job(variant: Optional[str]) -> Optional[RemoteRunnerJobOut]:
+    key = normalize_sales_analytics_variant(variant)
+    row = db_query_one(
+        """
+        SELECT *
+        FROM remote_runner_jobs
+        WHERE job_type = 'sales-analytics-run'
+          AND variant_key = ?
+          AND status IN ('queued', 'running')
+        ORDER BY id DESC
+        LIMIT 1
+        """,
+        (key,),
+    )
+    return remote_runner_job_out(row) if row else None
+
+
+def requeue_stale_remote_runner_jobs() -> None:
+    cutoff_ts = time.time() - REMOTE_RUNNER_JOB_STALE_SECONDS
+    stale_jobs = db_query_all(
+        """
+        SELECT *
+        FROM remote_runner_jobs
+        WHERE status = 'running' AND COALESCE(started_ts, 0) > 0 AND started_ts <= ?
+        ORDER BY id ASC
+        """,
+        (cutoff_ts,),
+    )
+    if not stale_jobs:
+        return
+    for row in stale_jobs:
+        db_execute(
+            """
+            UPDATE remote_runner_jobs
+            SET status = 'queued',
+                started_ts = NULL,
+                started_at = '',
+                finished_ts = NULL,
+                finished_at = '',
+                worker_label = '',
+                result_message = 'Requeued after the worker went stale.',
+                error_message = ''
+            WHERE id = ?
+            """,
+            (int(row.get("id") or 0),),
+        )
+        if str(row.get("job_type") or "") == "sales-analytics-run":
+            write_sales_analytics_status(
+                str(row.get("variant_key") or "sales"),
+                {
+                    "state": "queued",
+                    "started_at": "",
+                    "finished_at": "",
+                    "last_error": "",
+                    "message": f"Requeued. Waiting for {remote_runner_label()} to reconnect.",
+                },
+            )
+        elif str(row.get("job_type") or "") == "whatsapp-self-message" and int(row.get("assignment_id") or 0) > 0:
+            update_bdc_assignment_whatsapp_status(
+                int(row.get("assignment_id") or 0),
+                f"WhatsApp push requeued. Waiting for {remote_runner_label()} to reconnect.",
+            )
+
+
+def claim_next_remote_runner_job(payload: RemoteRunnerPollIn) -> Optional[RemoteRunnerJobOut]:
+    supported_variants = set(normalize_remote_runner_variants(payload.sales_analytics_variants_ready))
+    for row in db_query_all(
+        "SELECT * FROM remote_runner_jobs WHERE status = 'queued' ORDER BY requested_ts ASC, id ASC"
+    ):
+        job_type = str(row.get("job_type") or "")
+        variant_key = str(row.get("variant_key") or "")
+        if job_type == "whatsapp-self-message" and not payload.whatsapp_ready:
+            continue
+        if job_type == "sales-analytics-run" and variant_key not in supported_variants:
+            continue
+        now_at = now_iso()
+        now_ts = time.time()
+        db_execute(
+            """
+            UPDATE remote_runner_jobs
+            SET status = 'running',
+                started_ts = ?,
+                started_at = ?,
+                worker_label = ?,
+                result_message = ?,
+                error_message = ''
+            WHERE id = ? AND status = 'queued'
+            """,
+            (
+                now_ts,
+                now_at,
+                str(payload.label or REMOTE_RUNNER_LABEL),
+                f"Running on {str(payload.label or REMOTE_RUNNER_LABEL)}.",
+                int(row.get("id") or 0),
+            ),
+        )
+        claimed = get_remote_runner_job_row(int(row.get("id") or 0))
+        if not claimed or str(claimed.get("status") or "") != "running":
+            continue
+        update_remote_runner_state(
+            label=payload.label,
+            whatsapp_ready=payload.whatsapp_ready,
+            sales_analytics_variants_ready=payload.sales_analytics_variants_ready,
+            active_job_id=int(claimed.get("id") or 0),
+            touch=True,
+        )
+        if job_type == "sales-analytics-run":
+            write_sales_analytics_status(
+                variant_key,
+                {
+                    "state": "running",
+                    "started_at": now_at,
+                    "finished_at": "",
+                    "last_error": "",
+                    "message": f"{str(payload.label or REMOTE_RUNNER_LABEL)} started the queued pull.",
+                },
+            )
+        elif job_type == "whatsapp-self-message" and int(claimed.get("assignment_id") or 0) > 0:
+            update_bdc_assignment_whatsapp_status(
+                int(claimed.get("assignment_id") or 0),
+                f"WhatsApp push is running on {str(payload.label or REMOTE_RUNNER_LABEL)}.",
+            )
+        return remote_runner_job_out(claimed)
+    update_remote_runner_state(
+        label=payload.label,
+        whatsapp_ready=payload.whatsapp_ready,
+        sales_analytics_variants_ready=payload.sales_analytics_variants_ready,
+        active_job_id=0,
+        touch=True,
+    )
+    return None
+
+
+def mark_remote_runner_job_completed(job_id: int, label: str, message: str = "") -> RemoteRunnerAckOut:
+    row = get_remote_runner_job_row(job_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="runner job not found")
+    now_at = now_iso()
+    now_ts = time.time()
+    result_message = str(message or row.get("result_message") or "Completed").strip() or "Completed"
+    db_execute(
+        """
+        UPDATE remote_runner_jobs
+        SET status = 'completed',
+            finished_ts = ?,
+            finished_at = ?,
+            worker_label = ?,
+            result_message = ?,
+            error_message = ''
+        WHERE id = ?
+        """,
+        (now_ts, now_at, str(label or REMOTE_RUNNER_LABEL), result_message, int(job_id)),
+    )
+    if str(row.get("job_type") or "") == "whatsapp-self-message" and int(row.get("assignment_id") or 0) > 0:
+        update_bdc_assignment_whatsapp_status(int(row.get("assignment_id") or 0), result_message)
+    update_remote_runner_state(label=label, active_job_id=0, touch=True)
+    return RemoteRunnerAckOut(ok=True, message=result_message)
+
+
+def mark_remote_runner_job_failed(job_id: int, label: str, message: str = "") -> RemoteRunnerAckOut:
+    row = get_remote_runner_job_row(job_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="runner job not found")
+    now_at = now_iso()
+    now_ts = time.time()
+    error_message = str(message or row.get("error_message") or "Failed").strip() or "Failed"
+    db_execute(
+        """
+        UPDATE remote_runner_jobs
+        SET status = 'failed',
+            finished_ts = ?,
+            finished_at = ?,
+            worker_label = ?,
+            error_message = ?,
+            result_message = ''
+        WHERE id = ?
+        """,
+        (now_ts, now_at, str(label or REMOTE_RUNNER_LABEL), error_message, int(job_id)),
+    )
+    if str(row.get("job_type") or "") == "sales-analytics-run":
+        write_sales_analytics_status(
+            str(row.get("variant_key") or "sales"),
+            {
+                "state": "failed",
+                "finished_at": now_at,
+                "last_error": error_message,
+                "message": error_message,
+            },
+        )
+    elif str(row.get("job_type") or "") == "whatsapp-self-message" and int(row.get("assignment_id") or 0) > 0:
+        update_bdc_assignment_whatsapp_status(int(row.get("assignment_id") or 0), f"WhatsApp push failed: {error_message}")
+    update_remote_runner_state(label=label, active_job_id=0, touch=True)
+    return RemoteRunnerAckOut(ok=True, message=error_message)
+
+
 def build_sales_analytics_config(variant: Optional[str] = None, can_trigger: bool = False) -> SalesAnalyticsConfigOut:
     meta = sales_analytics_variant_meta(variant)
     latest = read_sales_analytics_latest(meta["key"])
     status = read_sales_analytics_status(meta["key"])
     state = remote_runner_state()
+    local_ready = local_sales_analytics_runner_ready(meta["key"])
     chat_name = (
         str((latest.delivery.chat_name if latest else "") or status.chat_name or SALES_ACTIVITY_SELF_CHAT_LABEL).strip()
         or SALES_ACTIVITY_SELF_CHAT_LABEL
@@ -2665,7 +3115,7 @@ def build_sales_analytics_config(variant: Optional[str] = None, can_trigger: boo
         schedule_times=list(meta["schedule_times"]),
         chat_name=chat_name,
         runner_ready=sales_analytics_runner_ready(meta["key"]),
-        runner_online=state.online if remote_runner_broker_enabled() and not local_sales_analytics_runner_ready(meta["key"]) else True,
+        runner_online=local_ready or state.online,
         runner_label=state.label or REMOTE_RUNNER_LABEL,
         runner_status_text=sales_analytics_runner_status_text(meta["key"]),
         can_trigger=can_trigger,
@@ -2690,13 +3140,44 @@ def fetch_sales_analytics_dashboard(
 
 def trigger_sales_analytics_runner(variant: Optional[str] = None) -> SalesAnalyticsTriggerOut:
     meta = sales_analytics_variant_meta(variant)
-    paths = sales_analytics_paths(meta["key"])
     current_status = read_sales_analytics_status(meta["key"])
-    if str(current_status.state or "").lower() == "running":
+    current_state = str(current_status.state or "").lower()
+    active_job = find_active_remote_runner_sales_job(meta["key"])
+    if current_state == "running" or (active_job and active_job.status == "running"):
         return SalesAnalyticsTriggerOut(
             started=False,
             message="A sales activity scrape is already running.",
             status=current_status,
+        )
+    if current_state == "queued" or (active_job and active_job.status == "queued"):
+        return SalesAnalyticsTriggerOut(
+            started=False,
+            message=f"A sales activity scrape is already queued for {remote_runner_label()}.",
+            status=current_status,
+        )
+
+    if not local_sales_analytics_runner_ready(meta["key"]):
+        if not remote_runner_broker_enabled():
+            raise HTTPException(status_code=503, detail=sales_analytics_runner_status_text(meta["key"]))
+        queue_remote_runner_job(
+            job_type="sales-analytics-run",
+            variant_key=meta["key"],
+            requested_by="dashboard",
+        )
+        queued_status = write_sales_analytics_status(
+            meta["key"],
+            {
+                "state": "queued",
+                "started_at": "",
+                "finished_at": "",
+                "last_error": "",
+                "message": f"Queued for {remote_runner_label()}. The pull will start when the home PC checks in.",
+            },
+        )
+        return SalesAnalyticsTriggerOut(
+            started=True,
+            message=f"Queued for {remote_runner_label()}.",
+            status=queued_status,
         )
 
     node_path = shutil.which("node")
@@ -2711,24 +3192,18 @@ def trigger_sales_analytics_runner(variant: Optional[str] = None) -> SalesAnalyt
         )
 
     started_at = f"{datetime.utcnow().isoformat()}Z"
-    next_status = current_status.model_dump()
-    next_status.update(
+    write_sales_analytics_status(
+        meta["key"],
         {
-            "variant_key": meta["key"],
-            "variant_label": meta["label"],
             "report_name": build_sales_analytics_config(meta["key"]).report_name,
-            "schedule_label": meta["schedule_label"],
-            "schedule_days": list(meta["schedule_days"]),
-            "schedule_times": list(meta["schedule_times"]),
             "chat_name": SALES_ACTIVITY_SELF_CHAT_LABEL,
             "state": "running",
             "started_at": started_at,
             "finished_at": "",
             "last_error": "",
             "message": "Sales activity scrape started from the dashboard.",
-        }
+        },
     )
-    write_json_file(paths["status"], next_status)
 
     creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
     try:
@@ -3867,6 +4342,13 @@ def require_admin(token: Optional[str]) -> Dict[str, Any]:
     if not session:
         raise HTTPException(status_code=403, detail="admin login required")
     return session
+
+
+def require_runner_token(token: Optional[str]) -> None:
+    if not remote_runner_broker_enabled():
+        raise HTTPException(status_code=503, detail="remote runner broker is not configured on this server")
+    if str(token or "").strip() != REMOTE_RUNNER_TOKEN:
+        raise HTTPException(status_code=403, detail="invalid runner token")
 
 
 def issue_session() -> AdminSessionOut:
@@ -8302,11 +8784,101 @@ def update_special(special_id: int, title: str, tag: str, upload: Optional[Uploa
 @app.on_event("startup")
 def on_startup() -> None:
     init_db()
+    start_remote_runner_worker()
 
 
 @app.get("/health")
 def health() -> Dict[str, str]:
     return {"status": "ok"}
+
+
+@app.post("/api/internal/runner/poll", response_model=RemoteRunnerPollOut)
+def poll_internal_runner(
+    payload: RemoteRunnerPollIn,
+    x_runner_token: Optional[str] = Header(default=None),
+) -> RemoteRunnerPollOut:
+    require_runner_token(x_runner_token)
+    requeue_stale_remote_runner_jobs()
+    job = claim_next_remote_runner_job(payload)
+    return RemoteRunnerPollOut(runner=remote_runner_state(), job=job)
+
+
+@app.post("/api/internal/runner/jobs/{job_id}/complete", response_model=RemoteRunnerAckOut)
+def complete_internal_runner_job(
+    job_id: int,
+    payload: RemoteRunnerJobResultIn,
+    x_runner_token: Optional[str] = Header(default=None),
+) -> RemoteRunnerAckOut:
+    require_runner_token(x_runner_token)
+    return mark_remote_runner_job_completed(job_id, payload.label, payload.message)
+
+
+@app.post("/api/internal/runner/jobs/{job_id}/failed", response_model=RemoteRunnerAckOut)
+def fail_internal_runner_job(
+    job_id: int,
+    payload: RemoteRunnerJobResultIn,
+    x_runner_token: Optional[str] = Header(default=None),
+) -> RemoteRunnerAckOut:
+    require_runner_token(x_runner_token)
+    return mark_remote_runner_job_failed(job_id, payload.label, payload.message)
+
+
+@app.post("/api/internal/runner/sales-analytics/sync", response_model=RemoteRunnerAckOut)
+def sync_internal_runner_sales_analytics(
+    variant: str = Form(...),
+    status_json: str = Form("{}"),
+    latest_json: str = Form(""),
+    screenshot_file: Optional[UploadFile] = File(default=None),
+    x_runner_token: Optional[str] = Header(default=None),
+) -> RemoteRunnerAckOut:
+    require_runner_token(x_runner_token)
+    key = normalize_sales_analytics_variant(variant)
+    try:
+        status_payload = json.loads(str(status_json or "{}"))
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=400, detail="status_json must be valid JSON") from exc
+    if not isinstance(status_payload, dict):
+        raise HTTPException(status_code=400, detail="status_json must be a JSON object")
+
+    latest_payload: Optional[Dict[str, Any]] = None
+    if str(latest_json or "").strip():
+        try:
+            parsed_latest = json.loads(str(latest_json or "{}"))
+        except json.JSONDecodeError as exc:
+            raise HTTPException(status_code=400, detail="latest_json must be valid JSON") from exc
+        if not isinstance(parsed_latest, dict):
+            raise HTTPException(status_code=400, detail="latest_json must be a JSON object")
+        latest_payload = parsed_latest
+
+    if latest_payload is not None and screenshot_file is not None:
+        meta = sales_analytics_variant_meta(key)
+        storage_key = str(meta.get("storage_key") or "").strip()
+        folder_path = SALES_ANALYTICS_UPLOADS_ROOT if not storage_key else os.path.join(SALES_ANALYTICS_UPLOADS_ROOT, storage_key)
+        folder_name = "sales-analytics" if not storage_key else f"sales-analytics/{storage_key}"
+        os.makedirs(folder_path, exist_ok=True)
+        ext = os.path.splitext(str(screenshot_file.filename or ""))[1].lower() or ".png"
+        if ext not in {".png", ".jpg", ".jpeg", ".webp"}:
+            raise HTTPException(status_code=400, detail="screenshot_file must be png, jpg, jpeg, or webp")
+        suggested_name = os.path.basename(str(latest_payload.get("screenshot_url") or "").strip())
+        if not suggested_name:
+            suggested_name = f"{meta['file_prefix']}-{int(time.time())}{ext}"
+        stored_name = re.sub(r"[^A-Za-z0-9._-]+", "-", suggested_name).strip(".-") or f"{meta['file_prefix']}-{int(time.time())}{ext}"
+        if not stored_name.lower().endswith(ext):
+            stored_name = f"{stored_name}{ext}"
+        destination = os.path.join(folder_path, stored_name)
+        with open(destination, "wb") as handle:
+            while True:
+                chunk = screenshot_file.file.read(1024 * 1024)
+                if not chunk:
+                    break
+                handle.write(chunk)
+        screenshot_file.file.close()
+        latest_payload["screenshot_url"] = upload_url(folder_name, stored_name)
+
+    if latest_payload is not None:
+        upsert_sales_analytics_run_record(key, latest_payload)
+    write_sales_analytics_status(key, status_payload)
+    return RemoteRunnerAckOut(ok=True, message="Sales analytics sync saved.")
 
 
 @app.post("/api/admin/login", response_model=AdminSessionOut)
@@ -8883,7 +9455,12 @@ def post_bdc_sales_tracker_agent_metrics(
 
 
 @app.post("/api/bdc-sales-tracker/entries", response_model=BdcSalesTrackerOut)
-def post_bdc_sales_tracker_entry(payload: BdcSalesTrackerEntryIn) -> BdcSalesTrackerOut:
+def post_bdc_sales_tracker_entry(
+    payload: BdcSalesTrackerEntryIn,
+    x_admin_token: Optional[str] = Header(default=None),
+) -> BdcSalesTrackerOut:
+    if bool(payload.sold):
+        require_admin(x_admin_token)
     return create_bdc_sales_tracker_entry(payload)
 
 
@@ -8891,17 +9468,36 @@ def post_bdc_sales_tracker_entry(payload: BdcSalesTrackerEntryIn) -> BdcSalesTra
 def put_bdc_sales_tracker_entry(
     entry_id: int,
     payload: BdcSalesTrackerEntryUpdateIn,
+    x_admin_token: Optional[str] = Header(default=None),
 ) -> BdcSalesTrackerOut:
+    row = get_bdc_sales_tracker_entry_row(entry_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="tracker row not found")
+    current_sold = bool(int(row.get("sold") or 0))
+    if current_sold or bool(payload.sold) != current_sold:
+        require_admin(x_admin_token)
     return update_bdc_sales_tracker_entry(entry_id, payload)
 
 
 @app.delete("/api/bdc-sales-tracker/entries/{entry_id}", response_model=BdcSalesTrackerOut)
-def delete_bdc_sales_tracker_entry_route(entry_id: int) -> BdcSalesTrackerOut:
+def delete_bdc_sales_tracker_entry_route(
+    entry_id: int,
+    x_admin_token: Optional[str] = Header(default=None),
+) -> BdcSalesTrackerOut:
+    row = get_bdc_sales_tracker_entry_row(entry_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="tracker row not found")
+    if bool(int(row.get("sold") or 0)):
+        require_admin(x_admin_token)
     return delete_bdc_sales_tracker_entry(entry_id)
 
 
 @app.post("/api/bdc-sales-tracker/dms-log", response_model=BdcSalesTrackerOut)
-def post_bdc_sales_tracker_dms_log_entry(payload: BdcSalesTrackerDmsLogEntryIn) -> BdcSalesTrackerOut:
+def post_bdc_sales_tracker_dms_log_entry(
+    payload: BdcSalesTrackerDmsLogEntryIn,
+    x_admin_token: Optional[str] = Header(default=None),
+) -> BdcSalesTrackerOut:
+    require_admin(x_admin_token)
     return create_bdc_sales_tracker_dms_log_entry(payload)
 
 
@@ -8909,17 +9505,27 @@ def post_bdc_sales_tracker_dms_log_entry(payload: BdcSalesTrackerDmsLogEntryIn) 
 def put_bdc_sales_tracker_dms_log_entry(
     entry_id: int,
     payload: BdcSalesTrackerDmsLogEntryUpdateIn,
+    x_admin_token: Optional[str] = Header(default=None),
 ) -> BdcSalesTrackerOut:
+    require_admin(x_admin_token)
     return update_bdc_sales_tracker_dms_log_entry(entry_id, payload)
 
 
 @app.post("/api/bdc-sales-tracker/dms-log/{entry_id}/sold", response_model=BdcSalesTrackerOut)
-def post_bdc_sales_tracker_dms_log_entry_sold(entry_id: int) -> BdcSalesTrackerOut:
+def post_bdc_sales_tracker_dms_log_entry_sold(
+    entry_id: int,
+    x_admin_token: Optional[str] = Header(default=None),
+) -> BdcSalesTrackerOut:
+    require_admin(x_admin_token)
     return mark_bdc_sales_tracker_dms_log_entry_sold(entry_id)
 
 
 @app.delete("/api/bdc-sales-tracker/dms-log/{entry_id}", response_model=BdcSalesTrackerOut)
-def delete_bdc_sales_tracker_dms_log_entry_route(entry_id: int) -> BdcSalesTrackerOut:
+def delete_bdc_sales_tracker_dms_log_entry_route(
+    entry_id: int,
+    x_admin_token: Optional[str] = Header(default=None),
+) -> BdcSalesTrackerOut:
+    require_admin(x_admin_token)
     return delete_bdc_sales_tracker_dms_log_entry(entry_id)
 
 
