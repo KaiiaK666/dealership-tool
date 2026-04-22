@@ -15,7 +15,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import date, datetime, timedelta
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 from zoneinfo import ZoneInfo
 
 from curl_cffi import requests as curl_requests
@@ -638,6 +638,8 @@ class BdcSalesTrackerDmsLogEntryOut(BaseModel):
     notes: str = ""
     logged: bool = False
     logged_at: str = ""
+    sold: bool = False
+    sold_at: str = ""
     created_at: str
     updated_at: str
     created_ts: float
@@ -1211,12 +1213,42 @@ def parse_bdc_sales_tracker_log_identity(value: str) -> Tuple[str, str, str]:
         raise HTTPException(status_code=400, detail="customer_name is required")
     parts = [normalize_short_text(part, "customer_name", max_len=220) for part in raw.split("/")]
     parts = [part for part in parts if part]
-    if len(parts) >= 3:
+    if len(parts) >= 2:
         customer_name = normalize_short_text(parts[0], "customer_name", max_len=120)
-        opportunity_id = normalize_short_text(parts[1], "opportunity_id", max_len=80)
-        dms_number = normalize_short_text(parts[2], "dms_number", max_len=80)
+        opportunity_id = ""
+        dms_number = ""
+        for part in parts[1:]:
+            lowered = part.lower()
+            if not opportunity_id and ("opp" in lowered or "opportunity" in lowered):
+                cleaned = re.sub(r"^(?:opp(?:ortunity)?\s*id\.?\s*[:#-]?\s*)", "", part, flags=re.IGNORECASE).strip(" .:-")
+                opportunity_id = normalize_short_text(cleaned or part, "opportunity_id", max_len=80)
+                continue
+            if not dms_number and "dms" in lowered:
+                cleaned = re.sub(r"^(?:dms\s*(?:no\.?|number)?\s*[:#-]?\s*)", "", part, flags=re.IGNORECASE).strip(" .:-")
+                dms_number = normalize_short_text(cleaned or part, "dms_number", max_len=80)
+                continue
+            if not opportunity_id:
+                opportunity_id = normalize_short_text(part, "opportunity_id", max_len=80)
+            elif not dms_number:
+                dms_number = normalize_short_text(part, "dms_number", max_len=80)
         return customer_name, opportunity_id, dms_number
     return normalize_short_text(raw, "customer_name", max_len=120), "", ""
+
+
+def merge_bdc_sales_tracker_notes(*parts: Any) -> str:
+    lines: List[str] = []
+    seen: Set[str] = set()
+    for part in parts:
+        for raw_line in str(part or "").replace("\r", "\n").split("\n"):
+            line = raw_line.strip()
+            if not line:
+                continue
+            lowered = line.lower()
+            if lowered in seen:
+                continue
+            seen.add(lowered)
+            lines.append(line)
+    return normalize_notes("\n".join(lines), "notes", max_len=1000)
 
 
 def normalize_tracker_focus_key(value: str) -> str:
@@ -3006,6 +3038,9 @@ def init_db() -> None:
     ensure_column("bdc_sales_tracker_dms_log", "opportunity_id", "TEXT NOT NULL DEFAULT ''")
     ensure_column("bdc_sales_tracker_dms_log", "dms_number", "TEXT NOT NULL DEFAULT ''")
     ensure_column("bdc_sales_tracker_dms_log", "notes", "TEXT NOT NULL DEFAULT ''")
+    ensure_column("bdc_sales_tracker_dms_log", "sold", "INTEGER NOT NULL DEFAULT 0")
+    ensure_column("bdc_sales_tracker_dms_log", "sold_ts", "REAL")
+    ensure_column("bdc_sales_tracker_dms_log", "sold_at", "TEXT NOT NULL DEFAULT ''")
     db_execute("CREATE INDEX IF NOT EXISTS idx_bdc_sales_tracker_dms_log_month ON bdc_sales_tracker_dms_log(month_key, logged, display_order, id)")
     db_execute(
         """
@@ -3337,6 +3372,8 @@ def bdc_sales_tracker_dms_log_entry_out(row: Dict[str, Any]) -> BdcSalesTrackerD
         notes=str(row.get("notes") or ""),
         logged=bool(int(row.get("logged") or 0)),
         logged_at=str(row.get("logged_at") or ""),
+        sold=bool(int(row.get("sold") or 0)),
+        sold_at=str(row.get("sold_at") or ""),
         created_at=str(row.get("created_at") or ""),
         updated_at=str(row.get("updated_at") or ""),
         created_ts=float(row.get("created_ts") or 0.0),
@@ -3833,6 +3870,39 @@ def get_bdc_sales_tracker_dms_log_row(entry_id: int) -> Optional[Dict[str, Any]]
     return db_query_one("SELECT * FROM bdc_sales_tracker_dms_log WHERE id = ?", (int(entry_id),))
 
 
+def find_matching_bdc_sales_tracker_entry(
+    month_key: str,
+    agent_id: int,
+    customer_name: str,
+    dms_number: str,
+) -> Optional[Dict[str, Any]]:
+    if dms_number:
+        row = db_query_one(
+            """
+            SELECT *
+            FROM bdc_sales_tracker_entries
+            WHERE month_key = ? AND agent_id = ? AND LOWER(dms_number) = LOWER(?)
+            ORDER BY sold ASC, updated_ts DESC, id DESC
+            LIMIT 1
+            """,
+            (month_key, int(agent_id), dms_number),
+        )
+        if row:
+            return row
+    if customer_name:
+        return db_query_one(
+            """
+            SELECT *
+            FROM bdc_sales_tracker_entries
+            WHERE month_key = ? AND agent_id = ? AND LOWER(profile_name) = LOWER(?)
+            ORDER BY sold ASC, updated_ts DESC, id DESC
+            LIMIT 1
+            """,
+            (month_key, int(agent_id), customer_name),
+        )
+    return None
+
+
 def upsert_bdc_sales_tracker_focus_note(payload: BdcSalesTrackerFocusNoteIn) -> BdcSalesTrackerOut:
     month_key = parse_month_key(payload.month)
     focus_key = normalize_tracker_focus_key(payload.focus_key)
@@ -4217,9 +4287,24 @@ def update_bdc_sales_tracker_dms_log_entry(entry_id: int, payload: BdcSalesTrack
     row = get_bdc_sales_tracker_dms_log_row(entry_id)
     if not row:
         raise HTTPException(status_code=404, detail="DMS log row not found")
-    customer_name = normalize_short_text(payload.customer_name, "customer_name", max_len=120)
-    opportunity_id = normalize_short_text(payload.opportunity_id, "opportunity_id", max_len=80)
-    dms_number = normalize_short_text(payload.dms_number, "dms_number", max_len=80)
+    raw_customer_name = str(payload.customer_name or "")
+    parsed_identity = "/" in raw_customer_name
+    parsed_customer_name, parsed_opportunity_id, parsed_dms_number = parse_bdc_sales_tracker_log_identity(raw_customer_name)
+    customer_name = normalize_short_text(
+        parsed_customer_name if parsed_identity else raw_customer_name,
+        "customer_name",
+        max_len=120,
+    )
+    opportunity_id = normalize_short_text(
+        parsed_opportunity_id if parsed_identity and parsed_opportunity_id else payload.opportunity_id,
+        "opportunity_id",
+        max_len=80,
+    )
+    dms_number = normalize_short_text(
+        parsed_dms_number if parsed_identity and parsed_dms_number else payload.dms_number,
+        "dms_number",
+        max_len=80,
+    )
     apt_set_under = normalize_short_text(payload.apt_set_under, "apt_set_under", max_len=120)
     notes = normalize_notes(payload.notes, "notes", max_len=1000)
     if not customer_name:
@@ -4270,6 +4355,105 @@ def update_bdc_sales_tracker_dms_log_entry(entry_id: int, payload: BdcSalesTrack
         ),
     )
     return fetch_bdc_sales_tracker(str(row.get("month_key") or ""))
+
+
+def mark_bdc_sales_tracker_dms_log_entry_sold(entry_id: int) -> BdcSalesTrackerOut:
+    row = get_bdc_sales_tracker_dms_log_row(entry_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="DMS log row not found")
+    month_key = parse_month_key(str(row.get("month_key") or ""))
+    customer_name = normalize_short_text(str(row.get("customer_name") or ""), "customer_name", max_len=120)
+    opportunity_id = normalize_short_text(str(row.get("opportunity_id") or ""), "opportunity_id", max_len=80)
+    dms_number = normalize_short_text(str(row.get("dms_number") or ""), "dms_number", max_len=80)
+    apt_set_under = normalize_short_text(str(row.get("apt_set_under") or ""), "apt_set_under", max_len=120)
+    notes = normalize_notes(str(row.get("notes") or ""), "notes", max_len=1000)
+    if not apt_set_under:
+        raise HTTPException(status_code=400, detail="Apt Set Under is required before marking a DMS log row sold")
+    agent_id, agent_name = resolve_bdc_agent(None, apt_set_under)
+    if not agent_id:
+        raise HTTPException(status_code=400, detail="Apt Set Under must match an active BDC agent before marking sold")
+
+    tracker_notes = merge_bdc_sales_tracker_notes(f"Opp ID {opportunity_id}" if opportunity_id else "", notes)
+    existing_entry = find_matching_bdc_sales_tracker_entry(month_key, int(agent_id), customer_name, dms_number)
+    tracker_now_ts = time.time()
+    tracker_now_at = now_iso()
+    if existing_entry:
+        existing_notes = merge_bdc_sales_tracker_notes(str(existing_entry.get("notes") or ""), tracker_notes)
+        sold_ts = float(existing_entry.get("sold_ts") or 0.0) if existing_entry.get("sold_ts") is not None else None
+        sold_at = str(existing_entry.get("sold_at") or "")
+        if not bool(int(existing_entry.get("sold") or 0)):
+            sold_ts = tracker_now_ts
+            sold_at = tracker_now_at
+        db_execute(
+            """
+            UPDATE bdc_sales_tracker_entries
+            SET dms_number = ?,
+                profile_name = ?,
+                notes = ?,
+                sold = 1,
+                sold_ts = ?,
+                sold_at = ?,
+                updated_ts = ?,
+                updated_at = ?
+            WHERE id = ?
+            """,
+            (
+                dms_number or str(existing_entry.get("dms_number") or ""),
+                customer_name or str(existing_entry.get("profile_name") or ""),
+                existing_notes,
+                sold_ts,
+                sold_at,
+                tracker_now_ts,
+                tracker_now_at,
+                int(existing_entry.get("id") or 0),
+            ),
+        )
+    else:
+        order_row = db_query_one(
+            "SELECT COALESCE(MAX(display_order), -1) AS max_order FROM bdc_sales_tracker_entries WHERE month_key = ? AND agent_id = ?",
+            (month_key, int(agent_id)),
+        ) or {}
+        display_order = int(order_row.get("max_order") or -1) + 1
+        db_insert(
+            """
+            INSERT INTO bdc_sales_tracker_entries (
+                month_key, agent_id, agent_name, dms_number, profile_name, customer_phone, notes, sold,
+                sold_ts, sold_at, display_order, created_ts, created_at, updated_ts, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, '', ?, 1, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                month_key,
+                int(agent_id),
+                agent_name,
+                dms_number,
+                customer_name,
+                tracker_notes,
+                tracker_now_ts,
+                tracker_now_at,
+                display_order,
+                tracker_now_ts,
+                tracker_now_at,
+                tracker_now_ts,
+                tracker_now_at,
+            ),
+        )
+
+    log_now_ts = time.time()
+    log_now_at = now_local_input_value()
+    db_execute(
+        """
+        UPDATE bdc_sales_tracker_dms_log
+        SET sold = 1,
+            sold_ts = ?,
+            sold_at = ?,
+            updated_ts = ?,
+            updated_at = ?
+        WHERE id = ?
+        """,
+        (log_now_ts, log_now_at, log_now_ts, log_now_at, int(entry_id)),
+    )
+    return fetch_bdc_sales_tracker(month_key)
 
 
 def delete_bdc_sales_tracker_dms_log_entry(entry_id: int) -> BdcSalesTrackerOut:
@@ -8007,6 +8191,11 @@ def put_bdc_sales_tracker_dms_log_entry(
     payload: BdcSalesTrackerDmsLogEntryUpdateIn,
 ) -> BdcSalesTrackerOut:
     return update_bdc_sales_tracker_dms_log_entry(entry_id, payload)
+
+
+@app.post("/api/bdc-sales-tracker/dms-log/{entry_id}/sold", response_model=BdcSalesTrackerOut)
+def post_bdc_sales_tracker_dms_log_entry_sold(entry_id: int) -> BdcSalesTrackerOut:
+    return mark_bdc_sales_tracker_dms_log_entry_sold(entry_id)
 
 
 @app.delete("/api/bdc-sales-tracker/dms-log/{entry_id}", response_model=BdcSalesTrackerOut)

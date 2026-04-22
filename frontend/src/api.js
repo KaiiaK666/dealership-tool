@@ -300,6 +300,8 @@ export const createBdcSalesTrackerDmsLogEntry = (payload) =>
   request("/api/bdc-sales-tracker/dms-log", { method: "POST", body: payload });
 export const updateBdcSalesTrackerDmsLogEntry = (entryId, payload) =>
   request(`/api/bdc-sales-tracker/dms-log/${encodeURIComponent(entryId)}`, { method: "PUT", body: payload });
+export const markBdcSalesTrackerDmsLogEntrySold = (entryId) =>
+  request(`/api/bdc-sales-tracker/dms-log/${encodeURIComponent(entryId)}/sold`, { method: "POST" });
 export const deleteBdcSalesTrackerDmsLogEntry = (entryId) =>
   request(`/api/bdc-sales-tracker/dms-log/${encodeURIComponent(entryId)}`, { method: "DELETE" });
 export const updateBdcSalesTrackerFocusNote = (payload) =>

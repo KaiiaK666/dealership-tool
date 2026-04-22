@@ -74,6 +74,7 @@ import {
   createBdcSalesTrackerDmsLogEntry,
   deleteBdcSalesTrackerEntry,
   deleteBdcSalesTrackerDmsLogEntry,
+  markBdcSalesTrackerDmsLogEntrySold,
   runSalesAnalyticsReport,
   updateBdcSalesTrackerDmsLogEntry,
 } from "./api.js";
@@ -655,6 +656,43 @@ function emptyBdcSalesTrackerEntryDraft() {
 
 function emptyBdcSalesTrackerDmsLogDraft() {
   return { customer_name: "", apt_set_under: "", notes: "" };
+}
+
+function parseBdcSalesTrackerDmsLogIdentity(value) {
+  const raw = String(value || "").trim();
+  if (!raw) {
+    return { customer_name: "", opportunity_id: "", dms_number: "" };
+  }
+  const parts = raw
+    .split("/")
+    .map((part) => String(part || "").trim())
+    .filter(Boolean);
+  if (parts.length < 2) {
+    return { customer_name: raw, opportunity_id: "", dms_number: "" };
+  }
+  let opportunity_id = "";
+  let dms_number = "";
+  for (const part of parts.slice(1)) {
+    const lowered = part.toLowerCase();
+    if (!opportunity_id && (lowered.includes("opp") || lowered.includes("opportunity"))) {
+      opportunity_id = part.replace(/^(?:opp(?:ortunity)?\s*id\.?\s*[:#-]?\s*)/i, "").replace(/^[\s.:-]+|[\s.:-]+$/g, "");
+      continue;
+    }
+    if (!dms_number && lowered.includes("dms")) {
+      dms_number = part.replace(/^(?:dms\s*(?:no\.?|number)?\s*[:#-]?\s*)/i, "").replace(/^[\s.:-]+|[\s.:-]+$/g, "");
+      continue;
+    }
+    if (!opportunity_id) {
+      opportunity_id = part;
+    } else if (!dms_number) {
+      dms_number = part;
+    }
+  }
+  return {
+    customer_name: parts[0],
+    opportunity_id,
+    dms_number,
+  };
 }
 
 function defaultBdcSalesTrackerRulesDraft() {
@@ -2041,6 +2079,7 @@ export default function App() {
   const selectedAgentLoopIsActive = ["queued", "running"].includes(String(selectedAgentRun?.status || "").toLowerCase());
   const trackerAgents = bdcSalesTracker?.agents || [];
   const trackerDmsLog = bdcSalesTracker?.dms_log || { current_entries: [], log_entries: [] };
+  const trackerDmsLogDraftPreview = parseBdcSalesTrackerDmsLogIdentity(bdcSalesTrackerDmsLogDraft.customer_name);
   const trackerBenchmarks = bdcSalesTracker?.benchmarks || {
     appointment_set_rate_floor: 0.2,
     appointment_set_rate_target: 0.3,
@@ -2694,6 +2733,19 @@ export default function App() {
         logged,
         logged_at: loggedAt,
       });
+      applyBdcSalesTrackerData(data);
+    } catch (errorValue) {
+      setError(errText(errorValue));
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function markBdcSalesTrackerDmsLogAsSold(entryId) {
+    setBusy(`bdc-dms-sold-${entryId}`);
+    setError("");
+    try {
+      const data = await markBdcSalesTrackerDmsLogEntrySold(entryId);
       applyBdcSalesTrackerData(data);
     } catch (errorValue) {
       setError(errText(errorValue));
@@ -7416,7 +7468,8 @@ export default function App() {
                     </div>
                   </div>
                   <p className="admin-note">
-                    New rows log immediately. Enter one line as Customer / Opp ID / DMS No, keep the row under Kai, and add an optional note when payroll review needs context.
+                    New rows log immediately. Paste one line as Customer / Opp ID / DMS No and the log will split it into the customer,
+                    opportunity, and DMS fields for you before payroll review.
                   </p>
                 </div>
 
@@ -7430,13 +7483,13 @@ export default function App() {
                     </div>
                     <div className="bdc-dms-log-create">
                       <label>
-                        <span>Customer / Opp ID / DMS No</span>
+                        <span>Paste full line</span>
                         <input
                           value={bdcSalesTrackerDmsLogDraft.customer_name}
                           onChange={(event) =>
                             setBdcSalesTrackerDmsLogDraft((current) => ({ ...current, customer_name: event.target.value }))
                           }
-                          placeholder="Jane Doe / 123456 / 789101"
+                          placeholder="Valentina Alvarado / Opp ID 5595489 / DMS No. 125062"
                         />
                       </label>
                       <label>
@@ -7456,6 +7509,20 @@ export default function App() {
                       <button type="button" onClick={addBdcSalesTrackerDmsLogEntry} disabled={busy === "bdc-dms-create"}>
                         {busy === "bdc-dms-create" ? "Logging..." : "Add To Log"}
                       </button>
+                      <div className="bdc-dms-log-create__parsed" aria-live="polite">
+                        <div className="bdc-dms-log-create__parsed-field">
+                          <span>Customer name</span>
+                          <strong>{trackerDmsLogDraftPreview.customer_name || "Will fill from the pasted line"}</strong>
+                        </div>
+                        <div className="bdc-dms-log-create__parsed-field">
+                          <span>Opp ID</span>
+                          <strong>{trackerDmsLogDraftPreview.opportunity_id || "Will fill from the pasted line"}</strong>
+                        </div>
+                        <div className="bdc-dms-log-create__parsed-field">
+                          <span>DMS No</span>
+                          <strong>{trackerDmsLogDraftPreview.dms_number || "Will fill from the pasted line"}</strong>
+                        </div>
+                      </div>
                     </div>
 
                     <div className="bdc-dms-log-list">
@@ -7550,9 +7617,12 @@ export default function App() {
                             <span>Actions</span>
                           </div>
                           {trackerDmsLog.log_entries.map((entry) => (
-                            <div key={`dms-log-${entry.id}`} className="bdc-dms-log-history-row">
+                            <div key={`dms-log-${entry.id}`} className={`bdc-dms-log-history-row${entry.sold ? " is-sold" : ""}`}>
                               <div className="bdc-dms-log-history-row__cell bdc-dms-log-history-row__timestamp" data-label="Timestamp">
                                 <strong>{dateTimeLabel(entry.logged_at)}</strong>
+                                <span className={`bdc-dms-log-history-row__status${entry.sold ? " is-sold" : ""}`}>
+                                  {entry.sold ? `Sold to tracker${entry.sold_at ? ` ${dateTimeLabel(entry.sold_at)}` : ""}` : "Logged only"}
+                                </span>
                               </div>
                               <label className="bdc-dms-log-history-row__cell" data-label="Customer">
                                 <input
@@ -7605,8 +7675,16 @@ export default function App() {
                                 </button>
                                 <button
                                   type="button"
+                                  className={entry.sold ? "secondary bdc-dms-log-history-row__sold-button is-sold" : "bdc-dms-log-history-row__sold-button"}
+                                  onClick={() => markBdcSalesTrackerDmsLogAsSold(entry.id)}
+                                  disabled={busy === `bdc-dms-sold-${entry.id}` || entry.sold}
+                                >
+                                  {busy === `bdc-dms-sold-${entry.id}` ? "Sending..." : entry.sold ? "Tracker Updated" : "Mark Sold"}
+                                </button>
+                                <button
+                                  type="button"
                                   onClick={() => saveBdcSalesTrackerDmsLogEntry(entry, false, "")}
-                                  disabled={busy === `bdc-dms-save-${entry.id}`}
+                                  disabled={busy === `bdc-dms-save-${entry.id}` || entry.sold}
                                 >
                                   {busy === `bdc-dms-save-${entry.id}` ? "Moving..." : "Move Back"}
                                 </button>
