@@ -786,6 +786,17 @@ def update_board(board_id: int, payload: BoardPatch) -> dict:
     return {"board": board}
 
 
+@app.delete("/api/boards/{board_id}")
+def delete_board(board_id: int) -> dict:
+    store = read_store()
+    board = get_board(store, board_id)
+    deleted_groups = len(board["groups"])
+    deleted_tasks = len(board["tasks"])
+    store["boards"] = [entry for entry in store["boards"] if int(entry["id"]) != int(board_id)]
+    write_store(store)
+    return {"deleted": True, "board_id": board_id, "deleted_groups": deleted_groups, "deleted_tasks": deleted_tasks}
+
+
 @app.post("/api/boards/{board_id}/fields")
 def create_board_field(board_id: int, payload: BoardFieldCreate) -> dict:
     store = read_store()
@@ -867,3 +878,15 @@ def update_task(board_id: int, task_id: int, payload: TaskPatch) -> dict:
         task[key] = value
     write_store(store)
     return {"task": task}
+
+
+@app.delete("/api/boards/{board_id}/tasks/{task_id}")
+def delete_task(board_id: int, task_id: int) -> dict:
+    store = read_store()
+    board = get_board(store, board_id)
+    task = next((entry for entry in board["tasks"] if int(entry["id"]) == int(task_id)), None)
+    if not task:
+        raise HTTPException(status_code=404, detail="Task not found")
+    board["tasks"] = [entry for entry in board["tasks"] if int(entry["id"]) != int(task_id)]
+    write_store(store)
+    return {"deleted": True, "task_id": task_id}
