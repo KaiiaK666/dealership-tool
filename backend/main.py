@@ -115,6 +115,10 @@ SPECIALS_KIA_NEW_URL = "https://www.bertogdenmissionkia.com/new-specials/"
 SPECIALS_MAZDA_NEW_URL = "https://www.bertogdenmissionmazda.com/new-vehicles/"
 SPECIALS_KIA_JIRA_ID = "OGDENMIKIA"
 SPECIALS_KIA_OFFERS_JS_URL = "https://d2dhakgqu1upap.cloudfront.net/specials/offers.js"
+SPECIALS_KIA_DEFAULT_PAGE_ID = "66e84f5a02b762a019f35dfb"
+SPECIALS_MAZDA_ALGOLIA_APP_ID = "1WNYBZLEEN"
+SPECIALS_MAZDA_ALGOLIA_SEARCH_KEY = "e2acb682178e9dcc22d18ecb2ff7d9e4"
+SPECIALS_MAZDA_ALGOLIA_INVENTORY_INDEX = "bertogdenmazdamission_production_inventory"
 SPECIALS_AUTO_REFRESH_SECONDS = 4 * 60 * 60
 SPECIALS_SOURCE_DEFINITIONS: Dict[str, Dict[str, str]] = {
     "kia_new": {
@@ -2082,12 +2086,31 @@ def kia_specials_feed_url(page_id: str, source_url: str) -> str:
 
 
 def build_kia_special_import(source_url: str) -> VehicleSpecialImportIn:
-    page_html = browser_fetch_text(source_url)
-    page_match = re.search(r'class=["\']nepenthe-new-specials["\'][^>]*data-pageid=["\']([^"\']+)["\']', page_html, re.IGNORECASE)
-    if not page_match:
-        raise HTTPException(status_code=502, detail="Could not find the Kia specials feed on the page")
-    page_id = page_match.group(1).strip()
-    feed = browser_fetch_json(kia_specials_feed_url(page_id, source_url))
+    candidate_page_ids = [SPECIALS_KIA_DEFAULT_PAGE_ID]
+    try:
+        page_html = browser_fetch_text(source_url)
+        page_match = re.search(r'class=["\']nepenthe-new-specials["\'][^>]*data-pageid=["\']([^"\']+)["\']', page_html, re.IGNORECASE)
+        if page_match:
+            page_id = page_match.group(1).strip()
+            if page_id and page_id not in candidate_page_ids:
+                candidate_page_ids.insert(0, page_id)
+    except HTTPException:
+        page_html = ""
+
+    feed: Dict[str, Any] = {}
+    last_error: Optional[HTTPException] = None
+    for page_id in candidate_page_ids:
+        try:
+            feed = browser_fetch_json(kia_specials_feed_url(page_id, source_url))
+            if feed.get("groups"):
+                break
+        except HTTPException as exc:
+            last_error = exc
+            continue
+    if not feed.get("groups"):
+        if last_error:
+            raise last_error
+        raise HTTPException(status_code=502, detail="Kia specials feed returned no groups")
     groups = feed.get("groups") or []
     if not groups:
         raise HTTPException(status_code=502, detail="Kia specials feed returned no groups")
@@ -2165,11 +2188,21 @@ def extract_mvn_algolia_settings(page_html: str) -> Dict[str, Any]:
 
 
 def build_mazda_special_import(source_url: str) -> VehicleSpecialImportIn:
-    page_html = browser_fetch_text(source_url)
-    settings = extract_mvn_algolia_settings(page_html)
-    app_id = str(settings.get("appId") or "").strip()
-    api_key = str(settings.get("apiKeySearch") or "").strip()
-    inventory_index = str(settings.get("inventoryIndex") or "").strip()
+    app_id = SPECIALS_MAZDA_ALGOLIA_APP_ID
+    api_key = SPECIALS_MAZDA_ALGOLIA_SEARCH_KEY
+    inventory_index = SPECIALS_MAZDA_ALGOLIA_INVENTORY_INDEX
+    try:
+        page_html = browser_fetch_text(source_url)
+        settings = extract_mvn_algolia_settings(page_html)
+        page_app_id = str(settings.get("appId") or "").strip()
+        page_api_key = str(settings.get("apiKeySearch") or "").strip()
+        page_inventory_index = str(settings.get("inventoryIndex") or "").strip()
+        if page_app_id and page_api_key and page_inventory_index:
+            app_id = page_app_id
+            api_key = page_api_key
+            inventory_index = page_inventory_index
+    except HTTPException:
+        pass
     if not app_id or not api_key or not inventory_index:
         raise HTTPException(status_code=502, detail="Mazda inventory search settings are missing required values")
 
@@ -2296,27 +2329,27 @@ def month_label_from_text(value: Any) -> str:
 
 
 def normalize_special_month_tags() -> None:
-    rows = db_query_all("SELECT id, tag, created_ts FROM specials ORDER BY created_ts DESC, id DESC")
+    rows = db_query_all("SELECT id, title, created_ts FROM specials ORDER BY created_ts DESC, id DESC")
     month_rows: List[Tuple[int, str, str, float]] = []
     counts: Dict[str, int] = {}
     latest_ts: Dict[str, float] = {}
     for row in rows:
-        raw_tag = str(row.get("tag") or "")
-        month_label = month_label_from_text(raw_tag)
+        raw_title = str(row.get("title") or "")
+        month_label = month_label_from_text(raw_title)
         if not month_label:
             continue
         row_id = int(row.get("id") or 0)
         created_ts = float(row.get("created_ts") or 0.0)
-        month_rows.append((row_id, raw_tag, month_label, created_ts))
+        month_rows.append((row_id, raw_title, month_label, created_ts))
         counts[month_label] = counts.get(month_label, 0) + 1
         latest_ts[month_label] = max(latest_ts.get(month_label, 0.0), created_ts)
     if not month_rows:
         return
     target_month = sorted(counts.keys(), key=lambda item: (-counts[item], -latest_ts.get(item, 0.0), item))[0]
-    updates = [(target_month, row_id) for row_id, raw_tag, current_month, _ in month_rows if raw_tag != target_month or current_month != target_month]
+    updates = [(target_month, row_id) for row_id, raw_title, current_month, _ in month_rows if raw_title != target_month or current_month != target_month]
     if updates:
-        for tag_value, row_id in updates:
-            db_execute("UPDATE specials SET tag = ? WHERE id = ?", (tag_value, row_id))
+        for title_value, row_id in updates:
+            db_execute("UPDATE specials SET title = ? WHERE id = ?", (title_value, row_id))
 
 
 def latest_special_feed_import_ts(source_key: str) -> float:
