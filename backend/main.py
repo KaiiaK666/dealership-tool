@@ -1578,22 +1578,21 @@ def build_assignment_notification_subject(assignment_row: Dict[str, Any]) -> str
     return f"New BDC lead: {customer_name} ({lead_store})"
 
 
+def build_assignment_customer_lines(assignment_row: Dict[str, Any]) -> List[str]:
+    customer_name = str(assignment_row.get("customer_name") or "").strip()
+    customer_phone = str(assignment_row.get("customer_phone") or "").strip()
+    lines: List[str] = []
+    if customer_name:
+        lines.append(f"Customer: {customer_name}")
+    if customer_phone:
+        lines.append(f"Phone: {customer_phone}")
+    return lines
+
+
 def build_assignment_notification_body(assignment_row: Dict[str, Any]) -> str:
-    customer_name = str(assignment_row.get("customer_name") or "").strip() or "No customer name entered"
-    customer_phone = str(assignment_row.get("customer_phone") or "").strip() or "No customer phone entered"
-    bdc_agent_name = str(assignment_row.get("bdc_agent_name") or "").strip() or "BDC"
-    lead_store = str(assignment_row.get("lead_store") or assignment_row.get("salesperson_dealership") or "").strip() or "BDC"
     salesperson_name = str(assignment_row.get("salesperson_name") or "").strip() or "Salesperson"
-    assigned_at = str(assignment_row.get("assigned_at") or now_iso())
-    lines = [
-        f"New BDC lead assigned to {salesperson_name}.",
-        "",
-        f"Store: {lead_store}",
-        f"Customer: {customer_name}",
-        f"Phone: {customer_phone}",
-        f"Assigned by: {bdc_agent_name}",
-        f"Assigned at: {assigned_at}",
-    ]
+    lines = [f"A lead has been assigned to {salesperson_name}."]
+    lines.extend(build_assignment_customer_lines(assignment_row))
     if APP_BASE_URL:
         lines.extend(["", f"Open the app: {APP_BASE_URL}"])
     return "\n".join(lines)
@@ -1760,27 +1759,8 @@ def update_bdc_lead_push_config(payload: BdcLeadPushConfigIn) -> BdcLeadPushConf
 
 def build_assignment_whatsapp_message(assignment_row: Dict[str, Any]) -> str:
     salesperson_name = str(assignment_row.get("salesperson_name") or "").strip() or "the salesperson"
-    customer_name = str(assignment_row.get("customer_name") or "").strip()
-    customer_phone = str(assignment_row.get("customer_phone") or "").strip()
-    lead_store = str(assignment_row.get("lead_store") or assignment_row.get("salesperson_dealership") or "").strip()
-    bdc_agent_name = str(assignment_row.get("bdc_agent_name") or "").strip()
-    assigned_at = str(assignment_row.get("assigned_at") or now_iso()).strip()
-
     lines = [f"A lead has been assigned to {salesperson_name}."]
-    if customer_name:
-        lines.append(f"Customer: {customer_name}")
-    else:
-        lines.append("Customer: No customer name entered")
-    if customer_phone:
-        lines.append(f"Phone: {customer_phone}")
-    else:
-        lines.append("Phone: No customer phone entered")
-    if lead_store:
-        lines.append(f"Store: {lead_store}")
-    if bdc_agent_name:
-        lines.append(f"Assigned by: {bdc_agent_name}")
-    if assigned_at:
-        lines.append(f"Assigned at: {assigned_at}")
+    lines.extend(build_assignment_customer_lines(assignment_row))
     return "\n".join(lines)
 
 
