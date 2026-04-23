@@ -2,8 +2,10 @@ import React, { useEffect, useRef, useState } from "react";
 import {
   apiBase,
   adminLogin,
+  adminLogout,
   assignBdcLead,
   cancelAgentLoopRun,
+  COOKIE_ADMIN_SESSION_MARKER,
   clearBdcHistory,
   createAgentLoopRun,
   createFreshUpAnalytics,
@@ -80,6 +82,12 @@ import {
 import CrmCleanupSection from "./CrmCleanupSection.jsx";
 import { ADMIN_RELEASE_HISTORY, LATEST_ADMIN_RELEASE } from "./releaseHistory.js";
 import SalesAnalyticsSection from "./SalesAnalyticsSection.jsx";
+import {
+  STAFF_ROSTER_DEALERSHIPS,
+  buildStaffRosterCsv,
+  normalizeStaffRosterLookupKey,
+  parseStaffRosterCsv,
+} from "./staffRosterCsv.js";
 import "./App.css";
 
 const TABS = [
@@ -122,8 +130,9 @@ const SPECIAL_FEED_SOURCES = [
   {
     key: "used_srp",
     label: "Mission Auto Outlet Top Picks",
-    description: "Pulls the strongest used-car picks from Mission Auto Outlet based on price, miles, and model year.",
-    defaultUrl: "https://www.bertogdenmissionautooutlet.com/",
+    description: "Pulls the strongest Mission Auto Outlet used picks from the live Mission search results page.",
+    defaultUrl:
+      "https://www.bertogdenmissionautooutlet.com/used-vehicles/?q=mission%2520&_dFR%5Btype%5D%5B0%5D=Pre-Owned&_dFR%5Btype%5D%5B1%5D=Certified%2520Pre-Owned",
   },
 ];
 
@@ -194,6 +203,11 @@ const MARKETPLACE_TEMPLATE_DEFAULTS = {
   price_label: "Price",
   cta_text: "Message us today for availability, trade value, and financing options.",
 };
+const TRACKER_NO_APT_OPTION = {
+  name: "NO APT",
+  source: "Missed appointment payout",
+  sortKey: -1,
+};
 const MARKETPLACE_TITLE_TOKEN = "{year} {make} {model}";
 const MARKETPLACE_BUILDER_DEFAULTS = {
   titlePrefix: "",
@@ -241,7 +255,7 @@ const FRESHUP_LINKS_DEFAULTS = {
     {
       dealership: "Kia",
       display_name: "Mission Kia",
-      call_label: "Call us now",
+      call_label: "Call Sales Agent",
       call_url: "tel:(956) 429 8898",
       maps_label: "Google Maps",
       maps_url:
@@ -249,9 +263,9 @@ const FRESHUP_LINKS_DEFAULTS = {
       instagram_url: "https://www.instagram.com/bertogdenkiamission/",
       facebook_url: "https://www.facebook.com/BertOgdenMissionKia",
       youtube_url: "https://www.youtube.com/channel/UCGVeQ1vKWK3bLq396D8P_4A",
-      soft_pull_label: "Quick Qualify",
+      soft_pull_label: "Quick Qualify Application",
       soft_pull_url: "https://www.700dealer.com/QuickQualify/fcb574d194ea477c945ec558b605c0f7-202061",
-      hard_pull_label: "Quick Application",
+      hard_pull_label: "Hard Pull Credit Submission",
       hard_pull_url: "https://www.700dealer.com/QuickQualify/efdbaaebf9444bf18a6e3ca931db75f3-2020120",
       inventory_label: "View Kia New Inventory",
       inventory_url: "https://www.bertogdenmissionkia.com/new-vehicles/",
@@ -266,9 +280,9 @@ const FRESHUP_LINKS_DEFAULTS = {
       instagram_url: "",
       facebook_url: "",
       youtube_url: "",
-      soft_pull_label: "Quick Qualify",
+      soft_pull_label: "Quick Qualify Application",
       soft_pull_url: "https://www.700dealer.com/QuickQualify/3019d192efae4e3684cc49a88095425a-202061",
-      hard_pull_label: "Quick Application",
+      hard_pull_label: "Hard Pull Credit Submission",
       hard_pull_url: "https://www.700dealer.com/QuickQualify/d303d5b01d0f44df9ca5aad9a8a408dd-2019930",
       inventory_label: "View Mazda New Inventory",
       inventory_url: "https://www.bertogdenmissionmazda.com/new-vehicles/",
@@ -283,9 +297,9 @@ const FRESHUP_LINKS_DEFAULTS = {
       instagram_url: "",
       facebook_url: "",
       youtube_url: "",
-      soft_pull_label: "Quick Qualify",
+      soft_pull_label: "Quick Qualify Application",
       soft_pull_url: "https://www.700dealer.com/QuickQualify/88a0b45934bf4a4e8937c8ccb61c463f-202061",
-      hard_pull_label: "Quick Application",
+      hard_pull_label: "Hard Pull Credit Submission",
       hard_pull_url: "https://www.700dealer.com/QuickQualify/6d6d3105f3d3447a95e729875e0f248b-2020120",
       inventory_label: "View Pre-Owned Inventory",
       inventory_url: "https://www.bertogdenmissionautooutlet.com/inventory/used-2021-kia-forte-gt-line-fwd-4d-sedan-3kpf34ad7me310864/",
@@ -366,6 +380,9 @@ const DEFAULT_BDC_LEAD_PUSH_CONFIG = {
   enabled: true,
   chat_name: "Kau 429-8898 (You)",
   runner_ready: false,
+  runner_online: false,
+  runner_label: "Home PC",
+  runner_status_text: "",
   message_type: "whatsapp-self",
 };
 
@@ -380,6 +397,9 @@ function emptySalesAnalyticsDashboard() {
       chat_name: "Kau 429-8898 (You)",
       report_name: "BDC Activity Report Sales",
       runner_ready: false,
+      runner_online: false,
+      runner_label: "Home PC",
+      runner_status_text: "",
       can_trigger: false,
     },
     status: {
@@ -993,9 +1013,85 @@ function formatPhoneInput(value) {
   return `(${digits.slice(0, 3)}) ${digits.slice(3, 6)}-${digits.slice(6)}`;
 }
 
+function digitsOnly(value) {
+  return String(value || "").replace(/\D/g, "");
+}
+
 function phoneHref(value) {
-  const digits = String(value || "").replace(/\D/g, "");
+  const digits = digitsOnly(value);
   return digits ? `tel:${digits}` : "";
+}
+
+function normalizedFreshUpActionLabel(kind, value) {
+  const text = String(value || "").trim();
+  if (kind === "soft_pull") {
+    if (!text || /^quick qualify$/i.test(text) || /^quick qualify application$/i.test(text)) {
+      return "Quick Qualify Application";
+    }
+  }
+  if (kind === "hard_pull") {
+    if (!text || /^quick application$/i.test(text) || /^kia quick application$/i.test(text) || /^hard pull credit submission$/i.test(text)) {
+      return "Hard Pull Credit Submission";
+    }
+  }
+  return text;
+}
+
+function normalizeFreshUpStore(store) {
+  return {
+    ...store,
+    soft_pull_label: normalizedFreshUpActionLabel("soft_pull", store?.soft_pull_label),
+    hard_pull_label: normalizedFreshUpActionLabel("hard_pull", store?.hard_pull_label),
+  };
+}
+
+function normalizeFreshUpLinksConfig(config) {
+  const defaultsByStore = new Map(FRESHUP_LINKS_DEFAULTS.stores.map((store) => [store.dealership, store]));
+  const rawStores = Array.isArray(config?.stores) && config.stores.length ? config.stores : FRESHUP_LINKS_DEFAULTS.stores;
+  const seen = new Set();
+  const stores = rawStores.map((store) => {
+    const dealership = String(store?.dealership || "").trim();
+    seen.add(dealership);
+    return normalizeFreshUpStore({
+      ...(defaultsByStore.get(dealership) || {}),
+      ...store,
+    });
+  });
+  for (const defaultStore of FRESHUP_LINKS_DEFAULTS.stores) {
+    if (!seen.has(defaultStore.dealership)) {
+      stores.push(normalizeFreshUpStore(defaultStore));
+    }
+  }
+  return {
+    ...FRESHUP_LINKS_DEFAULTS,
+    ...(config || {}),
+    stores,
+  };
+}
+
+function escapeVCardValue(value) {
+  return String(value || "")
+    .replace(/\\/g, "\\\\")
+    .replace(/\n/g, "\\n")
+    .replace(/;/g, "\\;")
+    .replace(/,/g, "\\,");
+}
+
+function freshUpContactCardHref(person, store) {
+  const name = String(person?.name || "").trim();
+  const digits = digitsOnly(person?.phone_number);
+  if (!name || !digits) return "";
+  const company = String(store?.display_name || person?.dealership || "Bert Ogden Mission").trim();
+  const lines = [
+    "BEGIN:VCARD",
+    "VERSION:3.0",
+    `FN:${escapeVCardValue(name)}`,
+    `ORG:${escapeVCardValue(company)}`,
+    "TITLE:Sales Specialist",
+    `TEL;TYPE=CELL,VOICE:${digits}`,
+    "END:VCARD",
+  ];
+  return `data:text/vcard;charset=utf-8,${encodeURIComponent(lines.join("\r\n"))}`;
 }
 
 function freshUpCardUrl(salespersonId) {
@@ -1016,11 +1112,12 @@ function freshUpAnalyticsLabel(value) {
     page_view: "Page View",
     submit: "Submit",
     link_click: "Link Click",
-    soft_pull: "Quick Qualify",
-    hard_pull: "Quick Application",
+    soft_pull: "Quick Qualify Application",
+    hard_pull: "Hard Pull Credit Submission",
     inventory: "Inventory",
     maps: "Maps",
     call: "Call",
+    contact_save: "Save Contact",
     instagram: "Instagram",
     facebook: "Facebook",
     youtube: "YouTube",
@@ -1054,12 +1151,57 @@ async function readClipboardText() {
   throw new Error("Clipboard read is not available in this browser.");
 }
 
-function csvSafeValue(value) {
-  const text = String(value ?? "");
-  if (/["\n,]/.test(text)) {
-    return `"${text.replace(/"/g, '""')}"`;
+function buildImportedSalespersonPayload(row, existing) {
+  const dealership = row.dealership || existing?.dealership || "";
+  if (!STAFF_ROSTER_DEALERSHIPS.includes(dealership)) {
+    throw new Error(`Sales row "${row.name}" must use Kia, Mazda, or Outlet in the dealership column.`);
   }
-  return text;
+
+  return {
+    name: row.name,
+    dealership,
+    weekly_days_off: Array.isArray(existing?.weekly_days_off) ? [...existing.weekly_days_off] : [],
+    active: typeof row.active === "boolean" ? row.active : Boolean(existing?.active ?? true),
+    phone_number: row.phoneNumber === null ? String(existing?.phone_number || "") : row.phoneNumber,
+    email: row.email === null ? String(existing?.email || "") : row.email,
+    notify_sms: typeof row.notifySms === "boolean" ? row.notifySms : Boolean(existing?.notify_sms),
+    notify_email: typeof row.notifyEmail === "boolean" ? row.notifyEmail : Boolean(existing?.notify_email),
+  };
+}
+
+function buildImportedBdcAgentPayload(row, existing) {
+  return {
+    name: row.name,
+    active: typeof row.active === "boolean" ? row.active : Boolean(existing?.active ?? true),
+  };
+}
+
+function salespersonMatchesPayload(existing, payload) {
+  return (
+    String(existing?.name || "") === payload.name &&
+    String(existing?.dealership || "") === payload.dealership &&
+    String(existing?.phone_number || "") === payload.phone_number &&
+    String(existing?.email || "") === payload.email &&
+    Boolean(existing?.notify_sms) === Boolean(payload.notify_sms) &&
+    Boolean(existing?.notify_email) === Boolean(payload.notify_email) &&
+    Boolean(existing?.active) === Boolean(payload.active)
+  );
+}
+
+function bdcAgentMatchesPayload(existing, payload) {
+  return String(existing?.name || "") === payload.name && Boolean(existing?.active) === Boolean(payload.active);
+}
+
+function formatStaffRosterImportSummary(summary) {
+  const parts = [
+    `${summary.updated} updated`,
+    `${summary.created} created`,
+    `${summary.unchanged} unchanged`,
+  ];
+  if (summary.failed) {
+    parts.push(`${summary.failed} failed`);
+  }
+  return parts.join(", ");
 }
 
 function downloadTextFile(filename, content, mimeType = "text/plain;charset=utf-8") {
@@ -1880,7 +2022,8 @@ export default function App() {
   const [specialsConfigDraft, setSpecialsConfigDraft] = useState({ used_srp_url: "" });
   const [specialsImportPayload, setSpecialsImportPayload] = useState("");
   const [specialsImportStatus, setSpecialsImportStatus] = useState("");
-  const [staffExportStatus, setStaffExportStatus] = useState("");
+  const [staffRosterFeedback, setStaffRosterFeedback] = useState(null);
+  const [staffImportKey, setStaffImportKey] = useState(0);
   const [selectedSpecialId, setSelectedSpecialId] = useState(null);
   const [bdcState, setBdcState] = useState(null);
   const [bdcDistribution, setBdcDistribution] = useState({ mode: "franchise" });
@@ -1915,7 +2058,7 @@ export default function App() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [lastAssignment, setLastAssignment] = useState(null);
-  const [adminToken, setAdminToken] = useState(() => localStorage.getItem("dealer_tool_admin") || "");
+  const [adminToken, setAdminToken] = useState(COOKIE_ADMIN_SESSION_MARKER);
   const [adminSession, setAdminSession] = useState(null);
   const [login, setLogin] = useState({ username: "", password: "" });
   const [agentLoopConfig, setAgentLoopConfig] = useState({
@@ -1990,7 +2133,7 @@ export default function App() {
   const [freshUpLog, setFreshUpLog] = useState({ total: 0, entries: [] });
   const [freshUpStatus, setFreshUpStatus] = useState("");
   const freshUpCopiedAt = "";
-  const [freshUpLinksConfig, setFreshUpLinksConfig] = useState(FRESHUP_LINKS_DEFAULTS);
+  const [freshUpLinksConfig, setFreshUpLinksConfig] = useState(() => normalizeFreshUpLinksConfig(FRESHUP_LINKS_DEFAULTS));
   const [freshUpAnalytics, setFreshUpAnalytics] = useState(FRESHUP_ANALYTICS_DEFAULTS);
   const freshUpPageViewRef = useRef("");
   const [marketplaceGuideStatus, setMarketplaceGuideStatus] = useState("");
@@ -2000,6 +2143,7 @@ export default function App() {
   const [specialForm, setSpecialForm] = useState({ editingId: null, title: "", tag: "", file: null });
   const [trafficUploadKey, setTrafficUploadKey] = useState(0);
   const [specialUploadKey, setSpecialUploadKey] = useState(0);
+  const staffImportInputRef = useRef(null);
 
   const activeSales = salespeople.filter((person) => person.active);
   const isBdcGlobal = bdcDistribution.mode === "global";
@@ -2148,6 +2292,12 @@ export default function App() {
   });
   const freshUpPrimaryStore = freshUpStoreCards[0] || null;
   const freshUpPrimaryBrand = freshUpStoreBrandMeta(freshUpPrimaryStore?.dealership);
+  const freshUpSalespersonPhoneText = formatPhoneInput(freshUpAssignedSalesperson?.phone_number || "");
+  const freshUpSalespersonPhoneHref = phoneHref(freshUpAssignedSalesperson?.phone_number || "");
+  const freshUpSalespersonContactHref = freshUpContactCardHref(freshUpAssignedSalesperson, freshUpPrimaryStore);
+  const freshUpSalespersonContactLabel = freshUpAssignedSalesperson
+    ? `Add ${freshUpAssignedSalesperson.name} as Contact`
+    : "Add salesperson as contact";
   const freshUpConversionRate = freshUpAnalytics.page_views
     ? Math.round((freshUpAnalytics.submissions / freshUpAnalytics.page_views) * 100)
     : 0;
@@ -2195,6 +2345,7 @@ export default function App() {
   };
   const trackerFocusNotes = bdcSalesTracker?.focus_notes || [];
   const trackerAptSetUnderOptions = [
+    TRACKER_NO_APT_OPTION,
     ...bdcAgents.map((agent) => ({
       name: String(agent.name || "").trim(),
       source: agent.active ? "BDC" : "BDC inactive",
@@ -2221,7 +2372,9 @@ export default function App() {
       if (leftSort !== rightSort) return leftSort - rightSort;
       return String(left.name || "").localeCompare(String(right.name || ""), undefined, { sensitivity: "base" });
     });
-  const trackerAptSetUnderOptionLabels = new Set(trackerAptSetUnderOptions.map((option) => option.name));
+  const trackerAptSetUnderAutoFillLabels = new Set(
+    trackerAptSetUnderOptions.filter((option) => option.name !== TRACKER_NO_APT_OPTION.name).map((option) => option.name)
+  );
   const trackerCurrentDmsCount = trackerDmsLog.current_entries.length;
   const trackerLoggedDmsCount = trackerDmsLog.log_entries.length;
   const trackerBehindByValue = Number(bdcSalesTracker?.summary?.behind_by || 0);
@@ -2693,7 +2846,7 @@ export default function App() {
 
   async function refreshFreshUpLinks() {
     const data = await getFreshUpLinks();
-    setFreshUpLinksConfig(data);
+    setFreshUpLinksConfig(normalizeFreshUpLinksConfig(data));
     setResourceLoadState((current) => ({ ...current, freshUpLinks: true }));
   }
 
@@ -3299,7 +3452,7 @@ export default function App() {
     setBdcSalesTrackerFocusNoteDraft(nextNote?.notes || "");
     setBdcSalesTrackerDmsLogDraft((current) => {
       const currentApt = String(current.apt_set_under || "").trim();
-      const resolvedApt = !currentApt || trackerAptSetUnderOptionLabels.has(currentApt) ? nextOption?.label || "" : currentApt;
+      const resolvedApt = !currentApt || trackerAptSetUnderAutoFillLabels.has(currentApt) ? nextOption?.label || "" : currentApt;
       if (current.apt_set_under === resolvedApt) {
         return current;
       }
@@ -3308,7 +3461,7 @@ export default function App() {
         apt_set_under: resolvedApt,
       };
     });
-  }, [bdcSalesTracker?.month, trackerFocusNotes, trackerFocusOptions, trackerAptSetUnderOptionLabels]);
+  }, [bdcSalesTracker?.month, trackerFocusNotes, trackerFocusOptions, trackerAptSetUnderAutoFillLabels]);
 
   useEffect(() => {
     setBdcSalesTrackerEntrySearch({ field: "all", value: "" });
@@ -3457,7 +3610,7 @@ export default function App() {
       try {
         const data = await getFreshUpLinks();
         if (!active) return;
-        setFreshUpLinksConfig(data);
+        setFreshUpLinksConfig(normalizeFreshUpLinksConfig(data));
         setResourceLoadState((current) => ({ ...current, freshUpLinks: true }));
       } catch (errorValue) {
         if (active) setError(errText(errorValue));
@@ -3574,7 +3727,8 @@ export default function App() {
 
   useEffect(() => {
     if (tab !== "salesAnalytics") return undefined;
-    if (String(salesAnalyticsDashboard?.status?.state || "").toLowerCase() !== "running") return undefined;
+    const statusState = String(salesAnalyticsDashboard?.status?.state || "").trim().toLowerCase();
+    if (!["queued", "running"].includes(statusState)) return undefined;
     const intervalId = window.setInterval(() => {
       refreshSalesAnalyticsDashboard({ quiet: true, variant: salesAnalyticsVariant }).catch(() => {});
     }, 15000);
@@ -3620,9 +3774,11 @@ export default function App() {
     }
     const anyRunning = SALES_ANALYTICS_VARIANTS.some(
       (variant) =>
-        String(salesAnalyticsAdminDashboards?.[variant.key]?.status?.state || "")
-          .trim()
-          .toLowerCase() === "running"
+        ["queued", "running"].includes(
+          String(salesAnalyticsAdminDashboards?.[variant.key]?.status?.state || "")
+            .trim()
+            .toLowerCase()
+        )
     );
     if (!anyRunning) {
       return undefined;
@@ -3838,7 +3994,6 @@ export default function App() {
         if (!active) return;
         setAdminToken("");
         setAdminSession(null);
-        localStorage.removeItem("dealer_tool_admin");
       }
     };
     check();
@@ -3907,9 +4062,8 @@ export default function App() {
     setError("");
     try {
       const session = await adminLogin(login);
-      setAdminToken(session.token);
+      setAdminToken(COOKIE_ADMIN_SESSION_MARKER);
       setAdminSession(session);
-      localStorage.setItem("dealer_tool_admin", session.token);
     } catch (errorValue) {
       setError(errText(errorValue));
     } finally {
@@ -3917,10 +4071,15 @@ export default function App() {
     }
   }
 
-  function logout() {
-    setAdminToken("");
-    setAdminSession(null);
-    localStorage.removeItem("dealer_tool_admin");
+  async function logout() {
+    try {
+      await adminLogout(adminToken);
+    } catch {
+      // Ignore logout transport failures and clear local admin state either way.
+    } finally {
+      setAdminToken("");
+      setAdminSession(null);
+    }
   }
 
   async function saveSalesperson(person) {
@@ -4576,46 +4735,133 @@ export default function App() {
 
   function exportStaffRosterCsv() {
     try {
-      const rows = [
-        ["staff_type", "name", "department", "dealership", "phone_number", "email", "text_alerts", "email_alerts", "active"],
-        ...[...salespeople]
-          .sort(
-            (left, right) =>
-              String(left.dealership || "").localeCompare(String(right.dealership || ""), undefined, { sensitivity: "base" }) ||
-              String(left.name || "").localeCompare(String(right.name || ""), undefined, { sensitivity: "base" })
-          )
-          .map((person) => [
-            "Sales",
-            person.name,
-            "Sales",
-            person.dealership,
-            person.phone_number || "",
-            person.email || "",
-            Boolean(person.notify_sms) ? "Yes" : "No",
-            Boolean(person.notify_email) ? "Yes" : "No",
-            Boolean(person.active) ? "Yes" : "No",
-          ]),
-        ...[...bdcAgents]
-          .sort((left, right) => String(left.name || "").localeCompare(String(right.name || ""), undefined, { sensitivity: "base" }))
-          .map((agent) => [
-            "BDC",
-            agent.name,
-            "BDC",
-            "",
-            "",
-            "",
-            "",
-            "",
-            Boolean(agent.active) ? "Yes" : "No",
-          ]),
-      ];
-      const csv = rows.map((row) => row.map(csvSafeValue).join(",")).join("\n");
+      const csv = buildStaffRosterCsv({ salespeople, bdcAgents });
+      const totalRows = salespeople.length + bdcAgents.length;
       downloadTextFile(`staff-roster-${todayDateValue()}.csv`, csv, "text/csv;charset=utf-8");
-      setStaffExportStatus(`Downloaded ${rows.length - 1} staff rows.`);
+      setStaffRosterFeedback({
+        kind: "success",
+        message: `Downloaded ${totalRows} staff rows. Edit the same CSV in Excel and upload it here to bulk sync the roster.`,
+      });
       setError("");
     } catch (errorValue) {
       setError(errText(errorValue));
     }
+  }
+
+  function openStaffRosterImportPicker() {
+    if (busy === "staff-import") return;
+    staffImportInputRef.current?.click();
+  }
+
+  async function importStaffRosterCsvFile(file) {
+    if (!adminToken) {
+      setStaffRosterFeedback({ kind: "error", message: "Sign in as admin first." });
+      return;
+    }
+
+    setBusy("staff-import");
+    setError("");
+    setStaffRosterFeedback(null);
+
+    try {
+      const text = await file.text();
+      const rows = parseStaffRosterCsv(text);
+      if (!rows.length) {
+        throw new Error("No staff rows were found in the CSV.");
+      }
+
+      const salesById = new Map(salespeople.map((person) => [Number(person.id), person]));
+      const salesByName = new Map(salespeople.map((person) => [normalizeStaffRosterLookupKey(person.name), person]));
+      const bdcById = new Map(bdcAgents.map((agent) => [Number(agent.id), agent]));
+      const bdcByName = new Map(bdcAgents.map((agent) => [normalizeStaffRosterLookupKey(agent.name), agent]));
+      const seenTargets = new Set();
+      const summary = { updated: 0, created: 0, unchanged: 0, failed: 0 };
+      const failures = [];
+
+      for (const row of rows) {
+        const lookupKey = `${row.staffType}:${row.recordId || normalizeStaffRosterLookupKey(row.name)}`;
+        if (seenTargets.has(lookupKey)) {
+          throw new Error(`CSV includes "${row.name}" more than once for ${row.staffType}. Keep one row per staff record.`);
+        }
+        seenTargets.add(lookupKey);
+      }
+
+      for (const row of rows) {
+        try {
+          if (row.staffType === "Sales") {
+            const existing =
+              (row.recordId ? salesById.get(Number(row.recordId)) : null) || salesByName.get(normalizeStaffRosterLookupKey(row.name));
+            const payload = buildImportedSalespersonPayload(row, existing);
+
+            if (existing && salespersonMatchesPayload(existing, payload)) {
+              summary.unchanged += 1;
+              continue;
+            }
+
+            const saved = existing
+              ? await updateSalesperson(adminToken, existing.id, payload)
+              : await createSalesperson(adminToken, payload);
+            const priorNameKey = existing ? normalizeStaffRosterLookupKey(existing.name) : "";
+            if (priorNameKey) {
+              salesByName.delete(priorNameKey);
+            }
+            salesById.set(Number(saved.id), saved);
+            salesByName.set(normalizeStaffRosterLookupKey(saved.name), saved);
+            summary[existing ? "updated" : "created"] += 1;
+            continue;
+          }
+
+          const existing =
+            (row.recordId ? bdcById.get(Number(row.recordId)) : null) || bdcByName.get(normalizeStaffRosterLookupKey(row.name));
+          const payload = buildImportedBdcAgentPayload(row, existing);
+
+          if (existing && bdcAgentMatchesPayload(existing, payload)) {
+            summary.unchanged += 1;
+            continue;
+          }
+
+          const saved = existing ? await updateBdcAgent(adminToken, existing.id, payload) : await createBdcAgent(adminToken, payload);
+          const priorNameKey = existing ? normalizeStaffRosterLookupKey(existing.name) : "";
+          if (priorNameKey) {
+            bdcByName.delete(priorNameKey);
+          }
+          bdcById.set(Number(saved.id), saved);
+          bdcByName.set(normalizeStaffRosterLookupKey(saved.name), saved);
+          summary[existing ? "updated" : "created"] += 1;
+        } catch (errorValue) {
+          summary.failed += 1;
+          if (failures.length < 5) {
+            failures.push(`Row ${row.rowNumber} (${row.staffType} ${row.name}): ${errText(errorValue)}`);
+          }
+        }
+      }
+
+      await refresh();
+
+      const baseMessage = `${file.name}: ${formatStaffRosterImportSummary(summary)}.`;
+      if (summary.failed) {
+        setStaffRosterFeedback({
+          kind: "error",
+          message: failures.length ? `${baseMessage} ${failures.join(" ")}` : baseMessage,
+        });
+      } else {
+        setStaffRosterFeedback({
+          kind: "success",
+          message: `${baseMessage} The live roster now matches the uploaded CSV.`,
+        });
+      }
+    } catch (errorValue) {
+      setStaffRosterFeedback({ kind: "error", message: errText(errorValue) });
+    } finally {
+      setBusy("");
+      setStaffImportKey((current) => current + 1);
+    }
+  }
+
+  async function handleStaffRosterImportChange(event) {
+    const file = event.target.files?.[0] || null;
+    if (!file) return;
+    await importStaffRosterCsvFile(file);
   }
 
   function resetSpecialForm() {
@@ -4803,8 +5049,9 @@ export default function App() {
     setBusy("freshup-links");
     setError("");
     try {
-      const updated = await updateFreshUpLinks(adminToken, freshUpLinksConfig);
-      setFreshUpLinksConfig(updated);
+      const nextConfig = normalizeFreshUpLinksConfig(freshUpLinksConfig);
+      const updated = await updateFreshUpLinks(adminToken, nextConfig);
+      setFreshUpLinksConfig(normalizeFreshUpLinksConfig(updated));
       setFreshUpStatus("Freshup customer page saved.");
       setResourceLoadState((current) => ({ ...current, freshUpLinks: true }));
     } catch (errorValue) {
@@ -4826,10 +5073,12 @@ export default function App() {
   const runningAdminSalesAnalytics = SALES_ANALYTICS_VARIANTS.map((variant) => {
     const dashboard = salesAnalyticsAdminDashboards[variant.key] || emptySalesAnalyticsDashboard();
     const status = dashboard?.status || {};
-    if (String(status.state || "").trim().toLowerCase() !== "running") return null;
+    const state = String(status.state || "").trim().toLowerCase();
+    if (!["queued", "running"].includes(state)) return null;
     return {
       key: variant.key,
       label: variant.label,
+      state,
       startedAt: status.started_at,
       message: status.message,
     };
@@ -9231,18 +9480,25 @@ export default function App() {
           <section className={`stack freshup-shell ${freshUpCardMode ? "freshup-shell--card" : ""}`}>
             {!freshUpCardMode ? (
               <div className="panel freshup-hero">
-                <div>
+                <div className="freshup-hero__copy">
                   <span className="eyebrow">Freshup Log</span>
-                  <h2>Fast contact capture for the lot.</h2>
+                  <h2>Choose the salesperson first, then log the customer fast.</h2>
                   <p>
-                    This is now a lightweight mobile-first log. Pick the salesperson, capture the customer name and phone,
-                    and everything lands in the running log below.
+                    This page is built for quick lot use. Pick the rep, enter the customer name and phone, save the freshup,
+                    and keep the tap-page links and live log underneath.
                   </p>
                 </div>
-                <div className="freshup-hero__status">
-                  <span>Ready state</span>
-                  <strong>{freshUpFilledCount}/3 filled</strong>
-                  <small>Optimized for quick desk or lot entry.</small>
+                <div className="freshup-hero__status-grid">
+                  <div className="freshup-hero__status">
+                    <span>Ready to log</span>
+                    <strong>{freshUpFilledCount}/3 filled</strong>
+                    <small>Salesperson, customer name, and phone are the only required steps.</small>
+                  </div>
+                  <div className="freshup-hero__status freshup-hero__status--soft">
+                    <span>Current rep</span>
+                    <strong>{freshUpAssignedSalesperson?.name || "Choose first"}</strong>
+                    <small>{freshUpAssignedSalesperson?.dealership || `${freshUpLog.total} freshups logged so far.`}</small>
+                  </div>
                 </div>
               </div>
             ) : null}
@@ -9281,13 +9537,53 @@ export default function App() {
                       <strong>{freshUpPrimaryStore?.display_name || "Bert Ogden Mission"}</strong>
                       <span>{freshUpLinksConfig.form_subtitle}</span>
                     </div>
+                    <div className="freshup-agent-actions">
+                      {freshUpSalespersonPhoneHref ? (
+                        <a
+                          className="freshup-link-btn freshup-link-btn--blue"
+                          href={freshUpSalespersonPhoneHref}
+                          onClick={() =>
+                            trackFreshUpEvent({
+                              eventType: "link_click",
+                              linkType: "call",
+                              targetUrl: freshUpSalespersonPhoneHref,
+                              storeDealership: freshUpAssignedSalesperson?.dealership || freshUpPrimaryStore?.dealership || "",
+                            })
+                          }
+                        >
+                          Call {freshUpAssignedSalesperson?.name || "Sales Agent"}
+                        </a>
+                      ) : null}
+                      {freshUpSalespersonContactHref ? (
+                        <a
+                          className="freshup-link-btn freshup-link-btn--outline"
+                          href={freshUpSalespersonContactHref}
+                          onClick={() =>
+                            trackFreshUpEvent({
+                              eventType: "link_click",
+                              linkType: "contact_save",
+                              targetUrl: freshUpSalespersonContactHref,
+                              storeDealership: freshUpAssignedSalesperson?.dealership || freshUpPrimaryStore?.dealership || "",
+                            })
+                          }
+                        >
+                          {freshUpSalespersonContactLabel}
+                        </a>
+                      ) : null}
+                    </div>
+                    {freshUpAssignedSalesperson && !freshUpSalespersonPhoneHref ? (
+                      <small className="freshup-agent-actions__note">
+                        Add a phone number for {freshUpAssignedSalesperson.name} in Admin &gt; Staff to unlock call and contact save.
+                      </small>
+                    ) : null}
                   </div>
                 ) : null}
                 {!freshUpCardMode ? (
                   <div className="freshup-capture__header">
                     <div>
                       <span className="eyebrow">Quick Entry</span>
-                      <h3>Fresh up input</h3>
+                      <h3>Salesperson-first freshup capture</h3>
+                      <small>Pick the rep first, then save the customer in one pass.</small>
                     </div>
                     <button type="button" className="secondary" onClick={resetFreshUpForm}>
                       Clear
@@ -9301,53 +9597,104 @@ export default function App() {
                   </div>
                 )}
 
-                <div className="freshup-form">
-                  <label>
-                    <span>{freshUpCardMode ? "Your Name" : "Customer Name"}</span>
-                    <input
-                      value={freshUpForm.customerName}
-                      onChange={(event) => setFreshUpForm((current) => ({ ...current, customerName: event.target.value }))}
-                      placeholder={freshUpCardMode ? "Enter your name" : "Full name"}
-                      autoComplete="name"
-                    />
-                  </label>
-
-                  <label>
-                    <span>{freshUpCardMode ? "Best Phone Number" : "Phone Number"}</span>
-                    <input
-                      type="tel"
-                      inputMode="tel"
-                      autoComplete="tel"
-                      value={freshUpForm.phone}
-                      onChange={(event) =>
-                        setFreshUpForm((current) => ({ ...current, phone: formatPhoneInput(event.target.value) }))
-                      }
-                      placeholder={freshUpCardMode ? "(956) 555-1234" : "(956) 555-1234"}
-                    />
-                  </label>
-
+                <div className={`freshup-form ${freshUpCardMode ? "freshup-form--card" : "freshup-form--desk"}`}>
                   {freshUpCardMode ? (
-                    <div className="freshup-lockbox freshup-lockbox--customer">
-                      <strong>{freshUpAssignedSalesperson?.name || "Salesperson not set"}</strong>
-                      <small>{freshUpAssignedSalesperson?.dealership || "This NFC link needs a salesperson selected."}</small>
-                    </div>
+                    <>
+                      <label>
+                        <span>Your Name</span>
+                        <input
+                          value={freshUpForm.customerName}
+                          onChange={(event) => setFreshUpForm((current) => ({ ...current, customerName: event.target.value }))}
+                          placeholder="Enter your name"
+                          autoComplete="name"
+                        />
+                      </label>
+                      <label>
+                        <span>Best Phone Number</span>
+                        <input
+                          type="tel"
+                          inputMode="tel"
+                          autoComplete="tel"
+                          value={freshUpForm.phone}
+                          onChange={(event) =>
+                            setFreshUpForm((current) => ({ ...current, phone: formatPhoneInput(event.target.value) }))
+                          }
+                          placeholder="(956) 555-1234"
+                        />
+                      </label>
+                      <div className="freshup-lockbox freshup-lockbox--customer">
+                        <strong>{freshUpAssignedSalesperson?.name || "Salesperson not set"}</strong>
+                        <small>{freshUpAssignedSalesperson?.dealership || "This NFC link needs a salesperson selected."}</small>
+                      </div>
+                    </>
                   ) : (
-                    <label>
-                      <span>Salesperson</span>
-                      <select value={resolvedFreshUpSalespersonId} onChange={(event) => applyFreshUpSalespersonSelection(event.target.value)}>
-                        <option value="">Select salesperson</option>
-                        {activeSales.map((person) => (
-                          <option key={`freshup-person-${person.id}`} value={person.id}>
-                            {person.name} ({person.dealership})
-                          </option>
-                        ))}
-                      </select>
-                      <small>
-                        {freshUpAssignedSalesperson
-                          ? `Selected ${freshUpAssignedSalesperson.name} (${freshUpAssignedSalesperson.dealership}).`
-                          : "Pick the salesperson before logging the fresh up."}
-                      </small>
-                    </label>
+                    <>
+                      <label className="freshup-form__field freshup-form__field--salesperson">
+                        <span>Salesperson</span>
+                        <select value={resolvedFreshUpSalespersonId} onChange={(event) => applyFreshUpSalespersonSelection(event.target.value)}>
+                          <option value="">Select salesperson</option>
+                          {activeSales.map((person) => (
+                            <option key={`freshup-person-${person.id}`} value={person.id}>
+                              {person.name} ({person.dealership})
+                            </option>
+                          ))}
+                        </select>
+                        <small>
+                          {freshUpAssignedSalesperson
+                            ? `Selected ${freshUpAssignedSalesperson.name} (${freshUpAssignedSalesperson.dealership}).`
+                            : "Pick the salesperson before logging the fresh up."}
+                        </small>
+                      </label>
+                      {freshUpAssignedSalesperson ? (
+                        <div className="freshup-salesperson-strip">
+                          <div className="freshup-salesperson-strip__copy">
+                            <span className="eyebrow">Assigned salesperson</span>
+                            <strong>{freshUpAssignedSalesperson.name}</strong>
+                            <small>
+                              {freshUpAssignedSalesperson.dealership}
+                              {freshUpSalespersonPhoneText ? ` · ${freshUpSalespersonPhoneText}` : " · No phone saved yet"}
+                            </small>
+                          </div>
+                          <div className="freshup-salesperson-strip__actions">
+                            {freshUpSalespersonPhoneHref ? (
+                              <a className="freshup-link-btn freshup-link-btn--blue" href={freshUpSalespersonPhoneHref}>
+                                Call {freshUpAssignedSalesperson.name}
+                              </a>
+                            ) : null}
+                            {freshUpSalespersonContactHref ? (
+                              <a
+                                className="freshup-link-btn freshup-link-btn--outline"
+                                href={freshUpSalespersonContactHref}
+                              >
+                                {freshUpSalespersonContactLabel}
+                              </a>
+                            ) : null}
+                          </div>
+                        </div>
+                      ) : null}
+                      <label className="freshup-form__field">
+                        <span>Customer Name</span>
+                        <input
+                          value={freshUpForm.customerName}
+                          onChange={(event) => setFreshUpForm((current) => ({ ...current, customerName: event.target.value }))}
+                          placeholder="Full name"
+                          autoComplete="name"
+                        />
+                      </label>
+                      <label className="freshup-form__field">
+                        <span>Phone Number</span>
+                        <input
+                          type="tel"
+                          inputMode="tel"
+                          autoComplete="tel"
+                          value={freshUpForm.phone}
+                          onChange={(event) =>
+                            setFreshUpForm((current) => ({ ...current, phone: formatPhoneInput(event.target.value) }))
+                          }
+                          placeholder="(956) 555-1234"
+                        />
+                      </label>
+                    </>
                   )}
                   <div className="freshup-actions">
                     <button
@@ -9372,7 +9719,7 @@ export default function App() {
                 <h3>{freshUpCardMode ? freshUpPrimaryStore?.display_name || freshUpLinksConfig.page_title : "Program one link per salesperson"}</h3>
                 <p>
                   {freshUpCardMode
-                    ? "Use the links below for financing, inventory, maps, or a direct call."
+                    ? "Use the links below for financing, inventory, maps, and store socials after you save your contact info."
                     : "Put this link on the NFC business card. When a customer taps, it opens a customer-facing landing page with contact capture at the top and the right links underneath."}
                 </p>
                 {!freshUpCardMode ? (
@@ -9471,22 +9818,6 @@ export default function App() {
                               }
                             >
                               {store.maps_label || "Google Maps"}
-                            </a>
-                          ) : null}
-                          {store.call_url ? (
-                            <a
-                              className="freshup-link-btn freshup-link-btn--blue"
-                              href={store.call_url}
-                              onClick={() =>
-                                trackFreshUpEvent({
-                                  eventType: "link_click",
-                                  linkType: "call",
-                                  targetUrl: store.call_url,
-                                  storeDealership: store.dealership,
-                                })
-                              }
-                            >
-                              {store.call_label || "Call Now"}
                             </a>
                           ) : null}
                           <a
@@ -10368,10 +10699,10 @@ export default function App() {
                           <strong>{bdcLeadPushConfig.chat_name || "Self chat"}</strong>
                           <small>
                             {!bdcLeadPushConfig.runner_ready
-                              ? "The local WhatsApp Web sender is not ready on this machine yet."
-                              : bdcLeadPushConfig.enabled
-                                ? "BDC Assign is set to push new leads into your self chat."
-                                : "Lead push is paused, but Twilio and email stay off."}
+                              ? bdcLeadPushConfig.runner_status_text || "The WhatsApp bridge is not ready yet."
+                              : !bdcLeadPushConfig.enabled
+                                ? "Lead push is paused, but Twilio and email stay off."
+                                : bdcLeadPushConfig.runner_status_text || "BDC Assign is set to push new leads into your self chat."}
                           </small>
                         </div>
                       </div>
@@ -10395,10 +10726,12 @@ export default function App() {
                       </div>
                       <div className="notice">
                         {!bdcLeadPushConfig.runner_ready
-                          ? "Keep the controlled Chrome profile signed into WhatsApp Web on this machine, then refresh the status here."
-                          : bdcLeadPushConfig.enabled
-                            ? `Every new BDC assignment will push only to ${bdcLeadPushConfig.chat_name || "your self chat"}.`
-                            : "Lead push is paused until you turn it back on."}
+                          ? bdcLeadPushConfig.runner_status_text || "Keep the controlled Chrome profile signed into WhatsApp Web on this machine, then refresh the status here."
+                          : !bdcLeadPushConfig.enabled
+                            ? "Lead push is paused until you turn it back on."
+                            : bdcLeadPushConfig.runner_status_text
+                              ? `Every new BDC assignment will push only to ${bdcLeadPushConfig.chat_name || "your self chat"}. ${bdcLeadPushConfig.runner_status_text}`
+                              : `Every new BDC assignment will push only to ${bdcLeadPushConfig.chat_name || "your self chat"}.`}
                       </div>
                       <div className="notification-setup-list">
                         <div>
@@ -10418,16 +10751,35 @@ export default function App() {
                           <span className="eyebrow">Salespeople by store</span>
                           <h3>Roster columns</h3>
                           <p className="admin-note">
-                            Edit the live roster here, then export the current staff list to CSV when you need a clean copy.
+                            Edit the live roster here, or export the staff CSV, update it quickly in Excel, and upload the
+                            same file to bulk sync names, phone numbers, emails, alerts, and active status back into the app.
                           </p>
                         </div>
                         <div className="controls">
+                          <input
+                            key={staffImportKey}
+                            ref={staffImportInputRef}
+                            type="file"
+                            accept=".csv,text/csv"
+                            hidden
+                            onChange={handleStaffRosterImportChange}
+                          />
+                          <button
+                            type="button"
+                            className="secondary"
+                            onClick={openStaffRosterImportPicker}
+                            disabled={busy === "staff-import"}
+                          >
+                            {busy === "staff-import" ? "Importing..." : "Import Staff CSV"}
+                          </button>
                           <button type="button" className="secondary" onClick={exportStaffRosterCsv}>
                             Export Staff CSV
                           </button>
                         </div>
                       </div>
-                      {staffExportStatus ? <div className="notice success">{staffExportStatus}</div> : null}
+                      {staffRosterFeedback ? (
+                        <div className={`notice ${staffRosterFeedback.kind}`}>{staffRosterFeedback.message}</div>
+                      ) : null}
                       <div className="store-roster-grid">
                         {dealershipColumns.map((group) => (
                           <section key={group.dealership} className="store-column">
@@ -11761,18 +12113,29 @@ export default function App() {
                       </div>
                       {runningAdminSalesAnalytics.length ? (
                         <div className="sales-automation-admin-running" role="status" aria-live="polite">
-                          <span className="eyebrow">Pull in progress</span>
-                          <h4>Wait while the report pull finishes</h4>
+                          <span className="eyebrow">Pull status</span>
+                          <h4>Queued and running pulls stay synced here</h4>
                           <p>
-                            The website refreshes automatically when each new snapshot lands. Most pulls show up within{" "}
+                            The website refreshes automatically when each queued or running snapshot moves forward. Most pulls show up within{" "}
                             {SALES_ANALYTICS_PULL_WINDOW_LABEL}.
                           </p>
                           <div className="sales-automation-admin-running__list">
                             {runningAdminSalesAnalytics.map((item) => (
                               <article key={`sales-analytics-running-${item.key}`} className="sales-automation-admin-running__item">
                                 <strong>{item.label}</strong>
-                                <span>{item.startedAt ? `Started ${dateTimeLabel(item.startedAt)}` : "Starting now"}</span>
-                                <small>{item.message || "DealerSocket scrape, WhatsApp send, and dashboard refresh are running now."}</small>
+                                <span>
+                                  {item.state === "queued"
+                                    ? "Queued for home PC"
+                                    : item.startedAt
+                                      ? `Started ${dateTimeLabel(item.startedAt)}`
+                                      : "Starting now"}
+                                </span>
+                                <small>
+                                  {item.message ||
+                                    (item.state === "queued"
+                                      ? "Waiting for the home-PC bridge to claim the request."
+                                      : "DealerSocket scrape, WhatsApp send, and dashboard refresh are running now.")}
+                                </small>
                               </article>
                             ))}
                           </div>
@@ -11785,7 +12148,9 @@ export default function App() {
                           const config = dashboard?.config || {};
                           const status = dashboard?.status || {};
                           const latest = dashboard?.latest || null;
+                          const statusState = String(status.state || "").trim().toLowerCase();
                           const isRunning = busy === `admin-sales-analytics-run:${variant.key}`;
+                          const isJobActive = isRunning || ["queued", "running"].includes(statusState);
                           return (
                             <article key={`admin-sales-analytics-${variant.key}`} className="sales-automation-admin-card inset-panel">
                               <div className="sales-automation-admin-card__copy">
@@ -11806,9 +12171,15 @@ export default function App() {
                               <button
                                 type="button"
                                 onClick={() => triggerAdminSalesAnalyticsRun(variant.key)}
-                                disabled={isRunning || salesAnalyticsAdminLoading || !config.runner_ready || !adminToken}
+                                disabled={isJobActive || salesAnalyticsAdminLoading || !config.runner_ready || !adminToken}
                               >
-                                {isRunning ? "Sending..." : "Send To My WhatsApp"}
+                                {isRunning
+                                  ? "Sending..."
+                                  : statusState === "queued"
+                                    ? "Queued..."
+                                    : statusState === "running"
+                                      ? "Running..."
+                                      : "Send To My WhatsApp"}
                               </button>
                             </article>
                           );

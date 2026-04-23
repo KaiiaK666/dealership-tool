@@ -6088,6 +6088,17 @@ button.special-card:hover:not(:disabled) {
   align-items: stretch;
 }
 
+.freshup-hero__copy {
+  display: grid;
+  gap: 10px;
+  align-content: start;
+}
+
+.freshup-hero__status-grid {
+  display: grid;
+  gap: 12px;
+}
+
 .freshup-shell--card .freshup-capture,
 .freshup-shell--card .freshup-nfc {
   border: 1px solid rgba(255, 255, 255, 0.08);
@@ -6188,6 +6199,12 @@ button.special-card:hover:not(:disabled) {
   color: #fff;
 }
 
+.freshup-hero__status--soft {
+  background:
+    radial-gradient(circle at top right, rgba(31, 124, 246, 0.16), transparent 38%),
+    rgba(37, 48, 59, 0.9);
+}
+
 .freshup-hero__status span,
 .freshup-lockbox span,
 .freshup-log-item__meta span {
@@ -6227,6 +6244,11 @@ button.special-card:hover:not(:disabled) {
   gap: 16px;
 }
 
+.freshup-capture__header small {
+  color: var(--muted);
+  line-height: 1.45;
+}
+
 .freshup-capture__header--compact {
   justify-content: flex-start;
   margin-bottom: 2px;
@@ -6240,6 +6262,30 @@ button.special-card:hover:not(:disabled) {
 .freshup-form {
   align-content: start;
   grid-auto-rows: max-content;
+  gap: 12px;
+}
+
+.freshup-form--desk {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.freshup-form--card {
+  gap: 14px;
+}
+
+.freshup-form > .freshup-actions,
+.freshup-form > .notice {
+  grid-column: 1 / -1;
+}
+
+.freshup-form__field,
+.freshup-form__field--salesperson {
+  display: grid;
+  gap: 6px;
+}
+
+.freshup-form__field--salesperson {
+  grid-column: 1 / -1;
 }
 
 .freshup-form label span {
@@ -6258,7 +6304,7 @@ button.special-card:hover:not(:disabled) {
 
 .freshup-form input,
 .freshup-form select {
-  min-height: 56px;
+  min-height: 50px;
   font-size: 1rem;
 }
 
@@ -6305,6 +6351,48 @@ button.special-card:hover:not(:disabled) {
 .freshup-contact-strip span {
   color: rgba(255, 255, 255, 0.78);
   font-size: 0.92rem;
+}
+
+.freshup-agent-actions,
+.freshup-salesperson-strip__actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.freshup-agent-actions__note {
+  display: block;
+  margin-top: -2px;
+}
+
+.freshup-shell--card .freshup-agent-actions__note {
+  color: rgba(255, 255, 255, 0.76);
+}
+
+.freshup-salesperson-strip {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+  gap: 14px;
+  align-items: center;
+  grid-column: 1 / -1;
+  padding: 14px 16px;
+  border-radius: 20px;
+  border: 1px solid rgba(210, 198, 182, 0.72);
+  background: rgba(247, 241, 232, 0.86);
+}
+
+.freshup-salesperson-strip__copy {
+  display: grid;
+  gap: 5px;
+}
+
+.freshup-salesperson-strip__copy strong {
+  font-size: 1.08rem;
+  color: var(--deep);
+}
+
+.freshup-salesperson-strip__copy small {
+  color: var(--muted);
 }
 
 .freshup-social-row {
@@ -6468,6 +6556,18 @@ button.special-card:hover:not(:disabled) {
 
 .freshup-link-btn--blue {
   background: #1f7cf6;
+  color: #fff;
+}
+
+.freshup-link-btn--outline {
+  background: rgba(37, 48, 59, 0.08);
+  border-color: rgba(37, 48, 59, 0.12);
+  color: var(--deep);
+}
+
+.freshup-shell--card .freshup-link-btn--outline {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.16);
   color: #fff;
 }
 
@@ -6687,7 +6787,11 @@ button.special-card:hover:not(:disabled) {
 
   .freshup-hero,
   .freshup-layout,
-  .freshup-actions {
+  .freshup-actions,
+  .freshup-hero__status-grid,
+  .freshup-agent-actions,
+  .freshup-salesperson-strip,
+  .freshup-salesperson-strip__actions {
     grid-template-columns: 1fr;
   }
 
@@ -6761,6 +6865,10 @@ button.special-card:hover:not(:disabled) {
 
   .freshup-shell--card .freshup-form {
     gap: 12px;
+  }
+
+  .freshup-form--desk {
+    grid-template-columns: 1fr;
   }
 
   .freshup-shell--card .freshup-capture__header h3 {
@@ -7546,6 +7654,7 @@ button.special-card:hover:not(:disabled) {
   .filters--notes,
   .freshup-hero,
   .freshup-layout,
+  .freshup-hero__status-grid,
   .fresh-up-form-grid,
   .bdc-sales-workspace-panel__layout,
   .bdc-sales-workspace-panel__quick-grid,
@@ -7825,7 +7934,8 @@ button.special-card:hover:not(:disabled) {
 
   .freshup-brand-stack,
   .freshup-capture__header,
-  .fresh-up-card__header {
+  .fresh-up-card__header,
+  .freshup-salesperson-strip {
     flex-direction: column;
     align-items: flex-start;
   }
