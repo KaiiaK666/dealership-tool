@@ -2088,6 +2088,7 @@ export default function App() {
   const [bdcSalesTrackerNoteDrafts, setBdcSalesTrackerNoteDrafts] = useState({});
   const [bdcSalesTrackerDmsLogDraft, setBdcSalesTrackerDmsLogDraft] = useState(() => emptyBdcSalesTrackerDmsLogDraft());
   const [bdcSalesTrackerDmsBulkDraft, setBdcSalesTrackerDmsBulkDraft] = useState(() => emptyBdcSalesTrackerDmsBulkDraft());
+  const [bdcSalesTrackerDmsBulkFeedback, setBdcSalesTrackerDmsBulkFeedback] = useState("");
   const [bdcSalesTrackerEntrySearch, setBdcSalesTrackerEntrySearch] = useState({ field: "all", value: "" });
   const [daysOffData, setDaysOffData] = useState({ month: currentMonth(), entries: [] });
   const [selectedDaysOffSalesId, setSelectedDaysOffSalesId] = useState("");
@@ -2579,8 +2580,8 @@ export default function App() {
   const selectedTrackerAgent = selectedTrackerAgentId
     ? trackerAgents.find((agent) => Number(agent.agent_id) === Number(selectedTrackerAgentId)) || null
     : null;
-  const trackerCanViewDmsLog = canEditTrackerAdmin;
   const trackerKaiFocusSelected = normalizeLookupText(selectedTrackerFocus?.label || "") === "kai";
+  const trackerCanViewDmsLog = canEditTrackerAdmin && trackerKaiFocusSelected;
   const trackerShowHistoricalBulkUpload = trackerCanViewDmsLog && trackerKaiFocusSelected && bdcSalesTrackerView === "dmsLog";
   const selectedTrackerAgentDraft = selectedTrackerAgent
     ? bdcSalesTrackerEntryDrafts[selectedTrackerAgent.agent_id] || emptyBdcSalesTrackerEntryDraft()
@@ -2966,6 +2967,7 @@ export default function App() {
   function applyBdcSalesTrackerFocusSelection(nextValue) {
     const resolved = trackerFocusOptions.find((option) => option.key === nextValue) || null;
     setBdcSalesTrackerFocusKey(resolved?.key || "");
+    setBdcSalesTrackerDmsBulkFeedback("");
     const existingNote = resolved ? trackerFocusNotes.find((entry) => entry.focus_key === resolved.key) : null;
     setBdcSalesTrackerFocusNoteDraft(existingNote?.notes || "");
     setBdcSalesTrackerDmsLogDraft((current) => ({
@@ -3189,10 +3191,28 @@ export default function App() {
   }
 
   async function addBdcSalesTrackerDmsLogBulkEntries() {
+    const targetDmsNumbers = trackerDmsBulkDraftNumbers;
+    if (!trackerCanViewDmsLog) {
+      setBdcSalesTrackerDmsBulkFeedback("");
+      setError("Select Kai before opening the DMS Log bulk upload.");
+      return;
+    }
+    if (!targetDmsNumbers.length) {
+      setBdcSalesTrackerDmsBulkFeedback("");
+      setError("Paste at least one DMS number before uploading.");
+      return;
+    }
     setBusy("bdc-dms-bulk-create");
     setError("");
+    setBdcSalesTrackerDmsBulkFeedback("");
     try {
       const resolvedAptSetUnder = bdcSalesTrackerDmsBulkDraft.apt_set_under || selectedTrackerFocus?.label || "";
+      const existingDmsNumbers = new Set(
+        [
+          ...(trackerDmsLog.current_entries || []),
+          ...(trackerDmsLog.log_entries || []),
+        ].map((entry) => normalizeLookupText(entry.dms_number))
+      );
       const data = await createBdcSalesTrackerDmsLogBulkEntries(
         {
           month: bdcSalesTrackerMonth,
@@ -3203,6 +3223,18 @@ export default function App() {
         adminToken
       );
       applyBdcSalesTrackerData(data);
+      const savedDmsNumbers = new Set(
+        (data?.dms_log?.log_entries || []).map((entry) => normalizeLookupText(entry.dms_number))
+      );
+      const savedCount = targetDmsNumbers.filter((dmsNumber) => {
+        const normalizedDms = normalizeLookupText(dmsNumber);
+        return savedDmsNumbers.has(normalizedDms) && !existingDmsNumbers.has(normalizedDms);
+      }).length;
+      setBdcSalesTrackerDmsBulkFeedback(
+        savedCount === targetDmsNumbers.length
+          ? `Saved ${savedCount} historical DMS ${savedCount === 1 ? "row" : "rows"} under ${resolvedAptSetUnder}.`
+          : `Saved ${savedCount} of ${targetDmsNumbers.length} DMS numbers under ${resolvedAptSetUnder}. Already logged or tracked numbers were skipped.`
+      );
       setBdcSalesTrackerDmsBulkDraft({
         ...emptyBdcSalesTrackerDmsBulkDraft(),
         apt_set_under: resolvedAptSetUnder,
@@ -3560,6 +3592,10 @@ export default function App() {
   useEffect(() => {
     setBdcSalesTrackerEntrySearch({ field: "all", value: "" });
   }, [selectedTrackerAgentId]);
+
+  useEffect(() => {
+    setBdcSalesTrackerDmsBulkFeedback("");
+  }, [bdcSalesTrackerMonth, selectedTrackerAgentId]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -6520,7 +6556,11 @@ export default function App() {
                     {trackerDaysWorked} worked / {trackerDaysLeft} left
                   </span>
                   <span className="bdc-sales-meta-chip">
-                    {trackerCanViewDmsLog ? "Admin DMS log unlocked" : "DMS log is admin only"}
+                    {trackerCanViewDmsLog
+                      ? "Kai DMS log unlocked"
+                      : canEditTrackerAdmin
+                        ? "DMS log hidden unless Kai is selected"
+                        : "DMS log is admin only"}
                   </span>
                 </div>
               </div>
@@ -8698,7 +8738,7 @@ export default function App() {
                         <button
                           type="button"
                           onClick={addBdcSalesTrackerDmsLogBulkEntries}
-                          disabled={busy === "bdc-dms-bulk-create" || !trackerDmsBulkDraftNumbers.length}
+                          disabled={busy === "bdc-dms-bulk-create" || !trackerDmsBulkDraftNumbers.length || !trackerCanViewDmsLog}
                         >
                           {busy === "bdc-dms-bulk-create"
                             ? "Uploading..."
@@ -8724,6 +8764,9 @@ export default function App() {
                             </strong>
                           </div>
                         </div>
+                        {bdcSalesTrackerDmsBulkFeedback ? (
+                          <p className="admin-note bdc-dms-log-bulk__feedback">{bdcSalesTrackerDmsBulkFeedback}</p>
+                        ) : null}
                       </div>
                     </article>
                   ) : null}

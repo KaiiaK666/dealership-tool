@@ -5847,11 +5847,18 @@ def create_bdc_sales_tracker_dms_log_bulk_entries(payload: BdcSalesTrackerDmsLog
     agent_id, _ = resolve_bdc_agent(None, apt_set_under)
     if not agent_id:
         raise HTTPException(status_code=400, detail="apt_set_under must match an active BDC agent for bulk historical input")
+    unique_dms_numbers: List[str] = []
     for dms_number in dms_numbers:
-        ensure_unique_bdc_sales_tracker_dms(month_key, dms_number)
+        try:
+            ensure_unique_bdc_sales_tracker_dms(month_key, dms_number)
+        except HTTPException as exc:
+            if exc.status_code == 400 and "already" in str(exc.detail or "").lower():
+                continue
+            raise
+        unique_dms_numbers.append(dms_number)
     now_ts = time.time()
     now_at = now_local_input_value()
-    for dms_number in dms_numbers:
+    for dms_number in unique_dms_numbers:
         db_insert(
             """
             INSERT INTO bdc_sales_tracker_dms_log (
