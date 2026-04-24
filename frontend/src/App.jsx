@@ -240,6 +240,7 @@ const TRAFFIC_ANALYSIS_PROMPTS = [
 const FRESH_UP_STORAGE_KEY = "dealer_tool_fresh_up_form";
 const SERVICE_NOTES_PREFERENCES_KEY = "dealer_tool_service_notes_prefs";
 const BDC_SALES_TRACKER_PREFERENCES_KEY = "dealer_tool_bdc_sales_tracker_prefs";
+const ADMIN_TOKEN_STORAGE_KEY = "dealer_tool_admin_token";
 const FRESH_UP_DEFAULTS = {
   customerName: "",
   phone: "",
@@ -965,6 +966,28 @@ function readBdcSalesTrackerPreferences() {
     };
   } catch {
     return defaults;
+  }
+}
+
+function readAdminToken() {
+  if (typeof window === "undefined") return COOKIE_ADMIN_SESSION_MARKER;
+  try {
+    return window.sessionStorage.getItem(ADMIN_TOKEN_STORAGE_KEY) || COOKIE_ADMIN_SESSION_MARKER;
+  } catch {
+    return COOKIE_ADMIN_SESSION_MARKER;
+  }
+}
+
+function storeAdminToken(token) {
+  if (typeof window === "undefined") return;
+  try {
+    if (token && token !== COOKIE_ADMIN_SESSION_MARKER) {
+      window.sessionStorage.setItem(ADMIN_TOKEN_STORAGE_KEY, token);
+    } else {
+      window.sessionStorage.removeItem(ADMIN_TOKEN_STORAGE_KEY);
+    }
+  } catch {
+    // Session storage is an enhancement; the HttpOnly cookie still carries the session.
   }
 }
 
@@ -2073,7 +2096,7 @@ export default function App() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [lastAssignment, setLastAssignment] = useState(null);
-  const [adminToken, setAdminToken] = useState(COOKIE_ADMIN_SESSION_MARKER);
+  const [adminToken, setAdminToken] = useState(readAdminToken);
   const [adminSession, setAdminSession] = useState(null);
   const [login, setLogin] = useState({ username: "", password: "" });
   const [agentLoopConfig, setAgentLoopConfig] = useState({
@@ -4060,9 +4083,15 @@ export default function App() {
       }
       try {
         const session = await getAdminSession(adminToken);
-        if (active) setAdminSession(session);
+        if (!active) return;
+        setAdminSession(session);
+        if (session?.token && session.token !== adminToken) {
+          storeAdminToken(session.token);
+          setAdminToken(session.token);
+        }
       } catch {
         if (!active) return;
+        storeAdminToken("");
         setAdminToken("");
         setAdminSession(null);
       }
@@ -4133,7 +4162,9 @@ export default function App() {
     setError("");
     try {
       const session = await adminLogin(login);
-      setAdminToken(COOKIE_ADMIN_SESSION_MARKER);
+      const nextToken = session?.token || COOKIE_ADMIN_SESSION_MARKER;
+      storeAdminToken(nextToken);
+      setAdminToken(nextToken);
       setAdminSession(session);
     } catch (errorValue) {
       setError(errText(errorValue));
@@ -4148,6 +4179,7 @@ export default function App() {
     } catch {
       // Ignore logout transport failures and clear local admin state either way.
     } finally {
+      storeAdminToken("");
       setAdminToken("");
       setAdminSession(null);
     }

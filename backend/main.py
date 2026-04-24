@@ -348,6 +348,7 @@ class AdminSessionOut(BaseModel):
 
 
 class AdminStatusOut(BaseModel):
+    token: str = ""
     username: str
     expires_ts: float
 
@@ -9317,7 +9318,7 @@ def admin_login(payload: AdminLoginIn, request: Request, response: Response) -> 
     clear_admin_login_attempts(request)
     session = issue_session()
     set_admin_session_cookie(response, request, session.token)
-    return AdminSessionOut(token="", username=session.username, expires_ts=session.expires_ts)
+    return AdminSessionOut(token=session.token, username=session.username, expires_ts=session.expires_ts)
 
 
 @app.post("/api/admin/logout")
@@ -9337,6 +9338,7 @@ def admin_logout(
 def admin_session(x_admin_token: Optional[str] = Header(default=None)) -> AdminStatusOut:
     session = require_admin(x_admin_token)
     return AdminStatusOut(
+        token=str(x_admin_token or ""),
         username=str(session.get("username") or ADMIN_USERNAME),
         expires_ts=float(session.get("expires_ts") or 0.0),
     )
