@@ -3448,6 +3448,55 @@ th {
   line-height: 1.45;
 }
 
+.bdc-dms-log-bulk {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: minmax(0, 1.55fr) minmax(250px, 1fr) minmax(220px, 1fr) auto;
+  align-items: end;
+}
+
+.bdc-dms-log-bulk__field {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+}
+
+.bdc-dms-log-bulk textarea {
+  min-height: 118px;
+  resize: vertical;
+  line-height: 1.45;
+}
+
+.bdc-dms-log-bulk__toggle {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.bdc-dms-log-bulk__toggle button {
+  min-width: 0;
+  padding: 10px 14px;
+  border-radius: 999px;
+  border: 1px solid rgba(123, 110, 91, 0.2);
+  background: rgba(247, 244, 238, 0.96);
+  color: var(--ink);
+  box-shadow: none;
+}
+
+.bdc-dms-log-bulk__toggle button.is-active {
+  color: #fff;
+  border-color: transparent;
+  background: linear-gradient(135deg, var(--accent), #d8773b);
+  box-shadow: 0 14px 26px rgba(213, 124, 60, 0.24);
+}
+
+.bdc-dms-log-bulk__summary {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 10px;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
 .bdc-dms-log-create__parsed {
   grid-column: 1 / -1;
   display: grid;
@@ -6107,13 +6156,20 @@ button.special-card:hover:not(:disabled) {
     linear-gradient(180deg, rgba(18, 22, 34, 0.96), rgba(11, 14, 23, 0.98));
   box-shadow: 0 28px 80px rgba(5, 7, 14, 0.28);
   color: #fff;
+  padding: 18px;
+  gap: 16px;
+}
+
+.freshup-shell--card {
+  width: min(1120px, 100%);
+  margin: 0 auto;
 }
 
 .freshup-brand-stack {
   display: flex;
   align-items: center;
   gap: 14px;
-  margin-bottom: 18px;
+  min-width: 0;
 }
 
 .freshup-brand-avatar,
@@ -6124,9 +6180,9 @@ button.special-card:hover:not(:disabled) {
 }
 
 .freshup-brand-avatar {
-  width: 88px;
-  height: 88px;
-  padding: 8px;
+  width: 74px;
+  height: 74px;
+  padding: 7px;
   border-radius: 999px;
   background: #fff;
   box-shadow: 0 20px 45px rgba(0, 0, 0, 0.28);
@@ -6141,9 +6197,10 @@ button.special-card:hover:not(:disabled) {
 
 .freshup-brand-mark {
   gap: 10px;
-  padding: 10px 14px;
+  min-width: 0;
+  padding: 12px 14px;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.06);
   backdrop-filter: blur(12px);
 }
 
@@ -6162,12 +6219,57 @@ button.special-card:hover:not(:disabled) {
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
+  line-height: 1.2;
 }
 
 .freshup-card-intro {
   display: grid;
   gap: 10px;
-  margin-bottom: 8px;
+}
+
+.freshup-card-intro__top {
+  display: grid;
+  gap: 14px;
+  grid-template-columns: minmax(0, auto) minmax(0, 1fr);
+  align-items: center;
+}
+
+.freshup-card-intro__copy {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+
+.freshup-card-intro__copy h2 {
+  margin: 0;
+  font-size: clamp(1.86rem, 3vw, 2.3rem);
+  line-height: 1.04;
+}
+
+.freshup-card-intro__copy p {
+  margin: 0;
+  max-width: 44ch;
+  font-size: 0.96rem;
+  line-height: 1.45;
+}
+
+.freshup-card-intro__meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.freshup-card-intro__meta span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.86);
+  font-size: 0.84rem;
+  line-height: 1.35;
 }
 
 .freshup-hero p {
@@ -6226,6 +6328,7 @@ button.special-card:hover:not(:disabled) {
 .freshup-layout {
   grid-template-columns: minmax(0, 1.05fr) minmax(320px, 0.95fr);
   align-items: start;
+  gap: 16px;
 }
 
 .freshup-capture,
@@ -6251,7 +6354,16 @@ button.special-card:hover:not(:disabled) {
 
 .freshup-capture__header--compact {
   justify-content: flex-start;
-  margin-bottom: 2px;
+  margin-bottom: -2px;
+}
+
+.freshup-capture__header-copy {
+  display: grid;
+  gap: 6px;
+}
+
+.freshup-capture__header-copy h3 {
+  margin: 0;
 }
 
 .freshup-form label {
@@ -6270,7 +6382,7 @@ button.special-card:hover:not(:disabled) {
 }
 
 .freshup-form--card {
-  gap: 14px;
+  gap: 10px;
 }
 
 .freshup-form > .freshup-actions,
@@ -6302,10 +6414,18 @@ button.special-card:hover:not(:disabled) {
   color: #fff;
 }
 
+.freshup-shell--card .freshup-capture__header-copy small {
+  color: rgba(255, 255, 255, 0.74);
+}
+
 .freshup-form input,
 .freshup-form select {
   min-height: 50px;
   font-size: 1rem;
+}
+
+.freshup-shell--card .freshup-form input {
+  min-height: 48px;
 }
 
 .freshup-form small {
@@ -6329,8 +6449,8 @@ button.special-card:hover:not(:disabled) {
 
 .freshup-lockbox--customer {
   gap: 4px;
-  padding: 10px 14px;
-  background: rgba(255, 255, 255, 0.08);
+  padding: 12px 14px;
+  background: rgba(255, 255, 255, 0.06);
   border: 1px solid rgba(255, 255, 255, 0.08);
 }
 
@@ -6358,6 +6478,11 @@ button.special-card:hover:not(:disabled) {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
+}
+
+.freshup-agent-actions--compact .freshup-link-btn {
+  min-height: 46px;
+  border-radius: 16px;
 }
 
 .freshup-agent-actions__note {
@@ -6392,7 +6517,13 @@ button.special-card:hover:not(:disabled) {
 }
 
 .freshup-salesperson-strip__copy small {
+  display: none;
+}
+
+.freshup-salesperson-strip__meta {
   color: var(--muted);
+  font-size: 0.92rem;
+  line-height: 1.45;
 }
 
 .freshup-social-row {
@@ -6454,6 +6585,46 @@ button.special-card:hover:not(:disabled) {
   font-size: 0.85rem;
   line-height: 1.6;
   word-break: break-word;
+}
+
+.freshup-nfc__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+}
+
+.freshup-nfc__header-copy {
+  display: grid;
+  gap: 8px;
+}
+
+.freshup-nfc__header-copy h3,
+.freshup-nfc__header-copy p {
+  margin: 0;
+}
+
+.freshup-nfc__header-chip {
+  display: grid;
+  gap: 4px;
+  min-width: 180px;
+  padding: 12px 14px;
+  border-radius: 18px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.05);
+  text-align: right;
+}
+
+.freshup-nfc__header-chip strong {
+  color: #fff;
+  font-size: 0.98rem;
+}
+
+.freshup-nfc__header-chip span {
+  color: rgba(255, 255, 255, 0.74);
+  font-size: 0.82rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
 }
 
 .freshup-log-list {
@@ -6522,6 +6693,7 @@ button.special-card:hover:not(:disabled) {
   margin: 6px 0 0;
   color: rgba(255, 255, 255, 0.82);
   font-size: 0.92rem;
+  line-height: 1.45;
 }
 
 .freshup-store-card h4 {
@@ -6805,14 +6977,13 @@ button.special-card:hover:not(:disabled) {
   }
 
   .freshup-card-intro {
-    gap: 8px;
-    margin-bottom: 4px;
+    gap: 10px;
   }
 
   .freshup-capture,
   .freshup-nfc,
   .freshup-log-panel {
-    padding: 16px;
+    padding: 14px;
   }
 
   .freshup-capture__header,
@@ -6831,8 +7002,8 @@ button.special-card:hover:not(:disabled) {
   }
 
   .freshup-brand-avatar {
-    width: 68px;
-    height: 68px;
+    width: 60px;
+    height: 60px;
     padding: 6px;
   }
 
@@ -6848,15 +7019,15 @@ button.special-card:hover:not(:disabled) {
   }
 
   .freshup-shell--card .freshup-card-intro h2 {
-    font-size: 1.9rem;
-    line-height: 1.05;
+    font-size: 1.65rem;
+    line-height: 1.04;
     margin: 0;
   }
 
   .freshup-shell--card .freshup-card-intro p {
     margin: 0;
-    font-size: 0.98rem;
-    line-height: 1.35;
+    font-size: 0.93rem;
+    line-height: 1.32;
   }
 
   .freshup-shell--card .freshup-social-row {
@@ -6864,16 +7035,31 @@ button.special-card:hover:not(:disabled) {
   }
 
   .freshup-shell--card .freshup-form {
-    gap: 12px;
+    gap: 10px;
   }
 
   .freshup-form--desk {
     grid-template-columns: 1fr;
   }
 
-  .freshup-shell--card .freshup-capture__header h3 {
-    margin: 0;
-    font-size: 1.45rem;
+  .freshup-card-intro__top,
+  .freshup-nfc__header {
+    grid-template-columns: 1fr;
+    flex-direction: column;
+  }
+
+  .freshup-card-intro__meta span {
+    width: 100%;
+  }
+
+  .freshup-shell--card .freshup-capture__header-copy {
+    gap: 4px;
+  }
+
+  .freshup-shell--card .freshup-nfc__header-chip {
+    width: 100%;
+    min-width: 0;
+    text-align: left;
   }
 
   .freshup-store-card {
@@ -7478,6 +7664,7 @@ button.special-card:hover:not(:disabled) {
   .bdc-sales-rules-grid,
   .bdc-sales-entry-create-panel,
   .bdc-dms-log-create,
+  .bdc-dms-log-bulk,
   .bdc-dms-log-entry {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -7498,7 +7685,8 @@ button.special-card:hover:not(:disabled) {
     justify-content: flex-start;
   }
 
-  .bdc-dms-log-create__parsed {
+  .bdc-dms-log-create__parsed,
+  .bdc-dms-log-bulk__summary {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
@@ -7764,6 +7952,11 @@ button.special-card:hover:not(:disabled) {
   .bdc-dms-log-history-row,
   .bdc-dms-log-history-row__actions,
   .bdc-sales-agent-rankings__item {
+    grid-template-columns: 1fr;
+  }
+
+  .bdc-dms-log-bulk,
+  .bdc-dms-log-bulk__summary {
     grid-template-columns: 1fr;
   }
 

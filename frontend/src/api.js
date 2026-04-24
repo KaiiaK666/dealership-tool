@@ -37,6 +37,7 @@ function inferApiBases() {
 
 const API_BASES = inferApiBases();
 const API_BASE = API_BASES[0] || "";
+export const COOKIE_ADMIN_SESSION_MARKER = "__cookie_admin_session__";
 
 function buildUrl(base, path) {
   return `${base}${path}`;
@@ -53,6 +54,7 @@ async function request(path, { method = "GET", body, headers = {}, timeout = 100
     try {
       const response = await fetch(buildUrl(bases[index], path), {
         method,
+        credentials: "include",
         headers: {
           ...(!isFormData && body ? { "Content-Type": "application/json" } : {}),
           ...headers,
@@ -99,11 +101,12 @@ function qs(params = {}) {
 }
 
 function adminHeaders(token) {
-  return token ? { "x-admin-token": token } : {};
+  return token && token !== COOKIE_ADMIN_SESSION_MARKER ? { "x-admin-token": token } : {};
 }
 
 export const apiBase = API_BASE;
 export const adminLogin = (payload) => request("/api/admin/login", { method: "POST", body: payload });
+export const adminLogout = (token) => request("/api/admin/logout", { method: "POST", headers: adminHeaders(token) });
 export const getAdminSession = (token) => request("/api/admin/session", { headers: adminHeaders(token) });
 export const getAgentLoopConfig = (token) =>
   request("/api/admin/agent-loops/config", { headers: adminHeaders(token) });
@@ -315,6 +318,8 @@ export const deleteBdcSalesTrackerEntry = (entryId, token) =>
   });
 export const createBdcSalesTrackerDmsLogEntry = (payload, token) =>
   request("/api/bdc-sales-tracker/dms-log", { method: "POST", body: payload, headers: adminHeaders(token) });
+export const createBdcSalesTrackerDmsLogBulkEntries = (payload, token) =>
+  request("/api/bdc-sales-tracker/dms-log/bulk", { method: "POST", body: payload, headers: adminHeaders(token) });
 export const updateBdcSalesTrackerDmsLogEntry = (entryId, payload, token) =>
   request(`/api/bdc-sales-tracker/dms-log/${encodeURIComponent(entryId)}`, {
     method: "PUT",

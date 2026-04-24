@@ -72,6 +72,7 @@ import {
   uploadServiceDriveTrafficImages,
   updateServiceDriveTrafficSales,
   createBdcSalesTrackerEntry,
+  createBdcSalesTrackerDmsLogBulkEntries,
   createBdcSalesTrackerDmsLogEntry,
   deleteBdcSalesTrackerEntry,
   deleteBdcSalesTrackerDmsLogEntry,
@@ -208,6 +209,7 @@ const TRACKER_NO_APT_OPTION = {
   source: "Missed appointment payout",
   sortKey: -1,
 };
+const TRACKER_HISTORICAL_INPUT_LABEL = "Historical Input";
 const MARKETPLACE_TITLE_TOKEN = "{year} {make} {model}";
 const MARKETPLACE_BUILDER_DEFAULTS = {
   titlePrefix: "",
@@ -247,10 +249,10 @@ const FRESH_UP_DEFAULTS = {
 };
 const FRESHUP_LINKS_DEFAULTS = {
   page_title: "Start with Bert Ogden Mission",
-  page_subtitle: "Drop your info first, then choose the next step that fits you best.",
-  form_title: "Send us your contact info",
-  form_subtitle: "A sales specialist will follow up fast.",
-  submit_label: "Send My Info",
+  page_subtitle: "Save your info first, then choose the credit or inventory step you want.",
+  form_title: "Send your contact info",
+  form_subtitle: "Your salesperson stays attached to this form.",
+  submit_label: "Send Info to Sales Agent",
   stores: [
     {
       dealership: "Kia",
@@ -736,6 +738,10 @@ function emptyBdcSalesTrackerDmsLogDraft() {
   return { customer_name: "", apt_set_under: "", notes: "" };
 }
 
+function emptyBdcSalesTrackerDmsBulkDraft() {
+  return { dms_numbers_text: "", apt_set_under: "", notes: "" };
+}
+
 function parseBdcSalesTrackerDmsLogIdentity(value) {
   const raw = String(value || "").trim();
   if (!raw) {
@@ -1075,6 +1081,14 @@ function escapeVCardValue(value) {
     .replace(/\n/g, "\\n")
     .replace(/;/g, "\\;")
     .replace(/,/g, "\\,");
+}
+
+function downloadFileName(value, fallback = "contact") {
+  const cleaned = String(value || "")
+    .trim()
+    .replace(/[<>:"/\\|?*\x00-\x1F]/g, "")
+    .replace(/\s+/g, "-");
+  return cleaned || fallback;
 }
 
 function freshUpContactCardHref(person, store) {
@@ -2050,6 +2064,7 @@ export default function App() {
   const [bdcSalesTrackerEntryDrafts, setBdcSalesTrackerEntryDrafts] = useState({});
   const [bdcSalesTrackerNoteDrafts, setBdcSalesTrackerNoteDrafts] = useState({});
   const [bdcSalesTrackerDmsLogDraft, setBdcSalesTrackerDmsLogDraft] = useState(() => emptyBdcSalesTrackerDmsLogDraft());
+  const [bdcSalesTrackerDmsBulkDraft, setBdcSalesTrackerDmsBulkDraft] = useState(() => emptyBdcSalesTrackerDmsBulkDraft());
   const [bdcSalesTrackerEntrySearch, setBdcSalesTrackerEntrySearch] = useState({ field: "all", value: "" });
   const [daysOffData, setDaysOffData] = useState({ month: currentMonth(), entries: [] });
   const [selectedDaysOffSalesId, setSelectedDaysOffSalesId] = useState("");
@@ -2295,9 +2310,19 @@ export default function App() {
   const freshUpSalespersonPhoneText = formatPhoneInput(freshUpAssignedSalesperson?.phone_number || "");
   const freshUpSalespersonPhoneHref = phoneHref(freshUpAssignedSalesperson?.phone_number || "");
   const freshUpSalespersonContactHref = freshUpContactCardHref(freshUpAssignedSalesperson, freshUpPrimaryStore);
+  const freshUpSalespersonContactFileName = freshUpAssignedSalesperson
+    ? `${downloadFileName(freshUpAssignedSalesperson.name, "salesperson-contact")}.vcf`
+    : "salesperson-contact.vcf";
   const freshUpSalespersonContactLabel = freshUpAssignedSalesperson
     ? `Add ${freshUpAssignedSalesperson.name} as Contact`
     : "Add salesperson as contact";
+  const freshUpCardIntroHeading = freshUpAssignedSalesperson ? `Work with ${freshUpAssignedSalesperson.name}` : freshUpLinksConfig.page_title;
+  const freshUpCardIntroCopy = freshUpAssignedSalesperson
+    ? `Send your name and phone first. Then choose the credit application or inventory step you want with ${freshUpPrimaryStore?.display_name || "our team"}.`
+    : "Send your name and phone first. Then choose the financing or inventory step you want.";
+  const freshUpCardSubmitLabel = freshUpAssignedSalesperson
+    ? `Send Info to ${String(freshUpAssignedSalesperson.name || "").trim().split(/\s+/)[0] || "Sales Agent"}`
+    : freshUpLinksConfig.submit_label;
   const freshUpConversionRate = freshUpAnalytics.page_views
     ? Math.round((freshUpAnalytics.submissions / freshUpAnalytics.page_views) * 100)
     : 0;
@@ -2334,6 +2359,7 @@ export default function App() {
   const trackerAgents = bdcSalesTracker?.agents || [];
   const trackerDmsLog = bdcSalesTracker?.dms_log || { current_entries: [], log_entries: [] };
   const trackerDmsLogDraftPreview = parseBdcSalesTrackerDmsLogIdentity(bdcSalesTrackerDmsLogDraft.customer_name);
+  const trackerDmsBulkDraftNumbers = parseBdcSalesTrackerDraftNumbers(bdcSalesTrackerDmsBulkDraft.dms_numbers_text);
   const trackerBenchmarks = bdcSalesTracker?.benchmarks || {
     appointment_set_rate_floor: 0.2,
     appointment_set_rate_target: 0.3,
@@ -2375,6 +2401,10 @@ export default function App() {
   const trackerAptSetUnderAutoFillLabels = new Set(
     trackerAptSetUnderOptions.filter((option) => option.name !== TRACKER_NO_APT_OPTION.name).map((option) => option.name)
   );
+  const trackerBulkAptSetUnderOptions = activeBdc
+    .map((agent) => String(agent.name || "").trim())
+    .filter(Boolean)
+    .filter((name, index, items) => items.findIndex((candidate) => normalizeLookupText(candidate) === normalizeLookupText(name)) === index);
   const trackerCurrentDmsCount = trackerDmsLog.current_entries.length;
   const trackerLoggedDmsCount = trackerDmsLog.log_entries.length;
   const trackerBehindByValue = Number(bdcSalesTracker?.summary?.behind_by || 0);
@@ -2527,6 +2557,8 @@ export default function App() {
     ? trackerAgents.find((agent) => Number(agent.agent_id) === Number(selectedTrackerAgentId)) || null
     : null;
   const trackerCanViewDmsLog = canEditTrackerAdmin;
+  const trackerKaiFocusSelected = normalizeLookupText(selectedTrackerFocus?.label || "") === "kai";
+  const trackerShowHistoricalBulkUpload = trackerCanViewDmsLog && trackerKaiFocusSelected && bdcSalesTrackerView === "dmsLog";
   const selectedTrackerAgentDraft = selectedTrackerAgent
     ? bdcSalesTrackerEntryDrafts[selectedTrackerAgent.agent_id] || emptyBdcSalesTrackerEntryDraft()
     : emptyBdcSalesTrackerEntryDraft();
@@ -2917,6 +2949,10 @@ export default function App() {
       ...current,
       apt_set_under: resolved?.label || "",
     }));
+    setBdcSalesTrackerDmsBulkDraft((current) => ({
+      ...current,
+      apt_set_under: current.apt_set_under || resolved?.label || "",
+    }));
   }
 
   async function saveBdcSalesTrackerGoal() {
@@ -3121,6 +3157,32 @@ export default function App() {
       setBdcSalesTrackerDmsLogDraft({
         ...emptyBdcSalesTrackerDmsLogDraft(),
         apt_set_under: selectedTrackerFocus?.label || "",
+      });
+    } catch (errorValue) {
+      setError(errText(errorValue));
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function addBdcSalesTrackerDmsLogBulkEntries() {
+    setBusy("bdc-dms-bulk-create");
+    setError("");
+    try {
+      const resolvedAptSetUnder = bdcSalesTrackerDmsBulkDraft.apt_set_under || selectedTrackerFocus?.label || "";
+      const data = await createBdcSalesTrackerDmsLogBulkEntries(
+        {
+          month: bdcSalesTrackerMonth,
+          dms_numbers_text: bdcSalesTrackerDmsBulkDraft.dms_numbers_text,
+          apt_set_under: resolvedAptSetUnder,
+          notes: bdcSalesTrackerDmsBulkDraft.notes,
+        },
+        adminToken
+      );
+      applyBdcSalesTrackerData(data);
+      setBdcSalesTrackerDmsBulkDraft({
+        ...emptyBdcSalesTrackerDmsBulkDraft(),
+        apt_set_under: resolvedAptSetUnder,
       });
     } catch (errorValue) {
       setError(errText(errorValue));
@@ -3459,6 +3521,15 @@ export default function App() {
       return {
         ...current,
         apt_set_under: resolvedApt,
+      };
+    });
+    setBdcSalesTrackerDmsBulkDraft((current) => {
+      if (String(current.apt_set_under || "").trim()) {
+        return current;
+      }
+      return {
+        ...current,
+        apt_set_under: nextOption?.label || "",
       };
     });
   }, [bdcSalesTracker?.month, trackerFocusNotes, trackerFocusOptions, trackerAptSetUnderAutoFillLabels]);
@@ -8520,6 +8591,110 @@ export default function App() {
                 </div>
 
                 <div className="bdc-dms-log-layout">
+                  {trackerShowHistoricalBulkUpload ? (
+                    <article className="panel bdc-dms-log-panel">
+                      <div className="row">
+                        <div>
+                          <span className="eyebrow">Historical input</span>
+                          <h3>Bulk upload DMS sold rows</h3>
+                        </div>
+                        <div className="bdc-sales-inline-summary bdc-sales-inline-summary--soft">
+                          <span>{trackerDmsBulkDraftNumbers.length} ready</span>
+                          <span>{bdcSalesTrackerDmsBulkDraft.apt_set_under || "Pick agent"}</span>
+                        </div>
+                      </div>
+                      <p className="admin-note">
+                        Paste raw DMS numbers from older payroll review. These rows will save with
+                        {" "}
+                        <strong>{TRACKER_HISTORICAL_INPUT_LABEL}</strong>
+                        {" "}
+                        for the customer name and Opp ID, then stay assigned to the BDC agent you pick here.
+                      </p>
+                      <div className="bdc-dms-log-bulk">
+                        <label className="bdc-dms-log-bulk__field bdc-dms-log-bulk__field--wide">
+                          <span>DMS numbers</span>
+                          <textarea
+                            rows={5}
+                            value={bdcSalesTrackerDmsBulkDraft.dms_numbers_text}
+                            onChange={(event) =>
+                              setBdcSalesTrackerDmsBulkDraft((current) => ({
+                                ...current,
+                                dms_numbers_text: event.target.value,
+                              }))
+                            }
+                            placeholder={"125062\n125063\n125064"}
+                          />
+                        </label>
+                        <div className="bdc-dms-log-bulk__field">
+                          <span>Apt Set Under</span>
+                          <div className="bdc-dms-log-bulk__toggle" role="group" aria-label="Bulk historical input agent">
+                            {trackerBulkAptSetUnderOptions.map((optionName) => {
+                              const isActive =
+                                normalizeLookupText(optionName) === normalizeLookupText(bdcSalesTrackerDmsBulkDraft.apt_set_under);
+                              return (
+                                <button
+                                  key={`tracker-bulk-apt-${normalizeLookupText(optionName)}`}
+                                  type="button"
+                                  className={isActive ? "is-active" : ""}
+                                  onClick={() =>
+                                    setBdcSalesTrackerDmsBulkDraft((current) => ({
+                                      ...current,
+                                      apt_set_under: optionName,
+                                    }))
+                                  }
+                                  aria-pressed={isActive}
+                                >
+                                  {optionName}
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+                        <label className="bdc-dms-log-bulk__field">
+                          <span>Optional note</span>
+                          <input
+                            value={bdcSalesTrackerDmsBulkDraft.notes}
+                            onChange={(event) =>
+                              setBdcSalesTrackerDmsBulkDraft((current) => ({
+                                ...current,
+                                notes: event.target.value,
+                              }))
+                            }
+                            placeholder="Month-end cleanup, backfilled after Reynolds review, etc."
+                          />
+                        </label>
+                        <button
+                          type="button"
+                          onClick={addBdcSalesTrackerDmsLogBulkEntries}
+                          disabled={busy === "bdc-dms-bulk-create" || !trackerDmsBulkDraftNumbers.length}
+                        >
+                          {busy === "bdc-dms-bulk-create"
+                            ? "Uploading..."
+                            : trackerDmsBulkDraftNumbers.length
+                              ? `Add ${trackerDmsBulkDraftNumbers.length} Historical ${trackerDmsBulkDraftNumbers.length === 1 ? "Row" : "Rows"}`
+                              : "Add Historical Rows"}
+                        </button>
+                        <div className="bdc-dms-log-bulk__summary" aria-live="polite">
+                          <div className="bdc-dms-log-create__parsed-field">
+                            <span>Customer name</span>
+                            <strong>{TRACKER_HISTORICAL_INPUT_LABEL}</strong>
+                          </div>
+                          <div className="bdc-dms-log-create__parsed-field">
+                            <span>Opp ID</span>
+                            <strong>{TRACKER_HISTORICAL_INPUT_LABEL}</strong>
+                          </div>
+                          <div className="bdc-dms-log-create__parsed-field">
+                            <span>DMS ready</span>
+                            <strong>
+                              {trackerDmsBulkDraftNumbers.length
+                                ? `${trackerDmsBulkDraftNumbers.length} unique DMS numbers`
+                                : "Paste one or many DMS numbers"}
+                            </strong>
+                          </div>
+                        </div>
+                      </div>
+                    </article>
+                  ) : null}
                   <article className="panel bdc-dms-log-panel">
                     <div className="row">
                       <div>
@@ -9513,31 +9688,35 @@ export default function App() {
               >
                 {freshUpCardMode ? (
                   <div className="freshup-card-intro">
-                    <div className="freshup-brand-stack">
-                      <div className="freshup-brand-avatar">
-                        <img src="/logo-facebook.png" alt="Bert Ogden heart logo" />
+                    <div className="freshup-card-intro__top">
+                      <div className="freshup-brand-stack">
+                        <div className="freshup-brand-avatar">
+                          <img src="/logo-facebook.png" alt="Bert Ogden heart logo" />
+                        </div>
+                        <div className="freshup-brand-mark">
+                          <img
+                            src={freshUpPrimaryBrand.logo}
+                            alt={`${freshUpPrimaryStore?.dealership || "Bert Ogden"} logo`}
+                            className={
+                              freshUpPrimaryStore?.dealership === "Outlet"
+                                ? "freshup-brand-mark__image freshup-brand-mark__image--rounded"
+                                : "freshup-brand-mark__image"
+                            }
+                          />
+                          <span>{freshUpPrimaryStore?.display_name || freshUpAssignedSalesperson?.dealership || "Bert Ogden Mission"}</span>
+                        </div>
                       </div>
-                      <div className="freshup-brand-mark">
-                        <img
-                          src={freshUpPrimaryBrand.logo}
-                          alt={`${freshUpPrimaryStore?.dealership || "Bert Ogden"} logo`}
-                          className={
-                            freshUpPrimaryStore?.dealership === "Outlet"
-                              ? "freshup-brand-mark__image freshup-brand-mark__image--rounded"
-                              : "freshup-brand-mark__image"
-                          }
-                        />
-                        <span>{freshUpPrimaryStore?.display_name || freshUpAssignedSalesperson?.dealership || "Bert Ogden Mission"}</span>
+                      <div className="freshup-card-intro__copy">
+                        <span className="eyebrow">Your Sales Agent</span>
+                        <h2>{freshUpCardIntroHeading}</h2>
+                        <p>{freshUpCardIntroCopy}</p>
                       </div>
                     </div>
-                    <span className="eyebrow">Contact {freshUpAssignedSalesperson?.name || "Our Team"}</span>
-                    <h2>{freshUpAssignedSalesperson?.name || freshUpLinksConfig.page_title}</h2>
-                    <p>{freshUpLinksConfig.page_subtitle}</p>
-                    <div className="freshup-contact-strip">
-                      <strong>{freshUpPrimaryStore?.display_name || "Bert Ogden Mission"}</strong>
-                      <span>{freshUpLinksConfig.form_subtitle}</span>
+                    <div className="freshup-card-intro__meta">
+                      <span>{freshUpPrimaryStore?.display_name || "Bert Ogden Mission"}</span>
+                      <span>{freshUpSalespersonPhoneText || "Sales specialist contact"}</span>
                     </div>
-                    <div className="freshup-agent-actions">
+                    <div className="freshup-agent-actions freshup-agent-actions--compact">
                       {freshUpSalespersonPhoneHref ? (
                         <a
                           className="freshup-link-btn freshup-link-btn--blue"
@@ -9558,6 +9737,7 @@ export default function App() {
                         <a
                           className="freshup-link-btn freshup-link-btn--outline"
                           href={freshUpSalespersonContactHref}
+                          download={freshUpSalespersonContactFileName}
                           onClick={() =>
                             trackFreshUpEvent({
                               eventType: "link_click",
@@ -9591,8 +9771,10 @@ export default function App() {
                   </div>
                 ) : (
                   <div className="freshup-capture__header freshup-capture__header--compact">
-                    <div>
-                      <h3>{freshUpLinksConfig.form_title}</h3>
+                    <div className="freshup-capture__header-copy">
+                      <span className="eyebrow">Step 1</span>
+                      <h3>Send your contact info</h3>
+                      <small>Your salesperson stays attached to this form.</small>
                     </div>
                   </div>
                 )}
@@ -9654,6 +9836,10 @@ export default function App() {
                               {freshUpAssignedSalesperson.dealership}
                               {freshUpSalespersonPhoneText ? ` · ${freshUpSalespersonPhoneText}` : " · No phone saved yet"}
                             </small>
+                            <span className="freshup-salesperson-strip__meta">
+                              {freshUpAssignedSalesperson.dealership}
+                              {freshUpSalespersonPhoneText ? ` - ${freshUpSalespersonPhoneText}` : " - No phone saved yet"}
+                            </span>
                           </div>
                           <div className="freshup-salesperson-strip__actions">
                             {freshUpSalespersonPhoneHref ? (
@@ -9665,6 +9851,7 @@ export default function App() {
                               <a
                                 className="freshup-link-btn freshup-link-btn--outline"
                                 href={freshUpSalespersonContactHref}
+                                download={freshUpSalespersonContactFileName}
                               >
                                 {freshUpSalespersonContactLabel}
                               </a>
@@ -9701,7 +9888,7 @@ export default function App() {
                       type="submit"
                       disabled={busy === "freshup-submit" || !freshUpAssignedSalesperson || !freshUpForm.customerName || !freshUpForm.phone}
                     >
-                      {busy === "freshup-submit" ? "Saving..." : freshUpCardMode ? freshUpLinksConfig.submit_label : "Log Freshup"}
+                      {busy === "freshup-submit" ? "Saving..." : freshUpCardMode ? freshUpCardSubmitLabel : "Log Freshup"}
                     </button>
                     {!freshUpCardMode ? (
                       <button type="button" className="secondary" onClick={copyFreshUpSummary}>
@@ -9715,13 +9902,23 @@ export default function App() {
               </form>
 
               <div id={freshUpCardMode ? "freshup-links" : undefined} className={`panel freshup-nfc ${freshUpCardMode ? "freshup-nfc--card" : ""}`}>
-                <span className="eyebrow">{freshUpCardMode ? "Helpful Links" : "NFC Card Side"}</span>
-                <h3>{freshUpCardMode ? freshUpPrimaryStore?.display_name || freshUpLinksConfig.page_title : "Program one link per salesperson"}</h3>
-                <p>
-                  {freshUpCardMode
-                    ? "Use the links below for financing, inventory, maps, and store socials after you save your contact info."
-                    : "Put this link on the NFC business card. When a customer taps, it opens a customer-facing landing page with contact capture at the top and the right links underneath."}
-                </p>
+                <div className="freshup-nfc__header">
+                  <div className="freshup-nfc__header-copy">
+                    <span className="eyebrow">{freshUpCardMode ? "Choose your next step" : "NFC Card Side"}</span>
+                    <h3>{freshUpCardMode ? freshUpPrimaryStore?.display_name || freshUpLinksConfig.page_title : "Program one link per salesperson"}</h3>
+                    <p>
+                      {freshUpCardMode
+                        ? "Finance, inventory, maps, and socials are all here once your info is saved."
+                        : "Put this link on the NFC business card. When a customer taps, it opens a customer-facing landing page with contact capture at the top and the right links underneath."}
+                    </p>
+                  </div>
+                  {freshUpCardMode ? (
+                    <div className="freshup-nfc__header-chip">
+                      <strong>{freshUpAssignedSalesperson?.name || "Sales team"}</strong>
+                      <span>{freshUpPrimaryStore?.display_name || "Bert Ogden Mission"}</span>
+                    </div>
+                  ) : null}
+                </div>
                 {!freshUpCardMode ? (
                   <>
                     <div className="freshup-nfc__link">

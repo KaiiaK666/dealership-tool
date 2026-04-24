@@ -2,6 +2,7 @@ import calendar
 import base64
 import json
 import csv
+import hashlib
 import io
 import os
 import re
@@ -19,7 +20,7 @@ from typing import Any, Dict, List, Optional, Set, Tuple
 from zoneinfo import ZoneInfo
 
 from curl_cffi import requests as curl_requests
-from fastapi import FastAPI, File, Form, Header, HTTPException, Request, UploadFile
+from fastapi import FastAPI, File, Form, Header, HTTPException, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
@@ -96,6 +97,10 @@ SALES_ACTIVITY_BDC_STAFF_SCHEDULE_LABEL = format_weekday_schedule_label(SALES_AC
 SALES_ACTIVITY_SELF_CHAT_LABEL = "Kau 429-8898 (You)"
 SALES_ACTIVITY_SELF_SEARCH_TERMS = "kau,956 429 8898,9564298898"
 SALES_ACTIVITY_SELF_VERIFY_TOKENS = "(You),429-8898,Message yourself"
+SALES_ACTIVITY_WHATSAPP_PROCESS_TIMEOUT_SECONDS = max(
+    300,
+    int(os.getenv("DEALER_WHATSAPP_PROCESS_TIMEOUT_SECONDS", "1500") or 1500),
+)
 BDC_WHATSAPP_LEAD_PUSH_META_KEY = "bdc:lead-whatsapp-push"
 SALES_ANALYTICS_VARIANTS: Dict[str, Dict[str, Any]] = {
     "sales": {
@@ -152,6 +157,13 @@ RULES_TIMEZONE = os.getenv("DEALER_TIMEZONE", "America/Chicago").strip() or "Ame
 ADMIN_USERNAME = os.getenv("DEALER_ADMIN_USERNAME", "").strip()
 ADMIN_PASSWORD = os.getenv("DEALER_ADMIN_PASSWORD", "").strip()
 SESSION_SECONDS = max(900, int(os.getenv("DEALER_ADMIN_SESSION_SECONDS", "43200") or 43200))
+ADMIN_SESSION_COOKIE_NAME = (
+    os.getenv("DEALER_ADMIN_SESSION_COOKIE_NAME", "dealer_tool_admin_session").strip() or "dealer_tool_admin_session"
+)
+ADMIN_SESSION_COOKIE_DOMAIN = os.getenv("DEALER_ADMIN_SESSION_COOKIE_DOMAIN", "").strip()
+ADMIN_LOGIN_WINDOW_SECONDS = max(60, int(os.getenv("DEALER_ADMIN_LOGIN_WINDOW_SECONDS", "900") or 900))
+ADMIN_LOGIN_MAX_ATTEMPTS = max(3, min(20, int(os.getenv("DEALER_ADMIN_LOGIN_MAX_ATTEMPTS", "8") or 8)))
+ADMIN_LOGIN_LOCKOUT_SECONDS = max(60, int(os.getenv("DEALER_ADMIN_LOGIN_LOCKOUT_SECONDS", "900") or 900))
 APP_BASE_URL = os.getenv("DEALER_APP_BASE_URL", "https://app.bertogden123.com").strip() or "https://app.bertogden123.com"
 TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID", "").strip()
 TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN", "").strip()
@@ -211,7 +223,10 @@ BDC_SALES_TRACKER_DEFAULT_SOLD_FROM_APPOINTMENTS_RATE_TARGET = 0.15
 BDC_SALES_TRACKER_DEFAULT_SOLD_FROM_APPOINTMENTS_RATE_CEILING = 0.18
 SPECIALS_KIA_NEW_URL = "https://www.bertogdenmissionkia.com/new-specials/"
 SPECIALS_MAZDA_NEW_URL = "https://www.bertogdenmissionmazda.com/new-specials/"
-SPECIALS_AUTO_OUTLET_URL = "https://www.bertogdenmissionautooutlet.com/"
+SPECIALS_AUTO_OUTLET_URL = (
+    "https://www.bertogdenmissionautooutlet.com/used-vehicles/"
+    "?q=mission%2520&_dFR%5Btype%5D%5B0%5D=Pre-Owned&_dFR%5Btype%5D%5B1%5D=Certified%2520Pre-Owned"
+)
 SPECIALS_KIA_JIRA_ID = "OGDENMIKIA"
 SPECIALS_MAZDA_JIRA_ID = "OGDENMISSI"
 SPECIALS_KIA_OFFERS_JS_URL = "https://d2dhakgqu1upap.cloudfront.net/specials/offers.js"
@@ -297,9 +312,26 @@ app.add_middleware(
 app.mount("/uploads", StaticFiles(directory=UPLOADS_ROOT), name="uploads")
 app.mount("/orgtool", orgtool_app)
 
+
+@app.middleware("http")
+async def apply_security_headers_and_admin_cookie(request: Request, call_next):
+    if not request.headers.get("x-admin-token"):
+        cookie_token = str(request.cookies.get(ADMIN_SESSION_COOKIE_NAME) or "").strip()
+        if cookie_token:
+            headers = list(request.scope.get("headers") or [])
+            headers.append((b"x-admin-token", cookie_token.encode("utf-8")))
+            request.scope["headers"] = headers
+    response = await call_next(request)
+    response.headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+    response.headers.setdefault("Referrer-Policy", "same-origin")
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
+    return response
+
 db_lock = threading.Lock()
 db_conn: Optional[sqlite3.Connection] = None
 admin_sessions: Dict[str, Dict[str, Any]] = {}
+admin_login_attempts: Dict[str, Dict[str, Any]] = {}
 agent_run_threads: Dict[int, threading.Thread] = {}
 agent_run_threads_lock = threading.Lock()
 
@@ -707,6 +739,13 @@ class BdcSalesTrackerEntryOut(BaseModel):
 class BdcSalesTrackerDmsLogEntryIn(BaseModel):
     month: str
     customer_name: str
+    apt_set_under: str = ""
+    notes: str = ""
+
+
+class BdcSalesTrackerDmsLogBulkIn(BaseModel):
+    month: str
+    dms_numbers_text: str
     apt_set_under: str = ""
     notes: str = ""
 
@@ -1478,8 +1517,56 @@ def mask_email(value: str) -> str:
     return f"{visible}***@{domain}"
 
 
+def constant_time_text_equal(left: str, right: str) -> bool:
+    return secrets.compare_digest(str(left or ""), str(right or ""))
+
+
+def hash_admin_session_token(token: Optional[str]) -> str:
+    text = str(token or "").strip()
+    if not text:
+        return ""
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def sensitive_text_values() -> List[str]:
+    values = [
+        ADMIN_PASSWORD,
+        TWILIO_AUTH_TOKEN,
+        RESEND_API_KEY,
+        OPENAI_API_KEY,
+        REMOTE_RUNNER_TOKEN,
+        os.getenv("DEALERSOCKET_USERNAME", "").strip(),
+        os.getenv("DEALERSOCKET_PASSWORD", "").strip(),
+        os.getenv("DEALERSOCKET_TOTP_SECRET", "").strip(),
+        os.getenv("MFA_SECRET", "").strip(),
+    ]
+    deduped: List[str] = []
+    seen: Set[str] = set()
+    for value in values:
+        text = str(value or "").strip()
+        if not text or text in seen:
+            continue
+        seen.add(text)
+        deduped.append(text)
+    return deduped
+
+
+def redact_sensitive_text(value: Any) -> str:
+    text = str(value or "")
+    if not text:
+        return ""
+    redacted = text
+    for secret in sensitive_text_values():
+        if len(secret) >= 3:
+            redacted = redacted.replace(secret, "[redacted]")
+    redacted = re.sub(r"(?i)(authorization\s*:\s*basic\s+)[A-Za-z0-9+/=._-]+", r"\1[redacted]", redacted)
+    redacted = re.sub(r"(?i)(authorization\s*:\s*bearer\s+)[^\s,;]+", r"\1[redacted]", redacted)
+    redacted = re.sub(r"(?i)(x-runner-token\s*[:=]\s*)[^\s,;]+", r"\1[redacted]", redacted)
+    return redacted
+
+
 def compact_error_text(error: Exception) -> str:
-    text = " ".join(str(error or "").strip().split())
+    text = " ".join(redact_sensitive_text(error).strip().split())
     if len(text) > 120:
         return f"{text[:117]}..."
     return text or "unexpected error"
@@ -1719,11 +1806,24 @@ def whatsapp_message_runner_ready() -> bool:
     return local_whatsapp_message_runner_ready() or remote_runner_broker_enabled()
 
 
+def whatsapp_runner_unavailable_text() -> str:
+    if REMOTE_RUNNER_BASE_URL and not REMOTE_RUNNER_TOKEN:
+        return (
+            "This machine has DEALER_REMOTE_RUNNER_BASE_URL set, but DEALER_REMOTE_RUNNER_TOKEN is missing."
+        )
+    if REMOTE_RUNNER_BASE_URL:
+        return (
+            "This machine is configured as a remote-runner worker. Keep DEALER_REMOTE_RUNNER_BASE_URL only on the home PC; "
+            "the hosted server should only set DEALER_REMOTE_RUNNER_TOKEN."
+        )
+    return "Set up the home-PC bridge or install the WhatsApp sender on this machine."
+
+
 def whatsapp_runner_status_text() -> str:
     if local_whatsapp_message_runner_ready():
         return "This machine is ready to send the WhatsApp message immediately."
     if not remote_runner_broker_enabled():
-        return "Set up the home-PC bridge or install the WhatsApp sender on this machine."
+        return whatsapp_runner_unavailable_text()
     state = remote_runner_state()
     if state.online and state.whatsapp_ready:
         return f"{state.label} is online and processing queued WhatsApp requests."
@@ -1765,7 +1865,13 @@ def build_assignment_whatsapp_message(assignment_row: Dict[str, Any]) -> str:
 
 
 def compact_process_text(stdout: str, stderr: str) -> str:
-    combined = " ".join(part.strip() for part in [stdout, stderr] if str(part or "").strip())
+    lines: List[str] = []
+    for part in (stdout, stderr):
+        for raw_line in str(part or "").splitlines():
+            line = raw_line.strip()
+            if line:
+                lines.append(line)
+    combined = " | ".join(lines[-6:])
     return compact_error_text(Exception(combined or "process failed"))
 
 
@@ -1802,13 +1908,17 @@ def run_self_whatsapp_message(message_text: str, message_tag: str = "bdc-assignm
         env=env,
         capture_output=True,
         text=True,
-        timeout=180,
+        timeout=SALES_ACTIVITY_WHATSAPP_PROCESS_TIMEOUT_SECONDS,
         creationflags=creation_flags,
     )
     if result.returncode != 0:
         raise RuntimeError(compact_process_text(result.stdout, result.stderr))
-    output = str(result.stdout or "").strip().splitlines()
-    return output[-1].strip() if output else f"WhatsApp push sent to {SALES_ACTIVITY_SELF_CHAT_LABEL}"
+    output = [str(line or "").strip() for line in str(result.stdout or "").splitlines() if str(line or "").strip()]
+    for line in reversed(output):
+        normalized = re.sub(r"^\[[^\]]+\]\s*", "", line).strip()
+        if normalized.lower().startswith("whatsapp push sent"):
+            return normalized
+    return f"WhatsApp push sent to {SALES_ACTIVITY_SELF_CHAT_LABEL}"
 
 
 def deliver_assignment_whatsapp_push_async(assignment_row: Dict[str, Any]) -> str:
@@ -1821,7 +1931,7 @@ def deliver_assignment_whatsapp_push_async(assignment_row: Dict[str, Any]) -> st
     message_text = build_assignment_whatsapp_message(assignment_row)
     if not local_whatsapp_message_runner_ready():
         if not remote_runner_broker_enabled():
-            return "WhatsApp push skipped: sender is not ready"
+            return f"WhatsApp push skipped: {whatsapp_runner_unavailable_text()}"
         queue_remote_runner_job(
             job_type="whatsapp-self-message",
             message_text=message_text,
@@ -2013,8 +2123,8 @@ def remote_runner_worker_loop() -> None:
             if isinstance(job, dict) and int(job.get("id") or 0) > 0:
                 process_remote_runner_job(job)
                 continue
-        except Exception:
-            pass
+        except Exception as exc:
+            print(f"[remote-runner-worker] {compact_error_text(exc)}")
         time.sleep(REMOTE_RUNNER_POLL_SECONDS)
 
 
@@ -2160,24 +2270,24 @@ def set_tab_visibility(payload: TabVisibilityIn) -> TabVisibilityOut:
 def default_freshup_links_config() -> FreshUpLinksConfigOut:
     return FreshUpLinksConfigOut(
         page_title="Start with Bert Ogden Mission",
-        page_subtitle="Drop your info first, then choose the next step that fits you best.",
-        form_title="Send us your contact info",
-        form_subtitle="A sales specialist will follow up fast.",
-        submit_label="Send My Info",
+        page_subtitle="Save your info first, then choose the credit or inventory step you want.",
+        form_title="Send your contact info",
+        form_subtitle="Your salesperson stays attached to this form.",
+        submit_label="Send Info to Sales Agent",
         stores=[
             FreshUpLinkStoreOut(
                 dealership="Kia",
                 display_name="Mission Kia",
-                call_label="Call us now",
+                call_label="Call Sales Agent",
                 call_url="tel:(956) 429 8898",
                 maps_label="Google Maps",
                 maps_url="https://www.google.com/maps/place/Bert+Ogden+Mission+Kia/@26.1969595,-98.2927102,17z/data=!3m1!4b1!4m6!3m5!1s0x8665a7eced82c205:0x3fe685adeab8c28e!8m2!3d26.1969595!4d-98.2901353!16s%2Fg%2F1tjdgmn5?entry=ttu&g_ep=EgoyMDI2MDIyMi4wIKXMDSoASAFQAw%3D%3D",
                 instagram_url="https://www.instagram.com/bertogdenkiamission/",
                 facebook_url="https://www.facebook.com/BertOgdenMissionKia",
                 youtube_url="https://www.youtube.com/channel/UCGVeQ1vKWK3bLq396D8P_4A",
-                soft_pull_label="Quick Qualify",
+                soft_pull_label="Quick Qualify Application",
                 soft_pull_url="https://www.700dealer.com/QuickQualify/fcb574d194ea477c945ec558b605c0f7-202061",
-                hard_pull_label="Quick Application",
+                hard_pull_label="Hard Pull Credit Submission",
                 hard_pull_url="https://www.700dealer.com/QuickQualify/efdbaaebf9444bf18a6e3ca931db75f3-2020120",
                 inventory_label="View Kia New Inventory",
                 inventory_url="https://www.bertogdenmissionkia.com/new-vehicles/",
@@ -2192,9 +2302,9 @@ def default_freshup_links_config() -> FreshUpLinksConfigOut:
                 instagram_url="",
                 facebook_url="",
                 youtube_url="",
-                soft_pull_label="Quick Qualify",
+                soft_pull_label="Quick Qualify Application",
                 soft_pull_url="https://www.700dealer.com/QuickQualify/3019d192efae4e3684cc49a88095425a-202061",
-                hard_pull_label="Quick Application",
+                hard_pull_label="Hard Pull Credit Submission",
                 hard_pull_url="https://www.700dealer.com/QuickQualify/d303d5b01d0f44df9ca5aad9a8a408dd-2019930",
                 inventory_label="View Mazda New Inventory",
                 inventory_url="https://www.bertogdenmissionmazda.com/new-vehicles/",
@@ -2209,9 +2319,9 @@ def default_freshup_links_config() -> FreshUpLinksConfigOut:
                 instagram_url="",
                 facebook_url="",
                 youtube_url="",
-                soft_pull_label="Quick Qualify",
+                soft_pull_label="Quick Qualify Application",
                 soft_pull_url="https://www.700dealer.com/QuickQualify/88a0b45934bf4a4e8937c8ccb61c463f-202061",
-                hard_pull_label="Quick Application",
+                hard_pull_label="Hard Pull Credit Submission",
                 hard_pull_url="https://www.700dealer.com/QuickQualify/6d6d3105f3d3447a95e729875e0f248b-2020120",
                 inventory_label="View Pre-Owned Inventory",
                 inventory_url="https://www.bertogdenmissionautooutlet.com/inventory/used-2021-kia-forte-gt-line-fwd-4d-sedan-3kpf34ad7me310864/",
@@ -2696,9 +2806,48 @@ def remote_runner_sales_variant_online_ready(variant: Optional[str] = None) -> b
     return state.online and key in set(state.sales_analytics_variants_ready or [])
 
 
+def build_sales_activity_process_env() -> Dict[str, str]:
+    allowed_keys = (
+        "APPDATA",
+        "COMSPEC",
+        "HOME",
+        "HOMEDRIVE",
+        "HOMEPATH",
+        "LANG",
+        "LC_ALL",
+        "LOCALAPPDATA",
+        "NODE_EXTRA_CA_CERTS",
+        "NUMBER_OF_PROCESSORS",
+        "OS",
+        "PATH",
+        "PATHEXT",
+        "PLAYWRIGHT_BROWSERS_PATH",
+        "PROCESSOR_ARCHITECTURE",
+        "PROCESSOR_IDENTIFIER",
+        "PROCESSOR_LEVEL",
+        "PROCESSOR_REVISION",
+        "PROGRAMDATA",
+        "PROGRAMFILES",
+        "PROGRAMFILES(X86)",
+        "SSL_CERT_DIR",
+        "SSL_CERT_FILE",
+        "SYSTEMROOT",
+        "TEMP",
+        "TMP",
+        "USERPROFILE",
+        "WINDIR",
+    )
+    env: Dict[str, str] = {}
+    for key in allowed_keys:
+        value = os.getenv(key, "")
+        if value:
+            env[key] = value
+    return env
+
+
 def sales_analytics_runner_env(variant: Optional[str] = None) -> Dict[str, str]:
     meta = sales_analytics_variant_meta(variant)
-    env = os.environ.copy()
+    env = build_sales_activity_process_env()
     env.update(
         {
             "DEALERSOCKET_REPORT_NAME": str(meta["report_name"]),
@@ -2708,9 +2857,11 @@ def sales_analytics_runner_env(variant: Optional[str] = None) -> Dict[str, str]:
             "SALES_ACTIVITY_SCHEDULE_DAYS": ",".join(meta["schedule_days"]),
             "SALES_ACTIVITY_SCHEDULE_TIMES": ",".join(meta["schedule_times"]),
             "SALES_ACTIVITY_SCHEDULE_LABEL": str(meta["schedule_label"]),
-            "WHATSAPP_TARGET_LABEL": env.get("WHATSAPP_TARGET_LABEL", SALES_ACTIVITY_SELF_CHAT_LABEL),
-            "WHATSAPP_SELF_SEARCH_TERMS": env.get("WHATSAPP_SELF_SEARCH_TERMS", SALES_ACTIVITY_SELF_SEARCH_TERMS),
-            "WHATSAPP_SELF_VERIFY_TOKENS": env.get("WHATSAPP_SELF_VERIFY_TOKENS", SALES_ACTIVITY_SELF_VERIFY_TOKENS),
+            "DEALER_REMOTE_RUNNER_BASE_URL": os.getenv("DEALER_REMOTE_RUNNER_BASE_URL", ""),
+            "DEALER_REMOTE_RUNNER_TOKEN": os.getenv("DEALER_REMOTE_RUNNER_TOKEN", ""),
+            "WHATSAPP_TARGET_LABEL": os.getenv("WHATSAPP_TARGET_LABEL", SALES_ACTIVITY_SELF_CHAT_LABEL),
+            "WHATSAPP_SELF_SEARCH_TERMS": os.getenv("WHATSAPP_SELF_SEARCH_TERMS", SALES_ACTIVITY_SELF_SEARCH_TERMS),
+            "WHATSAPP_SELF_VERIFY_TOKENS": os.getenv("WHATSAPP_SELF_VERIFY_TOKENS", SALES_ACTIVITY_SELF_VERIFY_TOKENS),
         }
     )
     return env
@@ -3379,7 +3530,11 @@ def extract_special_end_label(*values: Any) -> str:
 def summarize_kia_special_terms(disclaimer: str) -> Tuple[str, str, str, str]:
     text = collapse_whitespace(disclaimer)
     apr_match = re.search(r"(\d+(?:\.\d+)?)%\s*APR(?: financing)?[^.]*?(?:up to|for)\s*(\d+)\s*months?", text, re.IGNORECASE)
-    monthly_match = re.search(r"\$([\d,]+)\s*/\s*month|\$([\d,]+)\s+month", text, re.IGNORECASE)
+    monthly_match = re.search(
+        r"\$([\d,]+)\s*(?:/\s*(?:month|mo\.?)|\s+(?:month|mo\.?|first monthly payment))",
+        text,
+        re.IGNORECASE,
+    )
     due_match = re.search(r"\$([\d,]+)\s+due at signing", text, re.IGNORECASE)
     delivery_match = extract_special_end_label(text)
 
@@ -3389,7 +3544,7 @@ def summarize_kia_special_terms(disclaimer: str) -> Tuple[str, str, str, str]:
         term_value = apr_match.group(2)
         apr_text = f"{apr_value}% APR / {term_value} mos"
 
-    monthly_value = (monthly_match.group(1) or monthly_match.group(2)) if monthly_match else ""
+    monthly_value = monthly_match.group(1) if monthly_match else ""
     monthly_text = f"${monthly_value}/mo" if monthly_value else ""
 
     summary_line = monthly_text or apr_text or "Live Kia offer"
@@ -3429,6 +3584,91 @@ def extract_special_page_id(page_html: str) -> str:
     return match.group(1).strip() if match else ""
 
 
+def parse_inline_json_assignment(page_html: str, var_name: str) -> Dict[str, Any]:
+    match = re.search(rf"var\s+{re.escape(var_name)}\s*=\s*(\{{.*?\}});", page_html, re.IGNORECASE | re.DOTALL)
+    if not match:
+        return {}
+    try:
+        parsed = json.loads(match.group(1))
+    except json.JSONDecodeError:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def extract_mvn_algolia_settings(page_html: str) -> Dict[str, Any]:
+    return parse_inline_json_assignment(page_html, "mvnAlgSettings")
+
+
+def extract_page_modified_year_month(page_html: str) -> Tuple[str, str]:
+    match = re.search(r'"dateModified":"(\d{4})-(\d{2})-\d{2}T', page_html)
+    if not match:
+        return "", ""
+    return match.group(1), match.group(2)
+
+
+def extract_uploads_root(page_html: str, dealer_slug: str) -> str:
+    matches = re.findall(rf"https://[^\"']+/{re.escape(dealer_slug)}/uploads", page_html, re.IGNORECASE)
+    if not matches:
+        return ""
+    for match in matches:
+        if "di-uploads-pod" in match.lower():
+            return match
+    return matches[0]
+
+
+def slugify_media_stem(value: Any) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", str(value or "").strip().lower()).strip("-")
+    return slug
+
+
+def remote_url_is_image(url: str) -> bool:
+    try:
+        response = curl_requests.head(url, impersonate="chrome124", timeout=15, allow_redirects=True)
+        content_type = str(response.headers.get("content-type") or "").lower()
+        if response.status_code < 400 and content_type.startswith("image/"):
+            return True
+    except Exception:
+        pass
+    try:
+        response = curl_requests.get(url, impersonate="chrome124", timeout=15)
+        content_type = str(response.headers.get("content-type") or "").lower()
+        return response.status_code < 400 and content_type.startswith("image/")
+    except Exception:
+        return False
+
+
+def current_kia_special_image_url(
+    *,
+    page_html: str,
+    model_name: str,
+    fallback_image_url: str,
+    availability_cache: Optional[Dict[str, bool]] = None,
+) -> str:
+    uploads_root = extract_uploads_root(page_html, "bertogdenmissionkia")
+    year_text, month_text = extract_page_modified_year_month(page_html)
+    model_slug = slugify_media_stem(model_name)
+    if not uploads_root or not year_text or not month_text or not model_slug:
+        return fallback_image_url
+
+    cache = availability_cache if availability_cache is not None else {}
+    candidate_urls = [
+        f"{uploads_root}/{year_text}/{month_text}/{model_slug}_1200x1200-1-.png",
+        f"{uploads_root}/{year_text}/{month_text}/{model_slug}_1200x1200-1-.jpg",
+        f"{uploads_root}/{year_text}/{month_text}/{model_slug}_1200x1200-1-.jpeg",
+        f"{uploads_root}/{year_text}/{month_text}/{model_slug}_1200x1200.png",
+        f"{uploads_root}/{year_text}/{month_text}/{model_slug}_1200x1200.jpg",
+        f"{uploads_root}/{year_text}/{month_text}/{model_slug}_1200x1200.jpeg",
+    ]
+    for candidate_url in candidate_urls:
+        is_available = cache.get(candidate_url)
+        if is_available is None:
+            is_available = remote_url_is_image(candidate_url)
+            cache[candidate_url] = is_available
+        if is_available:
+            return candidate_url
+    return fallback_image_url
+
+
 def manufacturer_specials_feed_url(*, jira_id: str, page_id: str, source_url: str) -> str:
     params = urllib.parse.urlencode(
         {
@@ -3452,13 +3692,14 @@ def mazda_specials_feed_url(page_id: str, source_url: str) -> str:
 
 def build_kia_special_import(source_url: str) -> VehicleSpecialImportIn:
     candidate_page_ids = [SPECIALS_KIA_DEFAULT_PAGE_ID]
+    page_html = ""
     try:
         page_html = browser_fetch_text(source_url)
         page_id = extract_special_page_id(page_html)
         if page_id and page_id not in candidate_page_ids:
             candidate_page_ids.insert(0, page_id)
     except HTTPException:
-        page_html = ""
+        pass
 
     feed: Dict[str, Any] = {}
     last_error: Optional[HTTPException] = None
@@ -3481,6 +3722,7 @@ def build_kia_special_import(source_url: str) -> VehicleSpecialImportIn:
     now_ts = time.time()
     entries: List[VehicleSpecialImportEntryIn] = []
     seen_links: set[str] = set()
+    image_availability_cache: Dict[str, bool] = {}
     for group in groups:
         for special in group.get("specials") or []:
             if special.get("deleted") or not special.get("enabled", True):
@@ -3518,6 +3760,14 @@ def build_kia_special_import(source_url: str) -> VehicleSpecialImportIn:
             if dedupe_key in seen_links:
                 continue
             seen_links.add(dedupe_key)
+            image_url = str(special.get("header_image") or special.get("image") or "").strip()
+            if page_html:
+                image_url = current_kia_special_image_url(
+                    page_html=page_html,
+                    model_name=str(car.get("model") or ""),
+                    fallback_image_url=image_url,
+                    availability_cache=image_availability_cache,
+                )
             entries.append(
                 VehicleSpecialImportEntryIn(
                     badge="Kia New Special",
@@ -3528,7 +3778,7 @@ def build_kia_special_import(source_url: str) -> VehicleSpecialImportIn:
                     mileage_text="",
                     note=note_line,
                     score_label=score_label,
-                    image_url=str(special.get("header_image") or special.get("image") or "").strip(),
+                    image_url=image_url,
                     link_url=button_url or source_url,
                 )
             )
@@ -3636,6 +3886,7 @@ def build_auto_outlet_used_import(source_url: str) -> VehicleSpecialImportIn:
     app_id = SPECIALS_AUTO_OUTLET_ALGOLIA_APP_ID
     api_key = SPECIALS_AUTO_OUTLET_ALGOLIA_SEARCH_KEY
     inventory_index = SPECIALS_AUTO_OUTLET_ALGOLIA_INVENTORY_INDEX
+    page_html = ""
     try:
         page_html = browser_fetch_text(source_url)
         settings = extract_mvn_algolia_settings(page_html)
@@ -3659,13 +3910,33 @@ def build_auto_outlet_used_import(source_url: str) -> VehicleSpecialImportIn:
         "Origin": "https://www.bertogdenmissionautooutlet.com",
         "Referer": source_url,
     }
+    parsed_source_url = urllib.parse.urlparse(source_url)
+    parsed_source_query = urllib.parse.parse_qs(parsed_source_url.query or "", keep_blank_values=False)
+    raw_search_query = next(iter(parsed_source_query.get("q") or []), "")
+    search_query = str(raw_search_query or "").strip()
+    previous_search_query = None
+    while search_query and search_query != previous_search_query:
+        previous_search_query = search_query
+        search_query = urllib.parse.unquote_plus(search_query).strip()
+    if not search_query:
+        search_query = "mission auto outlet"
+    elif collapse_whitespace(search_query).lower() == "mission":
+        search_query = "mission auto outlet"
+
     algolia_payload = {
-        "query": "",
+        "query": search_query,
         "hitsPerPage": 40,
         "facetFilters": [["type:Pre-Owned", "type:Certified Pre-Owned", "type:Used", "type:Certified Used"]],
     }
     result = browser_fetch_json(algolia_url, method="POST", headers=algolia_headers, json_payload=algolia_payload)
     hits = result.get("hits") or []
+    mission_hits = [
+        hit
+        for hit in hits
+        if "mission auto outlet" in collapse_whitespace((hit or {}).get("location") or (hit or {}).get("Location") or "").lower()
+    ]
+    if mission_hits:
+        hits = mission_hits
     if not hits:
         raise HTTPException(status_code=502, detail="Mission Auto Outlet inventory search returned no vehicles")
 
@@ -3720,7 +3991,8 @@ def build_auto_outlet_used_import(source_url: str) -> VehicleSpecialImportIn:
         price_value = numeric_token_from_text(str(hit.get("our_price") or ""))
         mileage_value = numeric_token_from_text(str(hit.get("miles") or ""))
         stock_number = collapse_whitespace(hit.get("stock") or "")
-        note_parts = ["Mission Auto Outlet"]
+        location_label = collapse_whitespace(hit.get("location") or hit.get("Location") or "") or "Mission Auto Outlet"
+        note_parts = [location_label]
         if stock_number:
             note_parts.append(f"Stock {stock_number}")
         date_in_stock = collapse_whitespace(hit.get("date_in_stock") or "")
@@ -4316,9 +4588,129 @@ def prune_sessions() -> None:
         admin_sessions.pop(token, None)
 
 
+def request_client_host(request: Request) -> str:
+    forwarded = str(request.headers.get("x-forwarded-for") or "").split(",")[0].strip().lower()
+    if forwarded:
+        return forwarded
+    return str(getattr(request.client, "host", "") or "").strip().lower()
+
+
+def request_origin_host(request: Request) -> str:
+    for header_name in ("origin", "referer"):
+        raw_value = str(request.headers.get(header_name) or "").strip()
+        if not raw_value:
+            continue
+        try:
+            parsed = urllib.parse.urlparse(raw_value)
+        except ValueError:
+            continue
+        host = str(parsed.hostname or "").strip().lower()
+        if host:
+            return host
+    return ""
+
+
+def request_scheme(request: Request) -> str:
+    forwarded_proto = str(request.headers.get("x-forwarded-proto") or "").split(",")[0].strip().lower()
+    if forwarded_proto:
+        return forwarded_proto
+    for header_name in ("origin", "referer"):
+        raw_value = str(request.headers.get(header_name) or "").strip()
+        if not raw_value:
+            continue
+        try:
+            parsed = urllib.parse.urlparse(raw_value)
+        except ValueError:
+            continue
+        scheme = str(parsed.scheme or "").strip().lower()
+        if scheme:
+            return scheme
+    return str(request.url.scheme or "").strip().lower()
+
+
+def is_local_origin_request(request: Request) -> bool:
+    return request_client_host(request) in LOCAL_TRIGGER_HOSTS or request_origin_host(request) in LOCAL_TRIGGER_HOSTS
+
+
+def admin_cookie_secure(request: Request) -> bool:
+    return request_scheme(request) == "https" and not is_local_origin_request(request)
+
+
+def set_admin_session_cookie(response: Response, request: Request, token: str) -> None:
+    response.set_cookie(
+        key=ADMIN_SESSION_COOKIE_NAME,
+        value=str(token or ""),
+        max_age=SESSION_SECONDS,
+        expires=SESSION_SECONDS,
+        httponly=True,
+        secure=admin_cookie_secure(request),
+        samesite="lax",
+        path="/",
+        domain=ADMIN_SESSION_COOKIE_DOMAIN or None,
+    )
+
+
+def clear_admin_session_cookie(response: Response, request: Request) -> None:
+    response.delete_cookie(
+        key=ADMIN_SESSION_COOKIE_NAME,
+        path="/",
+        domain=ADMIN_SESSION_COOKIE_DOMAIN or None,
+        secure=admin_cookie_secure(request),
+        samesite="lax",
+    )
+
+
+def prune_admin_login_attempts() -> None:
+    now_ts = time.time()
+    expiry_window = max(ADMIN_LOGIN_WINDOW_SECONDS, ADMIN_LOGIN_LOCKOUT_SECONDS)
+    expired = [
+        key
+        for key, state in admin_login_attempts.items()
+        if float(state.get("locked_until_ts") or 0.0) <= now_ts
+        and float(state.get("last_failed_ts") or 0.0) <= (now_ts - expiry_window)
+    ]
+    for key in expired:
+        admin_login_attempts.pop(key, None)
+
+
+def ensure_admin_login_allowed(request: Request) -> None:
+    prune_admin_login_attempts()
+    client_key = request_client_host(request) or "unknown"
+    state = admin_login_attempts.get(client_key) or {}
+    locked_until_ts = float(state.get("locked_until_ts") or 0.0)
+    if locked_until_ts > time.time():
+        raise HTTPException(status_code=429, detail="too many admin login attempts. try again later")
+
+
+def register_failed_admin_login(request: Request) -> None:
+    prune_admin_login_attempts()
+    client_key = request_client_host(request) or "unknown"
+    now_ts = time.time()
+    state = admin_login_attempts.get(client_key) or {}
+    attempts = [
+        float(item)
+        for item in list(state.get("attempts") or [])
+        if now_ts - float(item or 0.0) <= ADMIN_LOGIN_WINDOW_SECONDS
+    ]
+    attempts.append(now_ts)
+    locked_until_ts = 0.0
+    if len(attempts) >= ADMIN_LOGIN_MAX_ATTEMPTS:
+        locked_until_ts = now_ts + ADMIN_LOGIN_LOCKOUT_SECONDS
+    admin_login_attempts[client_key] = {
+        "attempts": attempts,
+        "last_failed_ts": now_ts,
+        "locked_until_ts": locked_until_ts,
+    }
+
+
+def clear_admin_login_attempts(request: Request) -> None:
+    prune_admin_login_attempts()
+    admin_login_attempts.pop(request_client_host(request) or "unknown", None)
+
+
 def require_admin(token: Optional[str]) -> Dict[str, Any]:
     prune_sessions()
-    session = admin_sessions.get((token or "").strip())
+    session = admin_sessions.get(hash_admin_session_token(token))
     if not session:
         raise HTTPException(status_code=403, detail="admin login required")
     return session
@@ -4327,7 +4719,7 @@ def require_admin(token: Optional[str]) -> Dict[str, Any]:
 def require_runner_token(token: Optional[str]) -> None:
     if not remote_runner_broker_enabled():
         raise HTTPException(status_code=503, detail="remote runner broker is not configured on this server")
-    if str(token or "").strip() != REMOTE_RUNNER_TOKEN:
+    if not constant_time_text_equal(str(token or "").strip(), REMOTE_RUNNER_TOKEN):
         raise HTTPException(status_code=403, detail="invalid runner token")
 
 
@@ -4335,8 +4727,12 @@ def issue_session() -> AdminSessionOut:
     prune_sessions()
     token = secrets.token_urlsafe(24)
     expires_ts = time.time() + SESSION_SECONDS
-    admin_sessions[token] = {"username": ADMIN_USERNAME, "expires_ts": expires_ts}
+    admin_sessions[hash_admin_session_token(token)] = {"username": ADMIN_USERNAME, "expires_ts": expires_ts}
     return AdminSessionOut(token=token, username=ADMIN_USERNAME, expires_ts=expires_ts)
+
+
+def revoke_admin_session(token: Optional[str]) -> None:
+    admin_sessions.pop(hash_admin_session_token(token), None)
 
 
 def salesperson_out(row: Dict[str, Any]) -> SalespersonOut:
@@ -5435,6 +5831,49 @@ def create_bdc_sales_tracker_dms_log_entry(payload: BdcSalesTrackerDmsLogEntryIn
             now_at,
         ),
     )
+    return fetch_bdc_sales_tracker(month_key)
+
+
+def create_bdc_sales_tracker_dms_log_bulk_entries(payload: BdcSalesTrackerDmsLogBulkIn) -> BdcSalesTrackerOut:
+    month_key = parse_month_key(payload.month)
+    apt_set_under = normalize_short_text(payload.apt_set_under, "apt_set_under", max_len=120)
+    notes = normalize_notes(payload.notes, "notes", max_len=1000)
+    dms_numbers = parse_bdc_sales_tracker_dms_numbers(payload.dms_numbers_text)
+    if not apt_set_under:
+        raise HTTPException(status_code=400, detail="apt_set_under is required")
+    if not dms_numbers:
+        raise HTTPException(status_code=400, detail="At least one DMS number is required for bulk historical input")
+    agent_id, _ = resolve_bdc_agent(None, apt_set_under)
+    if not agent_id:
+        raise HTTPException(status_code=400, detail="apt_set_under must match an active BDC agent for bulk historical input")
+    for dms_number in dms_numbers:
+        ensure_unique_bdc_sales_tracker_dms(month_key, dms_number)
+    now_ts = time.time()
+    now_at = now_local_input_value()
+    for dms_number in dms_numbers:
+        db_insert(
+            """
+            INSERT INTO bdc_sales_tracker_dms_log (
+                month_key, customer_name, opportunity_id, dms_number, apt_set_under, notes, logged, logged_ts, logged_at,
+                display_order, created_ts, created_at, updated_ts, updated_at
+            )
+            VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, 0, ?, ?, ?, ?)
+            """,
+            (
+                month_key,
+                "Historical Input",
+                "Historical Input",
+                dms_number,
+                apt_set_under,
+                notes,
+                now_ts,
+                now_at,
+                now_ts,
+                now_at,
+                now_ts,
+                now_at,
+            ),
+        )
     return fetch_bdc_sales_tracker(month_key)
 
 
@@ -6537,7 +6976,7 @@ def ensure_bdc_undo_authorized(password: str) -> None:
     if not settings.require_password:
         return
     expected = str(get_meta(BDC_UNDO_PASSWORD_META_KEY) or "bdc")
-    if str(password or "").strip() != expected:
+    if not constant_time_text_equal(str(password or "").strip(), expected):
         raise HTTPException(status_code=403, detail="invalid undo password")
 
 
@@ -8862,15 +9301,36 @@ def sync_internal_runner_sales_analytics(
 
 
 @app.post("/api/admin/login", response_model=AdminSessionOut)
-def admin_login(payload: AdminLoginIn) -> AdminSessionOut:
+def admin_login(payload: AdminLoginIn, request: Request, response: Response) -> AdminSessionOut:
+    ensure_admin_login_allowed(request)
     if not admin_credentials_configured():
         raise HTTPException(
             status_code=503,
             detail="admin credentials are not configured on the server",
         )
-    if payload.username.strip() != ADMIN_USERNAME or payload.password != ADMIN_PASSWORD:
+    if not constant_time_text_equal(payload.username.strip(), ADMIN_USERNAME) or not constant_time_text_equal(
+        payload.password,
+        ADMIN_PASSWORD,
+    ):
+        register_failed_admin_login(request)
         raise HTTPException(status_code=403, detail="invalid admin credentials")
-    return issue_session()
+    clear_admin_login_attempts(request)
+    session = issue_session()
+    set_admin_session_cookie(response, request, session.token)
+    return AdminSessionOut(token="", username=session.username, expires_ts=session.expires_ts)
+
+
+@app.post("/api/admin/logout")
+def admin_logout(
+    request: Request,
+    response: Response,
+    x_admin_token: Optional[str] = Header(default=None),
+) -> Dict[str, bool]:
+    token = str(x_admin_token or request.cookies.get(ADMIN_SESSION_COOKIE_NAME) or "").strip()
+    if token:
+        revoke_admin_session(token)
+    clear_admin_session_cookie(response, request)
+    return {"ok": True}
 
 
 @app.get("/api/admin/session", response_model=AdminStatusOut)
@@ -9479,6 +9939,15 @@ def post_bdc_sales_tracker_dms_log_entry(
 ) -> BdcSalesTrackerOut:
     require_admin(x_admin_token)
     return create_bdc_sales_tracker_dms_log_entry(payload)
+
+
+@app.post("/api/bdc-sales-tracker/dms-log/bulk", response_model=BdcSalesTrackerOut)
+def post_bdc_sales_tracker_dms_log_bulk_entries(
+    payload: BdcSalesTrackerDmsLogBulkIn,
+    x_admin_token: Optional[str] = Header(default=None),
+) -> BdcSalesTrackerOut:
+    require_admin(x_admin_token)
+    return create_bdc_sales_tracker_dms_log_bulk_entries(payload)
 
 
 @app.put("/api/bdc-sales-tracker/dms-log/{entry_id}", response_model=BdcSalesTrackerOut)
