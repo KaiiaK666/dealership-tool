@@ -1858,9 +1858,40 @@ def update_bdc_lead_push_config(payload: BdcLeadPushConfigIn) -> BdcLeadPushConf
     return get_bdc_lead_push_config()
 
 
+def format_assignment_whatsapp_phone_mention(phone_number: Any) -> str:
+    digits = re.sub(r"\D+", "", str(phone_number or ""))
+    if not digits:
+        return ""
+    if len(digits) == 10:
+        digits = f"1{digits}"
+    if len(digits) == 11 and digits.startswith("1"):
+        return f"@+{digits}"
+    return f"@{digits}"
+
+
+def assignment_salesperson_phone_number(assignment_row: Dict[str, Any]) -> str:
+    saved_phone = str(
+        assignment_row.get("salesperson_phone_number")
+        or assignment_row.get("phone_number")
+        or ""
+    ).strip()
+    if saved_phone:
+        return saved_phone
+    salesperson_id = int(assignment_row.get("salesperson_id") or 0)
+    if salesperson_id <= 0:
+        return ""
+    salesperson_row = get_salesperson_row(salesperson_id)
+    if not salesperson_row:
+        return ""
+    return str(salesperson_row.get("phone_number") or "").strip()
+
+
 def build_assignment_whatsapp_message(assignment_row: Dict[str, Any]) -> str:
     salesperson_name = str(assignment_row.get("salesperson_name") or "").strip() or "the salesperson"
+    phone_mention = format_assignment_whatsapp_phone_mention(assignment_salesperson_phone_number(assignment_row))
     lines = [f"A lead has been assigned to {salesperson_name}."]
+    if phone_mention:
+        lines.insert(0, phone_mention)
     lines.extend(build_assignment_customer_lines(assignment_row))
     return "\n".join(lines)
 
