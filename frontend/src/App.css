@@ -8419,10 +8419,17 @@ button.special-card:hover:not(:disabled) {
 .sales-analytics-hero {
   grid-template-columns: minmax(0, 1.4fr) minmax(280px, 0.8fr);
   align-items: start;
+  overflow: hidden;
   background:
     radial-gradient(circle at top right, rgba(196, 102, 52, 0.14), transparent 34%),
     radial-gradient(circle at left center, rgba(28, 128, 121, 0.1), transparent 30%),
     linear-gradient(135deg, rgba(255, 252, 247, 0.98), rgba(245, 238, 227, 0.92));
+}
+
+.sales-analytics-hero > *,
+.sales-analytics-hero__copy,
+.sales-analytics-hero__actions {
+  min-width: 0;
 }
 
 .sales-analytics-variant-tabs {
@@ -8523,11 +8530,19 @@ button.special-card:hover:not(:disabled) {
   align-content: start;
 }
 
+.sales-analytics-hero__actions button {
+  width: 100%;
+  min-width: 0;
+}
+
 .sales-analytics-hero__actions small,
 .sales-analytics-feedback,
 .sales-analytics-error,
 .sales-analytics-empty-inline {
   color: var(--muted);
+  max-width: 100%;
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
 .sales-analytics-feedback,
@@ -8539,9 +8554,40 @@ button.special-card:hover:not(:disabled) {
 }
 
 .sales-analytics-error {
+  display: grid;
+  gap: 7px;
   color: var(--danger);
   border-color: rgba(195, 74, 49, 0.2);
   background: rgba(255, 244, 241, 0.92);
+}
+
+.sales-analytics-error strong {
+  color: #a83a24;
+}
+
+.sales-analytics-error span {
+  line-height: 1.45;
+}
+
+.sales-analytics-error details {
+  color: var(--muted);
+}
+
+.sales-analytics-error summary {
+  cursor: pointer;
+  width: fit-content;
+  font-weight: 700;
+}
+
+.sales-analytics-error pre {
+  max-height: 170px;
+  margin: 8px 0 0;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.72rem;
+  line-height: 1.45;
 }
 
 .sales-analytics-kpis {
@@ -8709,9 +8755,43 @@ button.special-card:hover:not(:disabled) {
   background: rgba(255, 243, 240, 0.92);
 }
 
+.sales-analytics-table__row.is-high {
+  border-color: rgba(77, 145, 74, 0.34);
+  background: linear-gradient(90deg, rgba(224, 246, 216, 0.96), rgba(250, 244, 223, 0.88));
+}
+
 .sales-analytics-table__rep {
   display: grid;
   gap: 4px;
+}
+
+.sales-analytics-table__rep strong {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.sales-analytics-table__done {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: rgba(214, 242, 201, 0.95);
+  border: 1px solid rgba(110, 174, 92, 0.38);
+  color: #285d2e;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.64rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.sales-analytics-table__done span {
+  color: #c28a04;
+  font-size: 0.78rem;
+  line-height: 1;
 }
 
 .sales-analytics-table__rep small,

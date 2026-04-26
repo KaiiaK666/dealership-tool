@@ -72,13 +72,44 @@ function pullTimingSummary(status, nowMs) {
 }
 
 function runStatusCopy(config, status) {
+  if (status?.state === "queued") {
+    return config?.runner_status_text || "Queued for the home-PC bridge. The pull starts as soon as that machine checks in.";
+  }
   if (status?.state === "running") {
     return `Wait while the pull finishes. Most runs show on this website within ${SALES_ANALYTICS_PULL_WINDOW_LABEL}.`;
   }
   if (!config?.runner_ready) {
-    return "Install the sales-activity runner dependencies before triggering a scrape from this tab.";
+    return config?.runner_status_text || "Install the sales-activity runner dependencies before triggering a scrape from this tab.";
   }
+  if (config?.runner_status_text) return config.runner_status_text;
   return `Schedule: ${config?.schedule_label || "Manual only"} | WhatsApp target: ${config?.chat_name || "Me"}.`;
+}
+
+function salesAnalyticsErrorCopy(value) {
+  const detail = String(value || "").trim();
+  if (!detail) return null;
+  const lower = detail.toLowerCase();
+  if (lower.includes("page.waitforurl") && (lower.includes("dealersocket") || lower.includes("solera") || lower.includes("login"))) {
+    return {
+      title: "DealerSocket login timed out",
+      message:
+        "The pull reached the DealerSocket/Solera login flow but never landed on the activity report. Open the home-PC runner Chrome profile, finish the login or MFA, then run the pull again.",
+      detail,
+    };
+  }
+  if (lower.includes("whatsapp")) {
+    return {
+      title: "WhatsApp delivery needs attention",
+      message:
+        "The report scrape may have run, but the WhatsApp sender did not finish. Check WhatsApp Web in the runner Chrome profile, then refresh this dashboard.",
+      detail,
+    };
+  }
+  return {
+    title: "Last run failed",
+    message: "The runner stopped before this dashboard received a clean report. Open the technical details if you need the exact error.",
+    detail,
+  };
 }
 
 function HistoryBars({ history }) {
@@ -124,8 +155,11 @@ export default function SalesAnalyticsSection({
     variant_label: "Sales people",
     schedule_label: "",
     schedule_times: [],
-    chat_name: "Kau 429-8898 (You)",
+    chat_name: "Kai 429-8898 (You)",
     runner_ready: false,
+    runner_online: false,
+    runner_label: "Home PC",
+    runner_status_text: "",
     can_trigger: false,
   };
   const status = dashboard?.status || {
@@ -146,10 +180,12 @@ export default function SalesAnalyticsSection({
   const maxCalls = Math.max(...rows.map((row) => Number(row?.calls_cti || 0)), 1);
   const maxEmails = Math.max(...rows.map((row) => Number(row?.emails_sent || 0)), 1);
   const maxTexts = Math.max(...rows.map((row) => Number(row?.texts_sent || 0)), 1);
-  const buttonDisabled = running || loading || !config.runner_ready || !config.can_trigger;
+  const statusState = String(status?.state || "").trim().toLowerCase();
+  const runIsActive = running || ["queued", "running"].includes(statusState);
+  const buttonDisabled = runIsActive || loading || !config.runner_ready || !config.can_trigger;
   const screenshotUrl = latest?.screenshot_url ? assetUrl(latest.screenshot_url) : "";
-  const runIsActive = running || String(status?.state || "").toLowerCase() === "running";
   const [clockMs, setClockMs] = React.useState(() => Date.now());
+  const runIssue = salesAnalyticsErrorCopy(status?.last_error);
 
   React.useEffect(() => {
     if (!runIsActive) return undefined;
@@ -165,21 +201,22 @@ export default function SalesAnalyticsSection({
       {runIsActive ? (
         <div className="sales-analytics-pull-overlay" role="status" aria-live="polite">
           <div className="sales-analytics-pull-overlay__card">
-            <span className="eyebrow">Pull in progress</span>
-            <h3>Wait while the report pull finishes</h3>
+            <span className="eyebrow">{statusState === "queued" ? "Pull queued" : "Pull in progress"}</span>
+            <h3>{statusState === "queued" ? "The request is waiting for your home PC" : "Wait while the report pull finishes"}</h3>
             <p>
-              DealerSocket scraping, screenshot creation, WhatsApp delivery, and the website refresh are running now. Most
-              pulls show here within {SALES_ANALYTICS_PULL_WINDOW_LABEL}.
+              {statusState === "queued"
+                ? "The hosted dashboard saved the request. Your home PC will claim it, run the DealerSocket scrape, send the WhatsApp image, and refresh this page as soon as it checks in."
+                : `DealerSocket scraping, screenshot creation, WhatsApp delivery, and the website refresh are running now. Most pulls show here within ${SALES_ANALYTICS_PULL_WINDOW_LABEL}.`}
             </p>
             <div className="sales-analytics-pull-overlay__stats">
               <article className="sales-analytics-pull-overlay__stat">
-                <span>Estimated time left</span>
-                <strong>{timing.remainingLabel}</strong>
-                <small>The board refreshes automatically when the run lands.</small>
+                <span>{statusState === "queued" ? "Queue status" : "Estimated time left"}</span>
+                <strong>{statusState === "queued" ? "Waiting" : timing.remainingLabel}</strong>
+                <small>{statusState === "queued" ? "The board refreshes automatically once the home PC starts the job." : "The board refreshes automatically when the run lands."}</small>
               </article>
               <article className="sales-analytics-pull-overlay__stat">
-                <span>Pull started</span>
-                <strong>{timing.startedLabel}</strong>
+                <span>{statusState === "queued" ? "Bridge" : "Pull started"}</span>
+                <strong>{statusState === "queued" ? config?.runner_label || "Home PC" : timing.startedLabel}</strong>
                 <small>{status?.message || "The latest report will replace this board as soon as the pull completes."}</small>
               </article>
             </div>
@@ -232,7 +269,7 @@ export default function SalesAnalyticsSection({
 
         <div className="sales-analytics-hero__actions">
           <button type="button" onClick={onRun} disabled={buttonDisabled}>
-            {runIsActive ? "Pull In Progress..." : "Run Manual Pull"}
+            {statusState === "queued" ? "Pull Queued..." : runIsActive ? "Pull In Progress..." : "Run Manual Pull"}
           </button>
           <button type="button" className="secondary" onClick={onRefresh} disabled={loading}>
             {loading ? "Refreshing..." : "Refresh Dashboard"}
@@ -241,7 +278,16 @@ export default function SalesAnalyticsSection({
             First local run may pause for DealerSocket MFA or a WhatsApp Web login inside the dedicated Chrome profile.
           </small>
           {feedback ? <div className="sales-analytics-feedback">{feedback}</div> : null}
-          {status?.last_error ? <div className="sales-analytics-error">Last error: {status.last_error}</div> : null}
+          {runIssue ? (
+            <div className="sales-analytics-error" role="alert">
+              <strong>{runIssue.title}</strong>
+              <span>{runIssue.message}</span>
+              <details>
+                <summary>Technical details</summary>
+                <pre>{runIssue.detail}</pre>
+              </details>
+            </div>
+          ) : null}
         </div>
       </div>
 
@@ -304,8 +350,8 @@ export default function SalesAnalyticsSection({
               <div className="sales-analytics-panel__header">
                 <div>
                   <span className="eyebrow">Watchlist</span>
-                  <h3>Low-activity reps</h3>
-                  <p>Bottom three reps plus anybody with zero calls.</p>
+                  <h3>Zero-call reps</h3>
+                  <p>Only reps with 0 CTI calls are flagged red.</p>
                 </div>
                 <div className={`sales-analytics-delivery is-${latest?.delivery?.whatsapp_status || "unknown"}`}>
                   WhatsApp {latest?.delivery?.whatsapp_status || "unknown"}
@@ -327,7 +373,7 @@ export default function SalesAnalyticsSection({
                     </article>
                   ))
                 ) : (
-                  <div className="sales-analytics-empty-inline">No low-activity list was flagged on the latest run.</div>
+                  <div className="sales-analytics-empty-inline">No zero-call reps were flagged on the latest run.</div>
                 )}
               </div>
 
@@ -370,10 +416,18 @@ export default function SalesAnalyticsSection({
               {rows.map((row) => (
                 <div
                   key={`sales-analytics-row-${row.rep}`}
-                  className={`sales-analytics-table__row ${row.low_activity ? "is-low" : ""}`}
+                  className={`sales-analytics-table__row ${row.low_activity ? "is-low" : ""} ${row.high_activity ? "is-high" : ""}`}
                 >
                   <div className="sales-analytics-table__rep">
-                    <strong>{row.rep}</strong>
+                    <strong>
+                      {row.rep}
+                      {row.high_activity ? (
+                        <span className="sales-analytics-table__done">
+                          <span aria-hidden="true">&#9733;</span>
+                          Done
+                        </span>
+                      ) : null}
+                    </strong>
                     <small>Rank #{formatNumber(row.rank || 0)}</small>
                   </div>
                   <div className="sales-analytics-meter">
