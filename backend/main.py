@@ -23,6 +23,7 @@ from curl_cffi import requests as curl_requests
 from fastapi import FastAPI, File, Form, Header, HTTPException, Request, Response, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
+from PIL import Image
 from pydantic import BaseModel, Field
 
 from orgtool_api import app as orgtool_app
@@ -77,6 +78,8 @@ DATA_ROOT = os.path.dirname(DB_PATH)
 UPLOADS_ROOT = os.path.join(DATA_ROOT, "uploads")
 TRAFFIC_PDF_ROOT = os.path.join(UPLOADS_ROOT, "traffic-pdfs")
 SPECIALS_ROOT = os.path.join(UPLOADS_ROOT, "specials")
+SPECIALS_GENERATED_ROOT = os.path.join(UPLOADS_ROOT, "special-generated")
+SPECIALS_VIDEO_ROOT = os.path.join(UPLOADS_ROOT, "special-videos")
 TRAFFIC_OFFER_ROOT = os.path.join(UPLOADS_ROOT, "traffic-offers")
 SALES_ANALYTICS_ROOT = os.path.join(DATA_ROOT, "sales-analytics")
 SALES_ANALYTICS_UPLOADS_ROOT = os.path.join(UPLOADS_ROOT, "sales-analytics")
@@ -90,9 +93,10 @@ SALES_ACTIVITY_RUNNER_BATCH = os.path.join(os.path.dirname(os.path.dirname(__fil
 SALES_ACTIVITY_SCHEDULE_DAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"]
 SALES_ACTIVITY_SCHEDULE_TIMES = build_hourly_schedule_times(10, 20, minute=0)
 SALES_ACTIVITY_SCHEDULE_LABEL = format_weekday_schedule_label(SALES_ACTIVITY_SCHEDULE_TIMES)
-SALES_ACTIVITY_SALES_MANAGER_SCHEDULE_TIMES = build_hourly_schedule_times(9, 20, minute=58)
+SALES_ACTIVITY_EVEN_HOUR_SCHEDULE_TIMES = ["10:00 AM", "12:00 PM", "2:00 PM", "4:00 PM", "6:00 PM", "8:00 PM"]
+SALES_ACTIVITY_SALES_MANAGER_SCHEDULE_TIMES = list(SALES_ACTIVITY_EVEN_HOUR_SCHEDULE_TIMES)
 SALES_ACTIVITY_SALES_MANAGER_SCHEDULE_LABEL = format_weekday_schedule_label(SALES_ACTIVITY_SALES_MANAGER_SCHEDULE_TIMES)
-SALES_ACTIVITY_BDC_STAFF_SCHEDULE_TIMES = build_hourly_schedule_times(9, 20, minute=59)
+SALES_ACTIVITY_BDC_STAFF_SCHEDULE_TIMES = list(SALES_ACTIVITY_EVEN_HOUR_SCHEDULE_TIMES)
 SALES_ACTIVITY_BDC_STAFF_SCHEDULE_LABEL = format_weekday_schedule_label(SALES_ACTIVITY_BDC_STAFF_SCHEDULE_TIMES)
 SALES_ACTIVITY_SELF_CHAT_LABEL = "Kau 429-8898 (You)"
 SALES_ACTIVITY_SELF_SEARCH_TERMS = "kau,956 429 8898,9564298898"
@@ -147,6 +151,8 @@ for path in (
     UPLOADS_ROOT,
     TRAFFIC_PDF_ROOT,
     SPECIALS_ROOT,
+    SPECIALS_GENERATED_ROOT,
+    SPECIALS_VIDEO_ROOT,
     TRAFFIC_OFFER_ROOT,
     SALES_ANALYTICS_ROOT,
     SALES_ANALYTICS_UPLOADS_ROOT,
@@ -175,6 +181,11 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
 OPENAI_AGENT_MODEL = os.getenv("OPENAI_AGENT_MODEL", "gpt-5.4-mini").strip() or "gpt-5.4-mini"
 OPENAI_AGENT_REASONING_EFFORT = os.getenv("OPENAI_AGENT_REASONING_EFFORT", "low").strip() or "low"
 OPENAI_AGENT_MAX_STEPS = max(2, min(10, int(os.getenv("OPENAI_AGENT_MAX_STEPS", "6") or 6)))
+OPENAI_IMAGE_MODEL = os.getenv("OPENAI_IMAGE_MODEL", "gpt-image-1").strip() or "gpt-image-1"
+OPENAI_IMAGE_QUALITY = os.getenv("OPENAI_IMAGE_QUALITY", "medium").strip() or "medium"
+OPENAI_VIDEO_MODEL = os.getenv("OPENAI_VIDEO_MODEL", "sora-2").strip() or "sora-2"
+OPENAI_VIDEO_SIZE = os.getenv("OPENAI_VIDEO_SIZE", "1280x720").strip() or "1280x720"
+OPENAI_VIDEO_SEGMENT_SECONDS = os.getenv("OPENAI_VIDEO_SEGMENT_SECONDS", "12").strip() or "12"
 REMOTE_RUNNER_TOKEN = os.getenv("DEALER_REMOTE_RUNNER_TOKEN", "").strip()
 REMOTE_RUNNER_BASE_URL = os.getenv("DEALER_REMOTE_RUNNER_BASE_URL", "").strip().rstrip("/")
 REMOTE_RUNNER_LABEL = os.getenv("DEALER_REMOTE_RUNNER_LABEL", "Home PC").strip() or "Home PC"
@@ -225,7 +236,7 @@ SPECIALS_KIA_NEW_URL = "https://www.bertogdenmissionkia.com/new-specials/"
 SPECIALS_MAZDA_NEW_URL = "https://www.bertogdenmissionmazda.com/new-specials/"
 SPECIALS_AUTO_OUTLET_URL = (
     "https://www.bertogdenmissionautooutlet.com/used-vehicles/"
-    "?q=mission%2520&_dFR%5Btype%5D%5B0%5D=Pre-Owned&_dFR%5Btype%5D%5B1%5D=Certified%2520Pre-Owned"
+    "?q=mission%2520auto%2520outlet&_dFR%5Btype%5D%5B0%5D=Pre-Owned&_dFR%5Btype%5D%5B1%5D=Certified%2520Pre-Owned"
 )
 SPECIALS_KIA_JIRA_ID = "OGDENMIKIA"
 SPECIALS_MAZDA_JIRA_ID = "OGDENMISSI"
@@ -253,6 +264,22 @@ SPECIALS_SOURCE_DEFINITIONS: Dict[str, Dict[str, str]] = {
         "category": "used_inventory",
     },
 }
+SPECIALS_GENERATED_TILE_TARGETS: Tuple[Dict[str, str], ...] = (
+    {"key": "kia-k4", "store": "Kia", "model": "K4", "source_key": "kia_new"},
+    {"key": "kia-k5", "store": "Kia", "model": "K5", "source_key": "kia_new"},
+    {"key": "kia-seltos", "store": "Kia", "model": "Seltos", "source_key": "kia_new"},
+    {"key": "kia-sportage", "store": "Kia", "model": "Sportage", "source_key": "kia_new"},
+    {"key": "kia-sorento", "store": "Kia", "model": "Sorento", "source_key": "kia_new"},
+    {"key": "kia-2027-telluride", "store": "Kia", "model": "2027 Telluride", "source_key": "kia_new"},
+    {"key": "kia-carnival", "store": "Kia", "model": "Carnival", "source_key": "kia_new"},
+    {"key": "mazda-mazda3", "store": "Mazda", "model": "Mazda3", "source_key": "mazda_new"},
+    {"key": "mazda-cx-5", "store": "Mazda", "model": "CX-5", "source_key": "mazda_new"},
+    {"key": "mazda-cx-50", "store": "Mazda", "model": "CX-50", "source_key": "mazda_new"},
+    {"key": "mazda-cx-90", "store": "Mazda", "model": "CX-90", "source_key": "mazda_new"},
+    {"key": "mazda-cx-70", "store": "Mazda", "model": "CX-70", "source_key": "mazda_new"},
+    {"key": "mazda-miata", "store": "Mazda", "model": "Miata", "source_key": "mazda_new"},
+    {"key": "outlet-priced-to-move", "store": "Auto Outlet", "model": "Used Cars", "source_key": "used_srp"},
+)
 DEFAULT_CORS_ORIGINS = [
     "http://localhost:4174",
     "http://127.0.0.1:4174",
@@ -873,16 +900,19 @@ class TabVisibilityIn(BaseModel):
 class SalesAnalyticsRowOut(BaseModel):
     rep: str = ""
     appt_created: int = 0
+    calls_managed: int = 0
     calls_cti: int = 0
     emails_sent: int = 0
     texts_sent: int = 0
     low_activity: bool = False
+    high_activity: bool = False
     rank: int = 0
 
 
 class SalesAnalyticsTotalsOut(BaseModel):
     reps: int = 0
     appointments_created: int = 0
+    calls_managed: int = 0
     calls_cti: int = 0
     emails_sent: int = 0
     texts_sent: int = 0
@@ -891,6 +921,7 @@ class SalesAnalyticsTotalsOut(BaseModel):
 
 class SalesAnalyticsAveragesOut(BaseModel):
     appointments_created: float = 0.0
+    calls_managed: float = 0.0
     calls_cti: float = 0.0
     emails_sent: float = 0.0
     texts_sent: float = 0.0
@@ -899,10 +930,12 @@ class SalesAnalyticsAveragesOut(BaseModel):
 class SalesAnalyticsHighlightOut(BaseModel):
     rep: str = ""
     appt_created: int = 0
+    calls_managed: int = 0
     calls_cti: int = 0
     emails_sent: int = 0
     texts_sent: int = 0
     low_activity: bool = False
+    high_activity: bool = False
     rank: int = 0
 
 
@@ -1208,6 +1241,40 @@ class VehicleSpecialSectionOut(BaseModel):
     entries: List[VehicleSpecialEntryOut]
 
 
+class GeneratedSpecialTileOut(BaseModel):
+    id: int
+    tile_key: str
+    store: str
+    model_name: str
+    title: str
+    subtitle: str
+    prompt: str
+    source_summary: str
+    image_url: str
+    generated_ts: float
+    status: str
+    error_text: str = ""
+
+
+class GeneratedSpecialVideoOut(BaseModel):
+    id: int
+    video_key: str
+    store: str
+    title: str
+    description: str
+    prompt: str
+    openai_video_ids: List[str] = []
+    clip_urls: List[str] = []
+    video_url: str = ""
+    thumbnail_url: str = ""
+    view_url: str = ""
+    status: str
+    progress: int = 0
+    created_ts: float
+    updated_ts: float
+    error_text: str = ""
+
+
 class SpecialsConfigOut(BaseModel):
     kia_new_url: str
     mazda_new_url: str
@@ -1217,6 +1284,10 @@ class SpecialsConfigOut(BaseModel):
 class SpecialsListOut(BaseModel):
     entries: List[SpecialOut]
     vehicle_sections: List[VehicleSpecialSectionOut] = []
+    generated_tiles: List[GeneratedSpecialTileOut] = []
+    generated_tiles_configured: bool = False
+    generated_videos: List[GeneratedSpecialVideoOut] = []
+    generated_videos_configured: bool = False
     config: SpecialsConfigOut
 
 
@@ -2886,6 +2957,8 @@ def sales_analytics_runner_env(variant: Optional[str] = None) -> Dict[str, str]:
             "DEALERSOCKET_ROLE": str(meta["role_name"]),
             "SALES_ACTIVITY_STORAGE_KEY": str(meta.get("storage_key") or "sales"),
             "SALES_ACTIVITY_FILE_PREFIX": str(meta["file_prefix"]),
+            "SALES_ACTIVITY_INCLUDE_CALLS_MANAGED": "true" if bool(meta.get("storage_key")) else "false",
+            "SALES_ACTIVITY_RUN_VARIANTS": "sales,sales-manager,bdc-staff",
             "SALES_ACTIVITY_SCHEDULE_DAYS": ",".join(meta["schedule_days"]),
             "SALES_ACTIVITY_SCHEDULE_TIMES": ",".join(meta["schedule_times"]),
             "SALES_ACTIVITY_SCHEDULE_LABEL": str(meta["schedule_label"]),
@@ -3074,6 +3147,20 @@ def find_active_remote_runner_sales_job(variant: Optional[str]) -> Optional[Remo
         LIMIT 1
         """,
         (key,),
+    )
+    return remote_runner_job_out(row) if row else None
+
+
+def find_any_active_remote_runner_sales_job() -> Optional[RemoteRunnerJobOut]:
+    row = db_query_one(
+        """
+        SELECT *
+        FROM remote_runner_jobs
+        WHERE job_type = 'sales-analytics-run'
+          AND status IN ('queued', 'running')
+        ORDER BY id DESC
+        LIMIT 1
+        """
     )
     return remote_runner_job_out(row) if row else None
 
@@ -3306,16 +3393,29 @@ def trigger_sales_analytics_runner(variant: Optional[str] = None) -> SalesAnalyt
     current_status = read_sales_analytics_status(meta["key"])
     current_state = str(current_status.state or "").lower()
     active_job = find_active_remote_runner_sales_job(meta["key"])
+    any_active_job = find_any_active_remote_runner_sales_job()
     if current_state == "running" or (active_job and active_job.status == "running"):
         return SalesAnalyticsTriggerOut(
             started=False,
             message="A sales activity scrape is already running.",
             status=current_status,
         )
+    if any_active_job and any_active_job.status == "running":
+        return SalesAnalyticsTriggerOut(
+            started=False,
+            message="A combined sales activity scrape is already running.",
+            status=current_status,
+        )
     if current_state == "queued" or (active_job and active_job.status == "queued"):
         return SalesAnalyticsTriggerOut(
             started=False,
             message=f"A sales activity scrape is already queued for {remote_runner_label()}.",
+            status=current_status,
+        )
+    if any_active_job and any_active_job.status == "queued":
+        return SalesAnalyticsTriggerOut(
+            started=False,
+            message=f"A combined sales activity scrape is already queued for {remote_runner_label()}.",
             status=current_status,
         )
 
@@ -3553,9 +3653,9 @@ def format_currency_short(value: float) -> str:
 def extract_special_end_label(*values: Any) -> str:
     for value in values:
         text = str(value or "")
-        match = re.search(r"\b(\d{1,2}/\d{1,2}/\d{4})\b", text)
-        if match:
-            return match.group(1)
+        matches = re.findall(r"\b(\d{1,2}/\d{1,2}/\d{4})\b", text)
+        if matches:
+            return matches[-1]
     return ""
 
 
@@ -3667,6 +3767,18 @@ def remote_url_is_image(url: str) -> bool:
         return response.status_code < 400 and content_type.startswith("image/")
     except Exception:
         return False
+
+
+def normalize_remote_asset_url(value: Any) -> str:
+    url = str(value or "").strip()
+    if not url:
+        return ""
+    if url.startswith("//"):
+        url = f"https:{url}"
+    lower_url = url.lower()
+    if "notfound.jpg" in lower_url or "placeholder" in lower_url:
+        return ""
+    return url
 
 
 def current_kia_special_image_url(
@@ -3792,7 +3904,7 @@ def build_kia_special_import(source_url: str) -> VehicleSpecialImportIn:
             if dedupe_key in seen_links:
                 continue
             seen_links.add(dedupe_key)
-            image_url = str(special.get("header_image") or special.get("image") or "").strip()
+            image_url = normalize_remote_asset_url(special.get("header_image") or special.get("image") or "")
             if page_html:
                 image_url = current_kia_special_image_url(
                     page_html=page_html,
@@ -3881,7 +3993,7 @@ def build_mazda_special_import(source_url: str) -> VehicleSpecialImportIn:
                     button_url = candidate
                     break
 
-            image_url = str(special.get("image") or special.get("header_image") or "").strip()
+            image_url = normalize_remote_asset_url(special.get("image") or special.get("header_image") or "")
             if not image_url:
                 continue
 
@@ -3962,11 +4074,14 @@ def build_auto_outlet_used_import(source_url: str) -> VehicleSpecialImportIn:
     }
     result = browser_fetch_json(algolia_url, method="POST", headers=algolia_headers, json_payload=algolia_payload)
     hits = result.get("hits") or []
-    mission_hits = [
-        hit
-        for hit in hits
-        if "mission auto outlet" in collapse_whitespace((hit or {}).get("location") or (hit or {}).get("Location") or "").lower()
-    ]
+    mission_hits = []
+    for hit in hits:
+        if not isinstance(hit, dict):
+            continue
+        location_label = collapse_whitespace((hit.get("location") or hit.get("Location") or "")).lower()
+        link_url = str(hit.get("link") or "").strip().lower()
+        if "mission auto outlet" in location_label or "bertogdenmissionautooutlet.com" in link_url:
+            mission_hits.append(hit)
     if mission_hits:
         hits = mission_hits
     if not hits:
@@ -3987,7 +4102,7 @@ def build_auto_outlet_used_import(source_url: str) -> VehicleSpecialImportIn:
             )
         ) or collapse_whitespace(str(hit.get("title_vrp") or "").replace("Pre-Owned", "").replace("Certified", ""))
         link_url = str(hit.get("link") or "").strip()
-        image_url = str(hit.get("thumbnail") or "").strip()
+        image_url = normalize_remote_asset_url(hit.get("thumbnail") or "")
         if not title or not link_url or not image_url:
             continue
         price_value = numeric_token_from_text(str(hit.get("our_price") or ""))
@@ -4039,7 +4154,7 @@ def build_auto_outlet_used_import(source_url: str) -> VehicleSpecialImportIn:
                 payment_text=f"Stock {stock_number}" if stock_number else "Mission Auto Outlet",
                 mileage_text=f"{int(mileage_value):,} miles" if mileage_value else "",
                 note=" • ".join(note_parts),
-                image_url=str(hit.get("thumbnail") or "").strip(),
+                image_url=normalize_remote_asset_url(hit.get("thumbnail") or ""),
                 link_url=str(hit.get("link") or "").strip(),
             )
         )
@@ -4133,10 +4248,10 @@ def special_source_requires_refresh(source_key: str) -> bool:
     return False
 
 
-def maybe_auto_refresh_special_sources() -> None:
+def maybe_auto_refresh_special_sources(force: bool = False) -> None:
     now_ts = time.time()
     for source_key in ("kia_new", "mazda_new", "used_srp"):
-        if special_source_requires_refresh(source_key):
+        if force or special_source_requires_refresh(source_key):
             try:
                 import_auto_vehicle_special_source(source_key)
             except Exception:
@@ -4525,6 +4640,47 @@ def init_db() -> None:
         """
     )
     db_execute("CREATE INDEX IF NOT EXISTS idx_special_feed_entries_source_key ON special_feed_entries(source_key, id DESC)")
+    db_execute(
+        """
+        CREATE TABLE IF NOT EXISTS special_generated_tiles (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            tile_key TEXT NOT NULL UNIQUE,
+            store TEXT NOT NULL DEFAULT '',
+            model_name TEXT NOT NULL DEFAULT '',
+            title TEXT NOT NULL DEFAULT '',
+            subtitle TEXT NOT NULL DEFAULT '',
+            prompt TEXT NOT NULL DEFAULT '',
+            source_summary TEXT NOT NULL DEFAULT '',
+            stored_filename TEXT NOT NULL DEFAULT '',
+            image_url TEXT NOT NULL DEFAULT '',
+            generated_ts REAL NOT NULL,
+            status TEXT NOT NULL DEFAULT 'pending',
+            error_text TEXT NOT NULL DEFAULT ''
+        )
+        """
+    )
+    db_execute(
+        """
+        CREATE TABLE IF NOT EXISTS special_generated_videos (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            video_key TEXT NOT NULL UNIQUE,
+            store TEXT NOT NULL DEFAULT '',
+            title TEXT NOT NULL DEFAULT '',
+            description TEXT NOT NULL DEFAULT '',
+            prompt TEXT NOT NULL DEFAULT '',
+            openai_video_ids_json TEXT NOT NULL DEFAULT '[]',
+            clip_urls_json TEXT NOT NULL DEFAULT '[]',
+            video_url TEXT NOT NULL DEFAULT '',
+            thumbnail_url TEXT NOT NULL DEFAULT '',
+            view_url TEXT NOT NULL DEFAULT '',
+            status TEXT NOT NULL DEFAULT 'pending',
+            progress INTEGER NOT NULL DEFAULT 0,
+            created_ts REAL NOT NULL,
+            updated_ts REAL NOT NULL,
+            error_text TEXT NOT NULL DEFAULT ''
+        )
+        """
+    )
     db_execute(
         """
         CREATE TABLE IF NOT EXISTS marketplace_template (
@@ -9028,6 +9184,529 @@ def create_traffic_pdf(title: str, upload: UploadFile) -> TrafficPdfOut:
     return traffic_pdf_out(row)
 
 
+def generated_special_tile_out(row: Dict[str, Any]) -> GeneratedSpecialTileOut:
+    return GeneratedSpecialTileOut(
+        id=int(row.get("id") or 0),
+        tile_key=str(row.get("tile_key") or ""),
+        store=str(row.get("store") or ""),
+        model_name=str(row.get("model_name") or ""),
+        title=str(row.get("title") or ""),
+        subtitle=str(row.get("subtitle") or ""),
+        prompt=str(row.get("prompt") or ""),
+        source_summary=str(row.get("source_summary") or ""),
+        image_url=str(row.get("image_url") or ""),
+        generated_ts=float(row.get("generated_ts") or 0.0),
+        status=str(row.get("status") or "pending"),
+        error_text=str(row.get("error_text") or ""),
+    )
+
+
+def fetch_generated_special_tiles() -> List[GeneratedSpecialTileOut]:
+    rows = db_query_all("SELECT * FROM special_generated_tiles ORDER BY generated_ts DESC, id DESC")
+    return [generated_special_tile_out(row) for row in rows]
+
+
+def json_list_value(value: Any) -> List[str]:
+    try:
+        parsed = json.loads(str(value or "[]"))
+    except Exception:
+        return []
+    if not isinstance(parsed, list):
+        return []
+    return [str(item) for item in parsed if str(item or "").strip()]
+
+
+def generated_special_video_out(row: Dict[str, Any]) -> GeneratedSpecialVideoOut:
+    return GeneratedSpecialVideoOut(
+        id=int(row.get("id") or 0),
+        video_key=str(row.get("video_key") or ""),
+        store=str(row.get("store") or ""),
+        title=str(row.get("title") or ""),
+        description=str(row.get("description") or ""),
+        prompt=str(row.get("prompt") or ""),
+        openai_video_ids=json_list_value(row.get("openai_video_ids_json")),
+        clip_urls=json_list_value(row.get("clip_urls_json")),
+        video_url=str(row.get("video_url") or ""),
+        thumbnail_url=str(row.get("thumbnail_url") or ""),
+        view_url=str(row.get("view_url") or row.get("video_url") or ""),
+        status=str(row.get("status") or "pending"),
+        progress=int(row.get("progress") or 0),
+        created_ts=float(row.get("created_ts") or 0.0),
+        updated_ts=float(row.get("updated_ts") or 0.0),
+        error_text=str(row.get("error_text") or ""),
+    )
+
+
+def fetch_generated_special_videos() -> List[GeneratedSpecialVideoOut]:
+    rows = db_query_all("SELECT * FROM special_generated_videos ORDER BY updated_ts DESC, id DESC")
+    return [generated_special_video_out(row) for row in rows]
+
+
+def sora_video_configured() -> bool:
+    return bool(OPENAI_API_KEY)
+
+
+def source_rows_for_generated_tile(source_key: str, model_name: str) -> List[Dict[str, Any]]:
+    rows = db_query_all(
+        "SELECT * FROM special_feed_entries WHERE source_key = ? ORDER BY score DESC, id DESC",
+        (source_key,),
+    )
+    if source_key == "used_srp":
+        return rows[:8]
+    model_tokens = [token for token in re.split(r"[^a-z0-9]+", model_name.lower()) if token]
+    matches: List[Dict[str, Any]] = []
+    for row in rows:
+        haystack = " ".join(
+            str(row.get(field) or "")
+            for field in ("title", "subtitle", "price_text", "payment_text", "mileage_text", "note")
+        ).lower()
+        if all(token in haystack for token in model_tokens):
+            matches.append(row)
+    return matches[:4] or rows[:3]
+
+
+def build_generated_tile_source_summary(target: Dict[str, str]) -> str:
+    rows = source_rows_for_generated_tile(target["source_key"], target["model"])
+    if not rows:
+        return "No matching live source rows were found during the latest import."
+    lines: List[str] = []
+    for row in rows[:4]:
+        parts = [
+            str(row.get("title") or "").strip(),
+            str(row.get("subtitle") or "").strip(),
+            str(row.get("price_text") or "").strip(),
+            str(row.get("payment_text") or "").strip(),
+            str(row.get("mileage_text") or "").strip(),
+            str(row.get("score_label") or "").strip(),
+        ]
+        line = " | ".join([part for part in parts if part])
+        if line:
+            lines.append(line)
+    return "\n".join(lines) or "Live source rows were available, but no display text was present."
+
+
+def build_generated_special_prompt(target: Dict[str, str], source_summary: str) -> Tuple[str, str, str]:
+    store = target["store"]
+    model_name = target["model"]
+    if target["source_key"] == "used_srp":
+        title = "Used Cars Priced To Move"
+        subtitle = "Sharry Rd and the Expressway Auto Outlet"
+        hero = "Bert Ogden Mission Auto Outlet used cars"
+        copy_points = "Include clear sales-copy text: USED CARS, PRICED TO MOVE, Sharry Rd + Expressway."
+    else:
+        title = f"{store} {model_name} Special"
+        subtitle = "Customer-ready square promo tile"
+        hero = f"new {store} {model_name}"
+        copy_points = f"Include clear sales-copy text: {model_name}, {store}, SPECIAL."
+    prompt = f"""
+Create one polished automotive sales promo graphic for customers.
+Final image must be a square 1080x1080 social tile with a modern dealership ad layout.
+Hero subject: {hero}.
+{copy_points}
+Use current dealership-special context only as inspiration; do not invent exact payment, APR, rebate, VIN, or legal offer terms unless shown in the source context.
+Source context:
+{source_summary}
+Design requirements:
+- premium but practical dealership look, bright showroom or clean outdoor lot lighting
+- vehicle should be the main visual subject and match the requested model/category as closely as possible
+- leave readable space for ad text, avoid tiny legal disclaimers
+- no fake official manufacturer logos, no QR codes, no phone numbers
+- customer-ready, friendly, high contrast, not cluttered
+""".strip()
+    return title, subtitle, prompt
+
+
+def request_openai_square_image(prompt: str) -> bytes:
+    if not openai_agent_configured():
+        raise RuntimeError("OPENAI_API_KEY is not configured")
+    payload: Dict[str, Any] = {
+        "model": OPENAI_IMAGE_MODEL,
+        "prompt": prompt,
+        "size": "1024x1024",
+        "quality": OPENAI_IMAGE_QUALITY,
+        "n": 1,
+    }
+    request = urllib.request.Request(
+        "https://api.openai.com/v1/images/generations",
+        data=json.dumps(payload).encode("utf-8"),
+        method="POST",
+    )
+    request.add_header("Authorization", f"Bearer {OPENAI_API_KEY}")
+    request.add_header("Content-Type", "application/json")
+    try:
+        with urllib.request.urlopen(request, timeout=180) as response:
+            data = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="ignore")
+        raise RuntimeError(f"OpenAI image HTTP {exc.code}: {detail or exc.reason}") from exc
+    except Exception as exc:
+        raise RuntimeError(f"OpenAI image request failed: {compact_error_text(exc)}") from exc
+    image_b64 = ((data.get("data") or [{}])[0] or {}).get("b64_json")
+    if not image_b64:
+        raise RuntimeError("OpenAI image response did not include image data")
+    return base64.b64decode(image_b64)
+
+
+def save_generated_special_image(tile_key: str, image_bytes: bytes) -> Tuple[str, str]:
+    safe_key = re.sub(r"[^a-z0-9-]+", "-", tile_key.lower()).strip("-") or secrets.token_hex(6)
+    stored_filename = f"{safe_key}-{int(time.time())}.png"
+    output_path = os.path.join(SPECIALS_GENERATED_ROOT, stored_filename)
+    with Image.open(io.BytesIO(image_bytes)) as image:
+        rgb_image = image.convert("RGB")
+        resized = rgb_image.resize((1080, 1080), Image.Resampling.LANCZOS)
+        resized.save(output_path, format="PNG", optimize=True)
+    return stored_filename, f"/uploads/special-generated/{stored_filename}"
+
+
+def upsert_generated_special_tile(target: Dict[str, str]) -> None:
+    source_summary = build_generated_tile_source_summary(target)
+    title, subtitle, prompt = build_generated_special_prompt(target, source_summary)
+    now_ts = time.time()
+    try:
+        image_bytes = request_openai_square_image(prompt)
+        stored_filename, image_url = save_generated_special_image(target["key"], image_bytes)
+        existing = db_query_one("SELECT stored_filename FROM special_generated_tiles WHERE tile_key = ?", (target["key"],))
+        old_filename = str(existing.get("stored_filename") or "") if existing else ""
+        db_execute(
+            """
+            INSERT INTO special_generated_tiles (
+                tile_key, store, model_name, title, subtitle, prompt, source_summary,
+                stored_filename, image_url, generated_ts, status, error_text
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'ready', '')
+            ON CONFLICT(tile_key) DO UPDATE SET
+                store = excluded.store,
+                model_name = excluded.model_name,
+                title = excluded.title,
+                subtitle = excluded.subtitle,
+                prompt = excluded.prompt,
+                source_summary = excluded.source_summary,
+                stored_filename = excluded.stored_filename,
+                image_url = excluded.image_url,
+                generated_ts = excluded.generated_ts,
+                status = 'ready',
+                error_text = ''
+            """,
+            (
+                target["key"],
+                target["store"],
+                target["model"],
+                title,
+                subtitle,
+                prompt,
+                source_summary,
+                stored_filename,
+                image_url,
+                now_ts,
+            ),
+        )
+        if old_filename and old_filename != stored_filename:
+            remove_uploaded_file(SPECIALS_GENERATED_ROOT, old_filename)
+    except Exception as exc:
+        db_execute(
+            """
+            INSERT INTO special_generated_tiles (
+                tile_key, store, model_name, title, subtitle, prompt, source_summary,
+                stored_filename, image_url, generated_ts, status, error_text
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, '', '', ?, 'failed', ?)
+            ON CONFLICT(tile_key) DO UPDATE SET
+                store = excluded.store,
+                model_name = excluded.model_name,
+                title = excluded.title,
+                subtitle = excluded.subtitle,
+                prompt = excluded.prompt,
+                source_summary = excluded.source_summary,
+                generated_ts = excluded.generated_ts,
+                status = 'failed',
+                error_text = excluded.error_text
+            """,
+            (
+                target["key"],
+                target["store"],
+                target["model"],
+                title,
+                subtitle,
+                prompt,
+                source_summary,
+                now_ts,
+                compact_error_text(exc),
+            ),
+        )
+
+
+def refresh_generated_special_tiles() -> SpecialsListOut:
+    if not openai_agent_configured():
+        raise HTTPException(status_code=400, detail="OPENAI_API_KEY is not configured")
+    maybe_auto_refresh_special_sources(force=True)
+    for target in SPECIALS_GENERATED_TILE_TARGETS:
+        upsert_generated_special_tile(target)
+    return fetch_specials(auto_refresh=False)
+
+
+def kia_video_source_summary() -> str:
+    rows = source_rows_for_generated_tile("kia_new", "Kia")[:6]
+    if not rows:
+        return "Current Kia specials source rows are not imported yet."
+    lines: List[str] = []
+    for row in rows:
+        parts = [
+            str(row.get("title") or "").strip(),
+            str(row.get("subtitle") or "").strip(),
+            str(row.get("price_text") or "").strip(),
+            str(row.get("payment_text") or "").strip(),
+        ]
+        line = " | ".join([part for part in parts if part])
+        if line:
+            lines.append(line)
+    return "\n".join(lines[:6]) or "Kia specials rows imported with limited display text."
+
+
+def kia_video_storyboard_prompts(source_summary: str) -> List[str]:
+    base = f"""
+Create a polished automotive dealership ad clip for Bert Ogden Mission Kia in Mission, Texas.
+Do not show real people or public figures. Do not include copyrighted music, fake official logos, QR codes, phone numbers, APR, exact payments, or legal offer claims.
+Use clean cinematic dealership visuals, modern Kia vehicles, South Texas daylight, showroom and highway energy, and customer-friendly sales copy.
+Current Kia context:
+{source_summary}
+""".strip()
+    return [
+        f"{base}\nClip 1 of 3: opening wide shot, new Kia lineup at Bert Ogden Mission Kia, confident camera push-in, on-screen text: Mission Kia Specials.",
+        f"{base}\nClip 2 of 3: dynamic feature montage of Kia K4, K5, Seltos, Sportage, Sorento, Telluride, and Carnival, bright motion, on-screen text: Find Your Next Kia.",
+        f"{base}\nClip 3 of 3: closing dealership call-to-action, vehicles ready on the lot, warm sunset light, on-screen text: Bert Ogden Mission Kia - Shop This Month.",
+    ]
+
+
+def request_openai_video_create(prompt: str) -> Dict[str, Any]:
+    if not sora_video_configured():
+        raise RuntimeError("OPENAI_API_KEY is not configured")
+    response = curl_requests.post(
+        "https://api.openai.com/v1/videos",
+        headers={"Authorization": f"Bearer {OPENAI_API_KEY}"},
+        data={
+            "model": OPENAI_VIDEO_MODEL,
+            "prompt": prompt,
+            "seconds": OPENAI_VIDEO_SEGMENT_SECONDS,
+            "size": OPENAI_VIDEO_SIZE,
+        },
+        timeout=90,
+    )
+    if response.status_code >= 400:
+        raise RuntimeError(f"OpenAI video HTTP {response.status_code}: {response.text[:1000]}")
+    return response.json()
+
+
+def request_openai_video_status(video_id: str) -> Dict[str, Any]:
+    request = urllib.request.Request(f"https://api.openai.com/v1/videos/{urllib.parse.quote(video_id)}")
+    request.add_header("Authorization", f"Bearer {OPENAI_API_KEY}")
+    try:
+        with urllib.request.urlopen(request, timeout=45) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="ignore")
+        raise RuntimeError(f"OpenAI video status HTTP {exc.code}: {detail or exc.reason}") from exc
+
+
+def download_openai_video_asset(video_id: str, variant: str = "video") -> bytes:
+    url = f"https://api.openai.com/v1/videos/{urllib.parse.quote(video_id)}/content?variant={urllib.parse.quote(variant)}"
+    request = urllib.request.Request(url)
+    request.add_header("Authorization", f"Bearer {OPENAI_API_KEY}")
+    try:
+        with urllib.request.urlopen(request, timeout=180) as response:
+            return response.read()
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", errors="ignore")
+        raise RuntimeError(f"OpenAI video download HTTP {exc.code}: {detail or exc.reason}") from exc
+
+
+def save_special_video_asset(filename: str, data: bytes) -> str:
+    safe_name = re.sub(r"[^a-zA-Z0-9._-]+", "-", filename).strip("-") or f"video-{int(time.time())}.bin"
+    output_path = os.path.join(SPECIALS_VIDEO_ROOT, safe_name)
+    with open(output_path, "wb") as handle:
+        handle.write(data)
+    return f"/uploads/special-videos/{safe_name}"
+
+
+def update_kia_video_row(**fields: Any) -> None:
+    existing = db_query_one("SELECT * FROM special_generated_videos WHERE video_key = ?", ("kia-30-second-ad",))
+    now_ts = time.time()
+    base = {
+        "video_key": "kia-30-second-ad",
+        "store": "Kia",
+        "title": "Bert Ogden Mission Kia 30 Second Ad",
+        "description": "Autonomous Kia ad assembled from three Sora video segments for customer sharing.",
+        "prompt": "",
+        "openai_video_ids_json": "[]",
+        "clip_urls_json": "[]",
+        "video_url": "",
+        "thumbnail_url": "",
+        "view_url": "",
+        "status": "pending",
+        "progress": 0,
+        "created_ts": now_ts,
+        "updated_ts": now_ts,
+        "error_text": "",
+    }
+    if existing:
+        base.update(existing)
+    base.update(fields)
+    base["updated_ts"] = now_ts
+    if existing:
+        db_execute(
+            """
+            UPDATE special_generated_videos
+            SET store = ?, title = ?, description = ?, prompt = ?, openai_video_ids_json = ?,
+                clip_urls_json = ?, video_url = ?, thumbnail_url = ?, view_url = ?, status = ?,
+                progress = ?, updated_ts = ?, error_text = ?
+            WHERE video_key = ?
+            """,
+            (
+                base["store"],
+                base["title"],
+                base["description"],
+                base["prompt"],
+                base["openai_video_ids_json"],
+                base["clip_urls_json"],
+                base["video_url"],
+                base["thumbnail_url"],
+                base["view_url"],
+                base["status"],
+                int(base["progress"] or 0),
+                base["updated_ts"],
+                base["error_text"],
+                base["video_key"],
+            ),
+        )
+    else:
+        db_insert(
+            """
+            INSERT INTO special_generated_videos (
+                video_key, store, title, description, prompt, openai_video_ids_json,
+                clip_urls_json, video_url, thumbnail_url, view_url, status, progress,
+                created_ts, updated_ts, error_text
+            )
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (
+                base["video_key"],
+                base["store"],
+                base["title"],
+                base["description"],
+                base["prompt"],
+                base["openai_video_ids_json"],
+                base["clip_urls_json"],
+                base["video_url"],
+                base["thumbnail_url"],
+                base["view_url"],
+                base["status"],
+                int(base["progress"] or 0),
+                base["created_ts"],
+                base["updated_ts"],
+                base["error_text"],
+            ),
+        )
+
+
+def assemble_kia_video(clip_paths: List[str]) -> str:
+    ffmpeg_path = shutil.which("ffmpeg")
+    if not ffmpeg_path or len(clip_paths) < 2:
+        return clip_paths[0] if clip_paths else ""
+    list_path = os.path.join(SPECIALS_VIDEO_ROOT, "kia-30-second-ad-clips.txt")
+    with open(list_path, "w", encoding="utf-8") as handle:
+        for clip_path in clip_paths:
+            escaped_path = clip_path.replace("'", "'\\''")
+            handle.write(f"file '{escaped_path}'\n")
+    output_name = f"kia-30-second-ad-{int(time.time())}.mp4"
+    output_path = os.path.join(SPECIALS_VIDEO_ROOT, output_name)
+    subprocess.run(
+        [ffmpeg_path, "-y", "-f", "concat", "-safe", "0", "-i", list_path, "-t", "30", "-c", "copy", output_path],
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=180,
+    )
+    return f"/uploads/special-videos/{output_name}"
+
+
+def run_kia_video_generation_job() -> None:
+    try:
+        maybe_auto_refresh_special_sources(force=True)
+        source_summary = kia_video_source_summary()
+        prompts = kia_video_storyboard_prompts(source_summary)
+        update_kia_video_row(status="running", progress=5, prompt="\n\n".join(prompts), error_text="")
+        video_ids: List[str] = []
+        clip_urls: List[str] = []
+        clip_paths: List[str] = []
+        thumbnail_url = ""
+        for index, prompt in enumerate(prompts, start=1):
+            created = request_openai_video_create(prompt)
+            video_id = str(created.get("id") or "")
+            if not video_id:
+                raise RuntimeError("OpenAI did not return a video id")
+            video_ids.append(video_id)
+            update_kia_video_row(
+                status="running",
+                progress=5 + (index - 1) * 25,
+                openai_video_ids_json=json.dumps(video_ids),
+            )
+            deadline = time.time() + 60 * 45
+            status_payload = created
+            while time.time() < deadline:
+                status_payload = request_openai_video_status(video_id)
+                status = str(status_payload.get("status") or "")
+                progress = int(status_payload.get("progress") or 0)
+                update_kia_video_row(status="running", progress=min(90, 5 + (index - 1) * 25 + progress // 4))
+                if status == "completed":
+                    break
+                if status == "failed":
+                    raise RuntimeError(f"OpenAI video generation failed: {status_payload.get('error') or ''}")
+                time.sleep(12)
+            if str(status_payload.get("status") or "") != "completed":
+                raise RuntimeError(f"OpenAI video generation timed out for segment {index}")
+            video_bytes = download_openai_video_asset(video_id, "video")
+            clip_filename = f"kia-ad-segment-{index}-{int(time.time())}.mp4"
+            clip_url = save_special_video_asset(clip_filename, video_bytes)
+            clip_urls.append(clip_url)
+            clip_paths.append(os.path.join(SPECIALS_VIDEO_ROOT, os.path.basename(clip_url)))
+            if not thumbnail_url:
+                try:
+                    thumbnail_url = save_special_video_asset(
+                        f"kia-ad-thumbnail-{int(time.time())}.webp",
+                        download_openai_video_asset(video_id, "thumbnail"),
+                    )
+                except Exception:
+                    thumbnail_url = ""
+            update_kia_video_row(clip_urls_json=json.dumps(clip_urls), thumbnail_url=thumbnail_url)
+        final_video_url = assemble_kia_video(clip_paths)
+        update_kia_video_row(
+            status="ready",
+            progress=100,
+            openai_video_ids_json=json.dumps(video_ids),
+            clip_urls_json=json.dumps(clip_urls),
+            video_url=final_video_url,
+            view_url=final_video_url,
+            thumbnail_url=thumbnail_url,
+            error_text="",
+        )
+    except Exception as exc:
+        update_kia_video_row(status="failed", error_text=compact_error_text(exc))
+
+
+def start_kia_video_generation() -> SpecialsListOut:
+    if not sora_video_configured():
+        raise HTTPException(status_code=400, detail="OPENAI_API_KEY is not configured")
+    active = db_query_one(
+        "SELECT status FROM special_generated_videos WHERE video_key = ?",
+        ("kia-30-second-ad",),
+    )
+    if active and str(active.get("status") or "") in {"queued", "running"}:
+        return fetch_specials(auto_refresh=False)
+    update_kia_video_row(status="queued", progress=0, error_text="")
+    thread = threading.Thread(target=run_kia_video_generation_job, daemon=True)
+    thread.start()
+    return fetch_specials(auto_refresh=False)
+
+
 def fetch_vehicle_special_sections() -> List[VehicleSpecialSectionOut]:
     config = get_specials_config()
     rows = db_query_all("SELECT * FROM special_feed_entries ORDER BY source_key ASC, score DESC, id DESC")
@@ -9071,6 +9750,10 @@ def fetch_specials(*, auto_refresh: bool = True) -> SpecialsListOut:
     return SpecialsListOut(
         entries=[special_out(row) for row in rows],
         vehicle_sections=fetch_vehicle_special_sections(),
+        generated_tiles=fetch_generated_special_tiles(),
+        generated_tiles_configured=openai_agent_configured(),
+        generated_videos=fetch_generated_special_videos(),
+        generated_videos_configured=sora_video_configured(),
         config=get_specials_config(),
     )
 
@@ -9564,6 +10247,22 @@ def post_specials_import_source(
 ) -> SpecialsListOut:
     require_admin(x_admin_token)
     return import_auto_vehicle_special_source(source_key)
+
+
+@app.post("/api/admin/specials/generated-tiles/refresh", response_model=SpecialsListOut)
+def post_specials_generated_tiles_refresh(
+    x_admin_token: Optional[str] = Header(default=None),
+) -> SpecialsListOut:
+    require_admin(x_admin_token)
+    return refresh_generated_special_tiles()
+
+
+@app.post("/api/admin/specials/kia-video/refresh", response_model=SpecialsListOut)
+def post_specials_kia_video_refresh(
+    x_admin_token: Optional[str] = Header(default=None),
+) -> SpecialsListOut:
+    require_admin(x_admin_token)
+    return start_kia_video_generation()
 
 
 @app.get("/api/quote/rates", response_model=QuoteRateListOut)

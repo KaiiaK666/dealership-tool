@@ -281,6 +281,18 @@ export const importSpecialFeedSource = (token, sourceKey) =>
     headers: adminHeaders(token),
     timeout: 120000,
   });
+export const refreshGeneratedSpecialTiles = (token) =>
+  request("/api/admin/specials/generated-tiles/refresh", {
+    method: "POST",
+    headers: adminHeaders(token),
+    timeout: 1800000,
+  });
+export const refreshKiaSpecialVideo = (token) =>
+  request("/api/admin/specials/kia-video/refresh", {
+    method: "POST",
+    headers: adminHeaders(token),
+    timeout: 60000,
+  });
 export const getBdcSalesTracker = (params = {}) =>
   request(`/api/bdc-sales-tracker${qs({ month: params.month })}`);
 export const getSalesAnalyticsDashboard = (params = {}) =>

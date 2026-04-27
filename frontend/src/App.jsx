@@ -47,6 +47,8 @@ import {
   getTrafficPdfs,
   importMastermindServiceDriveTraffic,
   importReynoldsServiceDriveTraffic,
+  refreshGeneratedSpecialTiles,
+  refreshKiaSpecialVideo,
   replaceAdminDaysOffMonth,
   undoMastermindServiceDriveTrafficImport,
   undoReynoldsServiceDriveTrafficImport,
@@ -498,6 +500,7 @@ function dateTimeLabel(value) {
 }
 
 function specialMonthStamp(value) {
+  if (!value) return monthLabel(currentMonth());
   const parsed = parseDateLike(value);
   if (!parsed || Number.isNaN(parsed.getTime())) return monthLabel(currentMonth());
   return new Intl.DateTimeFormat("en-US", { month: "long", year: "numeric" }).format(parsed);
@@ -2051,6 +2054,10 @@ export default function App() {
   const [trafficPdfs, setTrafficPdfs] = useState([]);
   const [specials, setSpecials] = useState([]);
   const [specialVehicleSections, setSpecialVehicleSections] = useState([]);
+  const [generatedSpecialTiles, setGeneratedSpecialTiles] = useState([]);
+  const [generatedSpecialTilesConfigured, setGeneratedSpecialTilesConfigured] = useState(false);
+  const [generatedSpecialVideos, setGeneratedSpecialVideos] = useState([]);
+  const [generatedSpecialVideosConfigured, setGeneratedSpecialVideosConfigured] = useState(false);
   const [specialsConfig, setSpecialsConfig] = useState({
     kia_new_url: SPECIAL_FEED_SOURCES[0].defaultUrl,
     mazda_new_url: SPECIAL_FEED_SOURCES[1].defaultUrl,
@@ -2218,8 +2225,17 @@ export default function App() {
   const specialFeedSourceMap = Object.fromEntries(SPECIAL_FEED_SOURCES.map((item) => [item.key, item]));
   const populatedSpecialVehicleSections = specialVehicleSections.filter((section) => (section.entries || []).length);
   const specialSectionsByKey = Object.fromEntries(specialVehicleSections.map((section) => [section.key, section]));
+  const readyGeneratedSpecialTiles = generatedSpecialTiles.filter((tile) => tile.status === "ready" && tile.image_url);
+  const generatedSpecialTileFailures = generatedSpecialTiles.filter((tile) => tile.status === "failed");
+  const kiaGeneratedVideo =
+    generatedSpecialVideos.find((video) => video.video_key === "kia-30-second-ad") || generatedSpecialVideos[0] || null;
+  const kiaGeneratedVideoReady = kiaGeneratedVideo?.status === "ready" && kiaGeneratedVideo?.video_url;
   const latestSpecialImportTs = populatedSpecialVehicleSections.reduce(
     (maxValue, section) => Math.max(maxValue, Number(section.imported_ts || 0)),
+    0
+  );
+  const latestGeneratedSpecialTs = readyGeneratedSpecialTiles.reduce(
+    (maxValue, tile) => Math.max(maxValue, Number(tile.generated_ts || 0)),
     0
   );
   const selectedTrafficSalesperson =
@@ -2852,6 +2868,10 @@ export default function App() {
   function syncSpecialsState(data) {
     setSpecials(data.entries || []);
     setSpecialVehicleSections(data.vehicle_sections || []);
+    setGeneratedSpecialTiles(data.generated_tiles || []);
+    setGeneratedSpecialTilesConfigured(Boolean(data.generated_tiles_configured));
+    setGeneratedSpecialVideos(data.generated_videos || []);
+    setGeneratedSpecialVideosConfigured(Boolean(data.generated_videos_configured));
     const nextConfig = data.config || {
       kia_new_url: SPECIAL_FEED_SOURCES[0].defaultUrl,
       mazda_new_url: SPECIAL_FEED_SOURCES[1].defaultUrl,
@@ -3966,8 +3986,7 @@ export default function App() {
       try {
         const data = await getSpecials();
         if (!active) return;
-        setSpecials(data.entries || []);
-        setResourceLoadState((current) => ({ ...current, specials: true }));
+        syncSpecialsState(data);
       } catch (errorValue) {
         if (active) setError(errText(errorValue));
       }
@@ -3993,6 +4012,16 @@ export default function App() {
       setSelectedSpecialId(specials.length ? specials[0].id : null);
     }
   }, [selectedSpecialId, specials]);
+
+  useEffect(() => {
+    if (tab !== "specials") return undefined;
+    const videoStatus = String(kiaGeneratedVideo?.status || "");
+    if (!["queued", "running"].includes(videoStatus)) return undefined;
+    const intervalId = window.setInterval(() => {
+      refreshSpecials().catch((errorValue) => setError(errText(errorValue)));
+    }, 15000);
+    return () => window.clearInterval(intervalId);
+  }, [kiaGeneratedVideo?.status, tab]);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -4792,6 +4821,42 @@ export default function App() {
       setSpecialsImportStatus(`Refreshed Kia (${kiaCount}), Mazda (${mazdaCount}), and Auto Outlet (${usedCount}) from the live feeds.`);
     } catch (errorValue) {
       setError(errText(errorValue));
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function refreshCustomerSpecialTiles() {
+    setBusy("specials-generated-refresh");
+    setError("");
+    setSpecialsImportStatus("Generating customer-ready image tiles. This can take several minutes.");
+    try {
+      const saved = await refreshGeneratedSpecialTiles(adminToken);
+      syncSpecialsState(saved);
+      const readyCount = (saved.generated_tiles || []).filter((tile) => tile.status === "ready" && tile.image_url).length;
+      const failedCount = (saved.generated_tiles || []).filter((tile) => tile.status === "failed").length;
+      setSpecialsImportStatus(
+        `Generated ${readyCount} customer-ready tile${readyCount === 1 ? "" : "s"}${failedCount ? `; ${failedCount} failed` : ""}.`
+      );
+    } catch (errorValue) {
+      setError(errText(errorValue));
+      setSpecialsImportStatus("");
+    } finally {
+      setBusy("");
+    }
+  }
+
+  async function refreshKiaVideoAd() {
+    setBusy("specials-kia-video-refresh");
+    setError("");
+    setSpecialsImportStatus("Starting the Kia video ad job. It will keep rendering in the backend.");
+    try {
+      const saved = await refreshKiaSpecialVideo(adminToken);
+      syncSpecialsState(saved);
+      setSpecialsImportStatus("Kia video ad job started. Refresh this page to check progress while Sora renders.");
+    } catch (errorValue) {
+      setError(errText(errorValue));
+      setSpecialsImportStatus("");
     } finally {
       setBusy("");
     }
@@ -10732,6 +10797,103 @@ export default function App() {
           </section>
         ) : null}
 
+        {tab === "specials" ? (
+          <section className="stack">
+            <div className="panel generated-specials-section">
+              <div className="generated-specials-section__header">
+                <div>
+                  <span className="eyebrow">Customer media</span>
+                  <h3>Ready-to-send square specials and Kia video ad</h3>
+                  <p className="admin-note">
+                    Generated from the current live specials context for customer follow-up. Video generation starts with Kia first.
+                  </p>
+                </div>
+                <div className="generated-specials-section__meta">
+                  {latestGeneratedSpecialTs ? <span>Generated {dateTimeLabel(latestGeneratedSpecialTs)}</span> : <span>Not generated yet</span>}
+                  <span>{readyGeneratedSpecialTiles.length} ready</span>
+                  {generatedSpecialTileFailures.length ? <span>{generatedSpecialTileFailures.length} failed</span> : null}
+                  {adminToken ? (
+                    <button
+                      type="button"
+                      onClick={refreshCustomerSpecialTiles}
+                      disabled={busy === "specials-generated-refresh" || Boolean(busy)}
+                    >
+                      {busy === "specials-generated-refresh" ? "Generating Images..." : "Refresh Image Tiles"}
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+              {!generatedSpecialTilesConfigured ? (
+                <div className="empty">OpenAI image generation is not configured yet. Add `OPENAI_API_KEY` on the backend to generate customer tiles.</div>
+              ) : readyGeneratedSpecialTiles.length ? (
+                <div className="generated-specials-grid">
+                  {readyGeneratedSpecialTiles.map((tile) => (
+                    <a
+                      key={`generated-special-${tile.tile_key}`}
+                      className="generated-special-card"
+                      href={assetUrl(tile.image_url)}
+                      target="_blank"
+                      rel="noreferrer"
+                    >
+                      <img src={assetUrl(tile.image_url)} alt={tile.title || tile.model_name} />
+                      <div className="generated-special-card__copy">
+                        <span>{tile.store}</span>
+                        <strong>{tile.model_name}</strong>
+                        <small>{tile.subtitle || "1080 x 1080 customer tile"}</small>
+                      </div>
+                    </a>
+                  ))}
+                </div>
+              ) : (
+                <div className="empty">
+                  {adminToken ? "No generated customer tiles yet. Use Refresh Image Tiles." : "Generated customer tiles are not ready yet."}
+                </div>
+              )}
+
+              <div className="generated-video-panel">
+                <div className="generated-video-panel__thumb">
+                  {kiaGeneratedVideo?.thumbnail_url ? (
+                    <img src={assetUrl(kiaGeneratedVideo.thumbnail_url)} alt={kiaGeneratedVideo.title || "Kia video ad thumbnail"} />
+                  ) : (
+                    <div className="generated-video-panel__placeholder">Kia Video</div>
+                  )}
+                </div>
+                <div className="generated-video-panel__copy">
+                  <span className="eyebrow">30 second ad workflow</span>
+                  <h4>{kiaGeneratedVideo?.title || "Bert Ogden Mission Kia 30 Second Ad"}</h4>
+                  <p>
+                    {kiaGeneratedVideo?.description ||
+                      "Autonomous Kia video job: refresh Kia source data, generate three Sora video segments, download thumbnails and clips, then assemble a customer-shareable ad when ffmpeg is available."}
+                  </p>
+                  <div className="generated-video-panel__chips">
+                    <span>{generatedSpecialVideosConfigured ? "Sora configured" : "Sora not configured"}</span>
+                    <span>{kiaGeneratedVideo?.status || "not started"}</span>
+                    {kiaGeneratedVideo?.progress ? <span>{kiaGeneratedVideo.progress}%</span> : null}
+                    {kiaGeneratedVideo?.clip_urls?.length ? <span>{kiaGeneratedVideo.clip_urls.length} clips</span> : null}
+                  </div>
+                  {kiaGeneratedVideo?.error_text ? <small className="generated-video-panel__error">{kiaGeneratedVideo.error_text}</small> : null}
+                  <div className="generated-video-panel__actions">
+                    {kiaGeneratedVideoReady ? (
+                      <a href={assetUrl(kiaGeneratedVideo.view_url || kiaGeneratedVideo.video_url)} target="_blank" rel="noreferrer">
+                        View Video
+                      </a>
+                    ) : null}
+                    {adminToken ? (
+                      <button
+                        type="button"
+                        onClick={refreshKiaVideoAd}
+                        disabled={busy === "specials-kia-video-refresh" || Boolean(busy)}
+                      >
+                        {busy === "specials-kia-video-refresh" ? "Starting Video..." : "Refresh Kia Video Ad"}
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </section>
+        ) : null}
+
         {tab === "crmCleanup" ? <CrmCleanupSection /> : null}
 
         {tab === "admin" ? (
@@ -13046,6 +13208,20 @@ export default function App() {
                           }
                         >
                           {busy === "specials-auto-all" ? "Refreshing all live specials..." : "Refresh All Live Specials"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={refreshCustomerSpecialTiles}
+                          disabled={busy === "specials-generated-refresh" || Boolean(busy)}
+                        >
+                          {busy === "specials-generated-refresh" ? "Generating Image Tiles..." : "Refresh Customer Image Tiles"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={refreshKiaVideoAd}
+                          disabled={busy === "specials-kia-video-refresh" || Boolean(busy)}
+                        >
+                          {busy === "specials-kia-video-refresh" ? "Starting Kia Video..." : "Refresh Kia Video Ad"}
                         </button>
                       </div>
 
