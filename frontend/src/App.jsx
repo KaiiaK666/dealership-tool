@@ -2360,6 +2360,9 @@ export default function App() {
   const freshUpSalespersonContactFileName = freshUpAssignedSalesperson
     ? `${downloadFileName(freshUpAssignedSalesperson.name, "salesperson-contact")}.vcf`
     : "salesperson-contact.vcf";
+  const freshUpSalespersonFirstName = freshUpAssignedSalesperson
+    ? String(freshUpAssignedSalesperson.name || "").trim().split(/\s+/)[0] || "your salesperson"
+    : "your salesperson";
   const freshUpSalespersonContactLabel = freshUpAssignedSalesperson
     ? `Add ${freshUpAssignedSalesperson.name} as Contact`
     : "Add salesperson as contact";
@@ -9830,7 +9833,7 @@ export default function App() {
                     </div>
                     <div className="freshup-card-intro__meta">
                       <span>{freshUpPrimaryStore?.display_name || "Bert Ogden Mission"}</span>
-                      <span>{freshUpSalespersonPhoneText || "Sales specialist contact"}</span>
+                      <span>{freshUpSalespersonPhoneText || `Ask for ${freshUpSalespersonFirstName}`}</span>
                     </div>
                     <div className="freshup-agent-actions freshup-agent-actions--compact">
                       {freshUpSalespersonPhoneHref ? (
@@ -10093,7 +10096,7 @@ export default function App() {
                             <div>
                               <span className="eyebrow">{isPrimary ? "Primary Store" : brand.badge}</span>
                               <h4>{store.display_name}</h4>
-                              <p>Financing shortcuts and inventory links for {store.display_name}.</p>
+                              <p>Financing and shopping links for {store.display_name}.</p>
                             </div>
                           </div>
                         </div>
