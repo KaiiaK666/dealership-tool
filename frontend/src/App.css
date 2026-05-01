@@ -6315,7 +6315,7 @@ button.special-card:hover:not(:disabled) {
 
 .freshup-hero__status span,
 .freshup-lockbox span,
-.freshup-log-item__meta span {
+.freshup-log-item__chip {
   font-family: "IBM Plex Mono", monospace;
   font-size: 0.74rem;
   letter-spacing: 0.14em;
@@ -6851,11 +6851,37 @@ button.special-card:hover:not(:disabled) {
 
 .freshup-log-item {
   display: grid;
-  gap: 12px;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 14px;
   padding: 16px;
+  border-radius: 22px;
+  border: 1px solid rgba(210, 198, 182, 0.66);
+  background:
+    linear-gradient(135deg, rgba(255, 255, 255, 0.96), rgba(250, 244, 235, 0.78)),
+    rgba(255, 255, 255, 0.86);
+  box-shadow: 0 16px 38px rgba(73, 58, 42, 0.08);
+}
+
+.freshup-log-item__avatar {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 48px;
+  height: 48px;
   border-radius: 18px;
-  border: 1px solid rgba(210, 198, 182, 0.64);
-  background: rgba(255, 255, 255, 0.82);
+  background:
+    radial-gradient(circle at 32% 24%, rgba(255, 255, 255, 0.7), transparent 34%),
+    linear-gradient(135deg, rgba(218, 113, 58, 0.95), rgba(39, 53, 66, 0.94));
+  color: #fff;
+  font-weight: 900;
+  letter-spacing: 0.05em;
+  box-shadow: 0 12px 24px rgba(39, 53, 66, 0.18);
+}
+
+.freshup-log-item__body {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
 }
 
 .freshup-log-item__top {
@@ -6867,17 +6893,42 @@ button.special-card:hover:not(:disabled) {
 
 .freshup-log-item__top strong {
   display: block;
-  font-size: 1rem;
+  color: var(--deep);
+  font-size: 1.08rem;
+  line-height: 1.2;
 }
 
-.freshup-log-item__top small {
+.freshup-log-item__identity {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.freshup-log-item__identity .eyebrow {
+  color: rgba(37, 48, 59, 0.54);
+}
+
+.freshup-log-item__identity a,
+.freshup-log-item__identity small {
   display: block;
-  margin-top: 4px;
   color: var(--muted);
+  font-size: 0.92rem;
+  line-height: 1.3;
+  text-decoration: none;
 }
 
-.freshup-log-item__top span {
-  color: var(--muted);
+.freshup-log-item__identity a:hover {
+  color: var(--accent-deep);
+  text-decoration: underline;
+}
+
+.freshup-log-item__top time {
+  padding: 8px 10px;
+  border-radius: 999px;
+  background: rgba(37, 48, 59, 0.07);
+  color: rgba(37, 48, 59, 0.72);
+  font-size: 0.84rem;
+  font-weight: 800;
   white-space: nowrap;
 }
 
@@ -6887,11 +6938,30 @@ button.special-card:hover:not(:disabled) {
   gap: 8px;
 }
 
-.freshup-log-item__meta span {
+.freshup-log-item__chip {
+  display: inline-flex;
+  align-items: center;
+  min-height: 32px;
   padding: 8px 10px;
   border-radius: 999px;
-  background: rgba(196, 102, 52, 0.1);
+  background: rgba(37, 48, 59, 0.07);
+  color: rgba(37, 48, 59, 0.8);
+  line-height: 1;
+}
+
+.freshup-log-item__chip--person {
+  background: rgba(196, 102, 52, 0.13);
   color: var(--accent-deep);
+}
+
+.freshup-log-item__chip.is-success {
+  background: rgba(23, 121, 105, 0.12);
+  color: #177969;
+}
+
+.freshup-log-item__chip.is-warm {
+  background: rgba(238, 169, 86, 0.16);
+  color: #9a551a;
 }
 
 .freshup-admin-group {
@@ -7092,6 +7162,19 @@ button.special-card:hover:not(:disabled) {
   .freshup-store-card__brand {
     flex-direction: column;
     align-items: flex-start;
+  }
+
+  .freshup-log-item {
+    grid-template-columns: 1fr;
+  }
+
+  .freshup-log-item__avatar {
+    width: 44px;
+    height: 44px;
+  }
+
+  .freshup-log-item__top time {
+    white-space: normal;
   }
 
   .freshup-form input,

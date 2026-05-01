@@ -1922,27 +1922,62 @@ function LogTable({ entries, empty }) {
   );
 }
 
+function freshUpLogInitials(name) {
+  const parts = String(name || "")
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean);
+  if (!parts.length) return "FU";
+  return parts.slice(0, 2).map((part) => part[0]?.toUpperCase() || "").join("") || "FU";
+}
+
+function freshUpGiftLogLabel(entry) {
+  const giftCode = String(entry?.gift_code || "").trim();
+  if (!giftCode) return "";
+  return entry?.gift_sms_sent ? `Gift text sent: ${giftCode}` : `Gift code saved: ${giftCode}`;
+}
+
 function FreshUpLogList({ entries, empty }) {
   if (!entries.length) return <div className="empty">{empty}</div>;
   return (
     <div className="freshup-log-list">
-      {entries.map((entry) => (
-        <article key={entry.id} className="freshup-log-item">
-          <div className="freshup-log-item__top">
-            <div>
-              <strong>{entry.customer_name}</strong>
-              <small>{entry.customer_phone || "No phone"}</small>
+      {entries.map((entry) => {
+        const phoneLink = phoneHref(entry.customer_phone);
+        const giftLabel = freshUpGiftLogLabel(entry);
+        return (
+          <article key={entry.id} className="freshup-log-item">
+            <div className="freshup-log-item__avatar" aria-hidden="true">
+              {freshUpLogInitials(entry.customer_name)}
             </div>
-            <span>{dateTimeLabel(entry.created_at)}</span>
-          </div>
-          <div className="freshup-log-item__meta">
-            <span>{entry.salesperson_name || "Unassigned"}</span>
-            <span>{entry.salesperson_dealership || "No store"}</span>
-            <span>{entry.source || "Desk"}</span>
-            {entry.gift_code ? <span>{entry.gift_sms_sent ? `Gift text: ${entry.gift_code}` : entry.gift_sms_status || `Gift code: ${entry.gift_code}`}</span> : null}
-          </div>
-        </article>
-      ))}
+            <div className="freshup-log-item__body">
+              <div className="freshup-log-item__top">
+                <div className="freshup-log-item__identity">
+                  <span className="eyebrow">Fresh Up</span>
+                  <strong>{entry.customer_name || "Unnamed customer"}</strong>
+                  {phoneLink ? (
+                    <a href={phoneLink}>{entry.customer_phone}</a>
+                  ) : (
+                    <small>No phone captured</small>
+                  )}
+                </div>
+                <time dateTime={entry.created_at || ""}>{dateTimeLabel(entry.created_at)}</time>
+              </div>
+              <div className="freshup-log-item__meta">
+                <span className="freshup-log-item__chip freshup-log-item__chip--person">
+                  {entry.salesperson_name || "Unassigned"}
+                </span>
+                <span className="freshup-log-item__chip">{entry.salesperson_dealership || "No store"}</span>
+                <span className="freshup-log-item__chip">{entry.source || "Desk"}</span>
+                {giftLabel ? (
+                  <span className={`freshup-log-item__chip ${entry.gift_sms_sent ? "is-success" : "is-warm"}`}>
+                    {giftLabel}
+                  </span>
+                ) : null}
+              </div>
+            </div>
+          </article>
+        );
+      })}
     </div>
   );
 }
