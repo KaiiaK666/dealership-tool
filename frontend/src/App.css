@@ -4958,6 +4958,12 @@ button.special-card:hover:not(:disabled) {
   border-color: rgba(23, 121, 105, 0.22);
 }
 
+.notice.warning {
+  color: #8a4b08;
+  background: rgba(255, 247, 229, 0.96);
+  border-color: rgba(214, 129, 45, 0.26);
+}
+
 .admin-danger-zone {
   margin-top: 18px;
   padding-top: 18px;
@@ -6386,8 +6392,48 @@ button.special-card:hover:not(:disabled) {
 }
 
 .freshup-form > .freshup-actions,
-.freshup-form > .notice {
+.freshup-form > .notice,
+.freshup-form > .freshup-form-notice,
+.freshup-form > .freshup-gift-promise,
+.freshup-form > .freshup-consent {
   grid-column: 1 / -1;
+}
+
+.freshup-gift-promise {
+  display: grid;
+  gap: 6px;
+  padding: 14px 16px;
+  border-radius: 20px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  background:
+    radial-gradient(circle at top right, rgba(249, 184, 92, 0.28), transparent 46%),
+    rgba(255, 255, 255, 0.08);
+}
+
+.freshup-gift-promise span {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.62);
+}
+
+.freshup-gift-promise strong {
+  color: #fff;
+  font-size: 1.12rem;
+  line-height: 1.25;
+}
+
+.freshup-gift-promise small,
+.freshup-consent,
+.freshup-field-hint {
+  line-height: 1.45;
+}
+
+.freshup-consent {
+  display: block;
+  padding: 0 2px;
 }
 
 .freshup-form__field,
@@ -6426,6 +6472,28 @@ button.special-card:hover:not(:disabled) {
 
 .freshup-shell--card .freshup-form input {
   min-height: 48px;
+}
+
+.freshup-shell--card .freshup-actions {
+  grid-template-columns: 1fr;
+}
+
+.freshup-shell--card .freshup-actions button {
+  min-height: 58px;
+  border: 0;
+  border-radius: 18px;
+  background: linear-gradient(135deg, #f8b45d 0%, #d96d32 100%);
+  color: #111827;
+  box-shadow: 0 18px 38px rgba(216, 109, 50, 0.32);
+  font-size: 1.05rem;
+  font-weight: 900;
+  letter-spacing: 0.01em;
+}
+
+.freshup-shell--card .freshup-actions button:disabled {
+  color: rgba(255, 255, 255, 0.62);
+  background: rgba(255, 255, 255, 0.16);
+  box-shadow: none;
 }
 
 .freshup-form small {
@@ -6625,6 +6693,38 @@ button.special-card:hover:not(:disabled) {
   font-size: 0.82rem;
   letter-spacing: 0.08em;
   text-transform: uppercase;
+}
+
+.freshup-link-gate {
+  display: grid;
+  gap: 8px;
+  padding: 18px;
+  border-radius: 20px;
+  border: 1px dashed rgba(255, 255, 255, 0.18);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.04)),
+    rgba(255, 255, 255, 0.04);
+}
+
+.freshup-link-gate span {
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.58);
+}
+
+.freshup-link-gate strong {
+  color: #fff;
+  font-size: 1.08rem;
+  line-height: 1.25;
+}
+
+.freshup-link-gate small {
+  max-width: 56ch;
+  color: rgba(255, 255, 255, 0.74);
+  line-height: 1.5;
 }
 
 .freshup-log-list {

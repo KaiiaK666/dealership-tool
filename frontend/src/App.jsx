@@ -249,11 +249,11 @@ const FRESH_UP_DEFAULTS = {
   source: "Desk",
 };
 const FRESHUP_LINKS_DEFAULTS = {
-  page_title: "Start with Bert Ogden Mission",
-  page_subtitle: "Save your info first, then choose the credit or inventory step you want.",
-  form_title: "Send your contact info",
+  page_title: "Get your gift",
+  page_subtitle: "Enter your phone first. We will text this month's gift code, then unlock the next steps.",
+  form_title: "Text me my gift code",
   form_subtitle: "Your salesperson stays attached to this form.",
-  submit_label: "Send Info to Sales Agent",
+  submit_label: "Get Your Gift",
   stores: [
     {
       dealership: "Kia",
@@ -999,6 +999,25 @@ function freshUpSummaryText(form, salespersonName) {
     `Salesperson: ${salespersonName || "Not selected"}`,
     `Source: ${String(form.source || "").trim() || "Desk"}`,
   ].join("\n");
+}
+
+function freshUpValidationMessage(form, salesperson) {
+  if (!salesperson?.id) return "Choose the salesperson first.";
+  if (!String(form.customerName || "").trim()) return "Enter the customer name.";
+  const phoneDigits = digitsOnly(form.phone);
+  if (phoneDigits.length !== 10) return "Enter a 10 digit phone number.";
+  return "";
+}
+
+function freshUpGiftCustomerStatus(result, customerPhone, salespersonName) {
+  const giftCode = String(result?.gift_code || "").trim();
+  if (result?.gift_sms_sent) {
+    return giftCode ? `Gift text sent. Your code is ${giftCode}.` : `Gift text sent to ${customerPhone}.`;
+  }
+  if (giftCode) {
+    return `Gift request saved. If the text does not arrive, show code ${giftCode} to your salesperson.`;
+  }
+  return `Gift request saved. ${salespersonName || "Our team"} has your name and phone.`;
 }
 
 function readFreshUpLaunchContext() {
@@ -1920,6 +1939,7 @@ function FreshUpLogList({ entries, empty }) {
             <span>{entry.salesperson_name || "Unassigned"}</span>
             <span>{entry.salesperson_dealership || "No store"}</span>
             <span>{entry.source || "Desk"}</span>
+            {entry.gift_code ? <span>{entry.gift_sms_sent ? `Gift text: ${entry.gift_code}` : entry.gift_sms_status || `Gift code: ${entry.gift_code}`}</span> : null}
           </div>
         </article>
       ))}
@@ -2171,6 +2191,8 @@ export default function App() {
   });
   const [freshUpLog, setFreshUpLog] = useState({ total: 0, entries: [] });
   const [freshUpStatus, setFreshUpStatus] = useState("");
+  const [freshUpFormError, setFreshUpFormError] = useState("");
+  const [freshUpCardSubmitted, setFreshUpCardSubmitted] = useState(false);
   const freshUpCopiedAt = "";
   const [freshUpLinksConfig, setFreshUpLinksConfig] = useState(() => normalizeFreshUpLinksConfig(FRESHUP_LINKS_DEFAULTS));
   const [freshUpAnalytics, setFreshUpAnalytics] = useState(FRESHUP_ANALYTICS_DEFAULTS);
@@ -2317,12 +2339,15 @@ export default function App() {
   const resolvedFreshUpSalespersonId =
     freshUpForm.salespersonId || (freshUpAssignedSalesperson ? String(freshUpAssignedSalesperson.id) : "");
   const freshUpSummary = freshUpSummaryText(freshUpForm, freshUpAssignedSalesperson?.name || "");
+  const freshUpCustomerNameReady = Boolean(String(freshUpForm.customerName || "").trim());
+  const freshUpCustomerPhoneReady = digitsOnly(freshUpForm.phone).length === 10;
   const freshUpFilledCount = [
     freshUpForm.customerName,
     freshUpForm.phone,
     freshUpAssignedSalesperson?.id || freshUpForm.salespersonId,
   ].filter((value) => String(value || "").trim()).length;
   const freshUpCardMode = freshUpLaunchContext.cardMode;
+  const freshUpLinksUnlocked = !freshUpCardMode || freshUpCardSubmitted;
   const freshUpCardHref = freshUpAssignedSalesperson ? freshUpCardUrl(freshUpAssignedSalesperson.id) : "";
   const freshUpStoreCards = [...(freshUpLinksConfig.stores || [])].sort((left, right) => {
     const leftPriority = left.dealership === freshUpAssignedSalesperson?.dealership ? 0 : 1;
@@ -2340,13 +2365,12 @@ export default function App() {
   const freshUpSalespersonContactLabel = freshUpAssignedSalesperson
     ? `Add ${freshUpAssignedSalesperson.name} as Contact`
     : "Add salesperson as contact";
-  const freshUpCardIntroHeading = freshUpAssignedSalesperson ? `Work with ${freshUpAssignedSalesperson.name}` : freshUpLinksConfig.page_title;
+  const freshUpCardIntroHeading = "Get your gift";
   const freshUpCardIntroCopy = freshUpAssignedSalesperson
-    ? `Send your name and phone first. Then choose the credit application or inventory step you want with ${freshUpPrimaryStore?.display_name || "our team"}.`
-    : "Send your name and phone first. Then choose the financing or inventory step you want.";
-  const freshUpCardSubmitLabel = freshUpAssignedSalesperson
-    ? `Send Info to ${String(freshUpAssignedSalesperson.name || "").trim().split(/\s+/)[0] || "Sales Agent"}`
-    : freshUpLinksConfig.submit_label;
+    ? `Enter your name and mobile number. We will text this month's gift code and attach ${freshUpAssignedSalesperson.name} as your sales contact.`
+    : "Enter your name and mobile number. We will text this month's gift code and attach the right salesperson.";
+  const freshUpCardSubmitLabel = "Get Your Gift";
+  const freshUpStatusTone = /skipped|failed/i.test(freshUpStatus) ? "warning" : "success";
   const freshUpConversionRate = freshUpAnalytics.page_views
     ? Math.round((freshUpAnalytics.submissions / freshUpAnalytics.page_views) * 100)
     : 0;
@@ -5098,6 +5122,17 @@ export default function App() {
       salespersonQuery: match ? match.name : "",
     }));
     setFreshUpStatus("");
+    setFreshUpFormError("");
+    if (freshUpCardMode) setFreshUpCardSubmitted(false);
+  }
+
+  function updateFreshUpFormField(field, value) {
+    setFreshUpForm((current) => ({ ...current, [field]: value }));
+    setFreshUpFormError("");
+    if (freshUpCardMode) {
+      setFreshUpStatus("");
+      setFreshUpCardSubmitted(false);
+    }
   }
 
   async function copyFreshUpSummary() {
@@ -5118,6 +5153,8 @@ export default function App() {
       source: freshUpCardMode ? "NFC Card" : "Desk",
     });
     setFreshUpStatus("");
+    setFreshUpFormError("");
+    setFreshUpCardSubmitted(false);
   }
 
   async function copyFreshUpCardLink() {
@@ -5131,19 +5168,28 @@ export default function App() {
   }
 
   async function submitFreshUpLog() {
-    setBusy("freshup-submit");
     setError("");
+    setFreshUpFormError("");
+    const validationMessage = freshUpValidationMessage(freshUpForm, freshUpAssignedSalesperson);
+    if (validationMessage) {
+      setFreshUpFormError(validationMessage);
+      return;
+    }
+    setBusy("freshup-submit");
     try {
       const salespersonId =
         freshUpAssignedSalesperson?.id || (freshUpForm.salespersonId ? Number(freshUpForm.salespersonId) : undefined);
       if (!salespersonId) {
         throw new Error("Pick the salesperson first.");
       }
-      await createFreshUpLog({
-        customer_name: freshUpForm.customerName,
-        customer_phone: freshUpForm.phone,
+      const customerName = String(freshUpForm.customerName || "").trim();
+      const customerPhone = formatPhoneInput(digitsOnly(freshUpForm.phone));
+      const freshUpResult = await createFreshUpLog({
+        customer_name: customerName,
+        customer_phone: customerPhone,
         salesperson_id: salespersonId,
         source: freshUpCardMode ? "NFC Card" : "Desk",
+        send_gift_text: freshUpCardMode,
       });
       if (!freshUpCardMode) {
         await refreshFreshUpLog();
@@ -5158,16 +5204,17 @@ export default function App() {
       }));
       setFreshUpStatus(
         freshUpCardMode
-          ? `Thanks. ${freshUpAssignedSalesperson?.name || "Our team"} will reach out soon.`
+          ? freshUpGiftCustomerStatus(freshUpResult, customerPhone, freshUpAssignedSalesperson?.name || "")
           : "Freshup logged."
       );
+      if (freshUpCardMode) setFreshUpCardSubmitted(true);
       if (freshUpCardMode && typeof document !== "undefined") {
         window.setTimeout(() => {
           document.getElementById("freshup-links")?.scrollIntoView({ behavior: "smooth", block: "start" });
         }, 150);
       }
     } catch (errorValue) {
-      setError(errText(errorValue));
+      setFreshUpFormError(errText(errorValue));
     } finally {
       setBusy("");
     }
@@ -9782,7 +9829,7 @@ export default function App() {
                         </div>
                       </div>
                       <div className="freshup-card-intro__copy">
-                        <span className="eyebrow">Your Sales Agent</span>
+                        <span className="eyebrow">Monthly Gift</span>
                         <h2>{freshUpCardIntroHeading}</h2>
                         <p>{freshUpCardIntroCopy}</p>
                       </div>
@@ -9848,8 +9895,8 @@ export default function App() {
                   <div className="freshup-capture__header freshup-capture__header--compact">
                     <div className="freshup-capture__header-copy">
                       <span className="eyebrow">Step 1</span>
-                      <h3>Send your contact info</h3>
-                      <small>Your salesperson stays attached to this form.</small>
+                      <h3>Text me my gift code</h3>
+                      <small>Your phone number is saved to this fresh-up and attached to your salesperson.</small>
                     </div>
                   </div>
                 )}
@@ -9857,13 +9904,19 @@ export default function App() {
                 <div className={`freshup-form ${freshUpCardMode ? "freshup-form--card" : "freshup-form--desk"}`}>
                   {freshUpCardMode ? (
                     <>
+                      <div className="freshup-gift-promise">
+                        <span>Gift text</span>
+                        <strong>Use this month's code to get your gift.</strong>
+                        <small>Enter your name and mobile number, then tap Get Your Gift.</small>
+                      </div>
                       <label>
                         <span>Your Name</span>
                         <input
                           value={freshUpForm.customerName}
-                          onChange={(event) => setFreshUpForm((current) => ({ ...current, customerName: event.target.value }))}
+                          onChange={(event) => updateFreshUpFormField("customerName", event.target.value)}
                           placeholder="Enter your name"
                           autoComplete="name"
+                          required
                         />
                       </label>
                       <label>
@@ -9873,11 +9926,11 @@ export default function App() {
                           inputMode="tel"
                           autoComplete="tel"
                           value={freshUpForm.phone}
-                          onChange={(event) =>
-                            setFreshUpForm((current) => ({ ...current, phone: formatPhoneInput(event.target.value) }))
-                          }
+                          onChange={(event) => updateFreshUpFormField("phone", formatPhoneInput(event.target.value))}
                           placeholder="(956) 555-1234"
+                          required
                         />
+                        <small className="freshup-field-hint">We will text the gift code to this 10-digit mobile number.</small>
                       </label>
                       <div className="freshup-lockbox freshup-lockbox--customer">
                         <strong>{freshUpAssignedSalesperson?.name || "Salesperson not set"}</strong>
@@ -9935,14 +9988,15 @@ export default function App() {
                         </div>
                       ) : null}
                       <label className="freshup-form__field">
-                        <span>Customer Name</span>
-                        <input
-                          value={freshUpForm.customerName}
-                          onChange={(event) => setFreshUpForm((current) => ({ ...current, customerName: event.target.value }))}
-                          placeholder="Full name"
-                          autoComplete="name"
-                        />
-                      </label>
+                          <span>Customer Name</span>
+                          <input
+                            value={freshUpForm.customerName}
+                          onChange={(event) => updateFreshUpFormField("customerName", event.target.value)}
+                            placeholder="Full name"
+                            autoComplete="name"
+                            required
+                          />
+                        </label>
                       <label className="freshup-form__field">
                         <span>Phone Number</span>
                         <input
@@ -9950,20 +10004,24 @@ export default function App() {
                           inputMode="tel"
                           autoComplete="tel"
                           value={freshUpForm.phone}
-                          onChange={(event) =>
-                            setFreshUpForm((current) => ({ ...current, phone: formatPhoneInput(event.target.value) }))
-                          }
+                          onChange={(event) => updateFreshUpFormField("phone", formatPhoneInput(event.target.value))}
                           placeholder="(956) 555-1234"
+                          required
                         />
                       </label>
                     </>
                   )}
+                  {freshUpCardMode ? (
+                    <small className="freshup-consent">
+                      By tapping Get Your Gift, you agree to receive a one-time gift code text and dealership follow-up.
+                    </small>
+                  ) : null}
                   <div className="freshup-actions">
                     <button
                       type="submit"
-                      disabled={busy === "freshup-submit" || !freshUpAssignedSalesperson || !freshUpForm.customerName || !freshUpForm.phone}
+                      disabled={busy === "freshup-submit" || !freshUpAssignedSalesperson || !freshUpCustomerNameReady || !freshUpCustomerPhoneReady}
                     >
-                      {busy === "freshup-submit" ? "Saving..." : freshUpCardMode ? freshUpCardSubmitLabel : "Log Freshup"}
+                      {busy === "freshup-submit" ? (freshUpCardMode ? "Sending Text..." : "Saving...") : freshUpCardMode ? freshUpCardSubmitLabel : "Log Freshup"}
                     </button>
                     {!freshUpCardMode ? (
                       <button type="button" className="secondary" onClick={copyFreshUpSummary}>
@@ -9972,7 +10030,8 @@ export default function App() {
                     ) : null}
                   </div>
 
-                  {freshUpStatus ? <div className="notice success">{freshUpStatus}</div> : null}
+                  {freshUpFormError ? <div className="notice error freshup-form-notice">{freshUpFormError}</div> : null}
+                  {freshUpStatus ? <div className={`notice ${freshUpStatusTone}`}>{freshUpStatus}</div> : null}
                 </div>
               </form>
 
@@ -9983,7 +10042,9 @@ export default function App() {
                     <h3>{freshUpCardMode ? freshUpPrimaryStore?.display_name || freshUpLinksConfig.page_title : "Program one link per salesperson"}</h3>
                     <p>
                       {freshUpCardMode
-                        ? "Finance, inventory, maps, and socials are all here once your info is saved."
+                        ? freshUpLinksUnlocked
+                          ? "Your gift request is saved. Choose the credit application, inventory, maps, or social link you need next."
+                          : "Get your gift code first. Credit, inventory, maps, and social links unlock after your phone number is saved."
                         : "Put this link on the NFC business card. When a customer taps, it opens a customer-facing landing page with contact capture at the top and the right links underneath."}
                     </p>
                   </div>
@@ -10022,6 +10083,13 @@ export default function App() {
                     </div>
                   </>
                 ) : null}
+                {freshUpCardMode && !freshUpLinksUnlocked ? (
+                  <div className="freshup-link-gate">
+                    <span>Gift first</span>
+                    <strong>Tap Get Your Gift to unlock the next steps.</strong>
+                    <small>That captures the phone number, sends the monthly gift text, and tags the fresh-up to {freshUpAssignedSalesperson?.name || "the salesperson"}.</small>
+                  </div>
+                ) : (
                 <div className="freshup-store-grid">
                   {freshUpStoreCards.map((store) => {
                     const brand = freshUpStoreBrandMeta(store.dealership);
@@ -10145,6 +10213,7 @@ export default function App() {
                     );
                   })}
                 </div>
+                )}
               </div>
             </div>
 

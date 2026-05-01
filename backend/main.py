@@ -168,6 +168,12 @@ APP_BASE_URL = os.getenv("DEALER_APP_BASE_URL", "https://app.bertogden123.com").
 TWILIO_ACCOUNT_SID = os.getenv("TWILIO_ACCOUNT_SID", "").strip()
 TWILIO_AUTH_TOKEN = os.getenv("TWILIO_AUTH_TOKEN", "").strip()
 TWILIO_FROM_NUMBER = os.getenv("TWILIO_FROM_NUMBER", "").strip()
+FRESHUP_GIFT_BUSINESS_NAME = os.getenv("DEALER_FRESHUP_GIFT_BUSINESS_NAME", "Bert Ogden Mission").strip() or "Bert Ogden Mission"
+FRESHUP_GIFT_CODE_SUFFIX = re.sub(r"[^A-Za-z0-9]", "", os.getenv("DEALER_FRESHUP_GIFT_CODE_SUFFIX", "33"))[:8] or "33"
+FRESHUP_GIFT_DUPLICATE_WINDOW_SECONDS = max(
+    30,
+    min(900, int(os.getenv("DEALER_FRESHUP_GIFT_DUPLICATE_WINDOW_SECONDS", "180") or 180)),
+)
 RESEND_API_KEY = os.getenv("RESEND_API_KEY", "").strip()
 BDC_NOTIFY_EMAIL_FROM = os.getenv("BDC_NOTIFY_EMAIL_FROM", "").strip()
 BDC_NOTIFY_EMAIL_REPLY_TO = os.getenv("BDC_NOTIFY_EMAIL_REPLY_TO", "").strip()
@@ -538,6 +544,7 @@ class FreshUpLogCreateIn(BaseModel):
     customer_phone: str
     salesperson_id: Optional[int] = None
     source: str = "Desk"
+    send_gift_text: bool = False
 
 
 class FreshUpLogOut(BaseModel):
@@ -550,6 +557,9 @@ class FreshUpLogOut(BaseModel):
     salesperson_name: str = ""
     salesperson_dealership: str = ""
     source: str = "Desk"
+    gift_code: str = ""
+    gift_sms_sent: bool = False
+    gift_sms_status: str = ""
 
 
 class FreshUpLogListOut(BaseModel):
@@ -1602,6 +1612,30 @@ def build_test_notification_body() -> str:
     if APP_BASE_URL:
         lines.extend(["", f"Open the app: {APP_BASE_URL}"])
     return "\n".join(lines)
+
+
+def current_freshup_gift_code() -> str:
+    return f"{now_local().strftime('%b').upper()}{FRESHUP_GIFT_CODE_SUFFIX}"
+
+
+def build_freshup_gift_sms_body(gift_code: str) -> str:
+    return (
+        f"Thanks for stopping by {FRESHUP_GIFT_BUSINESS_NAME}. Use code {gift_code} to get your gift this month. "
+        "Show this text to your salesperson. Reply STOP to opt out."
+    )
+
+
+def deliver_freshup_gift_text(raw_phone_number: str, gift_code: str) -> Tuple[bool, str]:
+    if not sms_notifications_configured():
+        return False, "Gift text skipped: Twilio is not configured"
+    sms_target = normalize_sms_phone(raw_phone_number)
+    if not sms_target:
+        return False, "Gift text skipped: phone number must be a valid US or E.164 number"
+    try:
+        send_twilio_sms(sms_target, build_freshup_gift_sms_body(gift_code))
+        return True, f"Gift text sent to {mask_phone(raw_phone_number)}"
+    except Exception as exc:
+        return False, f"Gift text failed: {compact_error_text(exc)}"
 
 
 def send_notification_test_sms(raw_phone_number: str) -> NotificationTestSmsOut:
@@ -4394,12 +4428,23 @@ def init_db() -> None:
             created_at TEXT NOT NULL,
             customer_name TEXT NOT NULL,
             customer_phone TEXT NOT NULL DEFAULT '',
+            customer_phone_sms TEXT NOT NULL DEFAULT '',
             salesperson_id INTEGER,
             salesperson_name TEXT NOT NULL DEFAULT '',
             salesperson_dealership TEXT NOT NULL DEFAULT '',
-            source TEXT NOT NULL DEFAULT 'Desk'
+            source TEXT NOT NULL DEFAULT 'Desk',
+            gift_code TEXT NOT NULL DEFAULT '',
+            gift_sms_sent INTEGER NOT NULL DEFAULT 0,
+            gift_sms_status TEXT NOT NULL DEFAULT ''
         )
         """
+    )
+    ensure_column("freshup_log", "customer_phone_sms", "TEXT NOT NULL DEFAULT ''")
+    ensure_column("freshup_log", "gift_code", "TEXT NOT NULL DEFAULT ''")
+    ensure_column("freshup_log", "gift_sms_sent", "INTEGER NOT NULL DEFAULT 0")
+    ensure_column("freshup_log", "gift_sms_status", "TEXT NOT NULL DEFAULT ''")
+    db_execute(
+        "CREATE INDEX IF NOT EXISTS idx_freshup_log_gift_dedupe ON freshup_log(customer_phone_sms, salesperson_id, gift_code, created_ts)"
     )
     db_execute(
         """
@@ -4885,6 +4930,9 @@ def freshup_log_out(row: Dict[str, Any]) -> FreshUpLogOut:
         salesperson_name=str(row.get("salesperson_name") or ""),
         salesperson_dealership=str(row.get("salesperson_dealership") or ""),
         source=str(row.get("source") or "Desk"),
+        gift_code=str(row.get("gift_code") or ""),
+        gift_sms_sent=bool(int(row.get("gift_sms_sent") or 0)),
+        gift_sms_status=str(row.get("gift_sms_status") or ""),
     )
 
 
@@ -6732,6 +6780,9 @@ def create_freshup_log(payload: FreshUpLogCreateIn) -> FreshUpLogOut:
     customer_phone = normalize_short_text(payload.customer_phone, "customer_phone", max_len=40)
     if not customer_phone:
         raise HTTPException(status_code=400, detail="customer_phone is required")
+    customer_phone_sms = normalize_sms_phone(customer_phone) or ""
+    if payload.send_gift_text and not customer_phone_sms:
+        raise HTTPException(status_code=400, detail="phone number must be a valid 10 digit mobile number")
     source = normalize_short_text(payload.source or "Desk", "source", max_len=40) or "Desk"
 
     salesperson_id: Optional[int] = None
@@ -6744,28 +6795,68 @@ def create_freshup_log(payload: FreshUpLogCreateIn) -> FreshUpLogOut:
         salesperson_id = int(row.get("id") or 0)
         salesperson_name = str(row.get("name") or "")
         salesperson_dealership = str(row.get("dealership") or "")
+    gift_code = current_freshup_gift_code() if payload.send_gift_text else ""
+    created_ts = time.time()
+
+    if payload.send_gift_text and customer_phone_sms:
+        duplicate_cutoff_ts = created_ts - FRESHUP_GIFT_DUPLICATE_WINDOW_SECONDS
+        duplicate_clauses = [
+            "customer_phone_sms = ?",
+            "gift_code = ?",
+            "source = ?",
+            "gift_sms_sent = 1",
+            "created_ts >= ?",
+        ]
+        duplicate_params: List[Any] = [customer_phone_sms, gift_code, source, duplicate_cutoff_ts]
+        if salesperson_id is None:
+            duplicate_clauses.append("salesperson_id IS NULL")
+        else:
+            duplicate_clauses.append("salesperson_id = ?")
+            duplicate_params.append(salesperson_id)
+        duplicate_row = db_query_one(
+            f"""
+            SELECT * FROM freshup_log
+            WHERE {' AND '.join(duplicate_clauses)}
+            ORDER BY created_ts DESC, id DESC
+            LIMIT 1
+            """,
+            tuple(duplicate_params),
+        )
+        if duplicate_row:
+            return freshup_log_out(duplicate_row)
 
     created_id = db_insert(
         """
         INSERT INTO freshup_log (
-            created_ts, created_at, customer_name, customer_phone, salesperson_id, salesperson_name,
-            salesperson_dealership, source
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            created_ts, created_at, customer_name, customer_phone, customer_phone_sms, salesperson_id,
+            salesperson_name, salesperson_dealership, source, gift_code, gift_sms_sent, gift_sms_status
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (
-            time.time(),
+            created_ts,
             now_iso(),
             customer_name,
             customer_phone,
+            customer_phone_sms,
             salesperson_id,
             salesperson_name,
             salesperson_dealership,
             source,
+            gift_code,
+            0,
+            "",
         ),
     )
     row = db_query_one("SELECT * FROM freshup_log WHERE id = ?", (created_id,))
     if not row:
         raise HTTPException(status_code=500, detail="failed to create freshup log")
+    if payload.send_gift_text:
+        gift_sms_sent, gift_sms_status = deliver_freshup_gift_text(customer_phone, gift_code)
+        db_execute(
+            "UPDATE freshup_log SET gift_sms_sent = ?, gift_sms_status = ? WHERE id = ?",
+            (1 if gift_sms_sent else 0, gift_sms_status, created_id),
+        )
+        row = db_query_one("SELECT * FROM freshup_log WHERE id = ?", (created_id,)) or row
     if source.lower() == "nfc card":
         create_freshup_analytics_event(
             FreshUpAnalyticsEventIn(
