@@ -376,6 +376,7 @@ class SalespersonOut(BaseModel):
     dealership: str
     weekly_days_off: List[int]
     active: bool
+    phone_number: str = ""
     created_ts: float
     updated_ts: float
 
@@ -4819,6 +4820,7 @@ def salesperson_out(row: Dict[str, Any]) -> SalespersonOut:
         dealership=str(row.get("dealership") or ""),
         weekly_days_off=text_to_days(row.get("weekly_days_off")),
         active=bool(int(row.get("active") or 0)),
+        phone_number=str(row.get("phone_number") or ""),
         created_ts=float(row.get("created_ts") or 0.0),
         updated_ts=float(row.get("updated_ts") or 0.0),
     )
