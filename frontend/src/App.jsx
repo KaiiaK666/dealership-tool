@@ -139,6 +139,45 @@ const SPECIAL_FEED_SOURCES = [
   },
 ];
 
+const SPECIAL_STATIC_GRAPHICS = {
+  kia: {
+    label: "Kia",
+    eyebrow: "Kia MoM Graphics",
+    zipUrl: "/special-graphics/kia-mom-graphics.zip",
+    items: [
+      { title: "2026 Kia Sorento", model: "Sorento", file: "kia/kia-sorento.png" },
+      { title: "2026 Kia K4 Hatchback", model: "K4 Hatchback", file: "kia/kia-k4-hatchback.png" },
+      { title: "2026 Kia K4", model: "K4", file: "kia/kia-k4.png" },
+      { title: "2026 Kia K5", model: "K5", file: "kia/kia-k5.png" },
+      { title: "2026 Kia Seltos", model: "Seltos", file: "kia/kia-seltos.png" },
+      { title: "2026 Kia Niro", model: "Niro", file: "kia/kia-niro.png" },
+      { title: "2026 Kia Carnival", model: "Carnival", file: "kia/kia-carnival.png" },
+      { title: "2026 Kia Sportage", model: "Sportage", file: "kia/kia-sportage.png" },
+      { title: "2027 Kia Telluride", model: "Telluride", file: "kia/kia-2027-telluride.png" },
+      { title: "2027 Kia Telluride Alternate", model: "Telluride", file: "kia/kia-2027-telluride-alt.png" },
+    ],
+  },
+  mazda: {
+    label: "Mazda",
+    eyebrow: "Mazda MoM Graphics",
+    zipUrl: "/special-graphics/mazda-mom-graphics.zip",
+    items: [
+      { title: "2026 Mazda CX-70 Inline 6 Turbo", model: "CX-70", file: "mazda/mazda-cx-70-inline-6-turbo.png" },
+      { title: "2026 Mazda CX-50", model: "CX-50", file: "mazda/mazda-cx-50.png" },
+      { title: "2026 Mazda MX-5 Miata RF", model: "MX-5 Miata RF", file: "mazda/mazda-mx-5-miata-rf.png" },
+      { title: "2026 Mazda CX-50 Hybrid", model: "CX-50 Hybrid", file: "mazda/mazda-cx-50-hybrid.png" },
+      { title: "2026 Mazda CX-5", model: "CX-5", file: "mazda/mazda-cx-5.png" },
+      { title: "2026 Mazda CX-90 PHEV Story", model: "CX-90 PHEV", file: "mazda/mazda-cx-90-phev-story.png" },
+      { title: "2026 Mazda3 Hatchback", model: "Mazda3 Hatchback", file: "mazda/mazda3-hatchback.png" },
+      { title: "2026 Mazda CX-70 Plug-In Hybrid", model: "CX-70 PHEV", file: "mazda/mazda-cx-70-plug-in-hybrid.png" },
+      { title: "2026 Mazda3 Sedan", model: "Mazda3 Sedan", file: "mazda/mazda3-sedan.png" },
+      { title: "2026 Mazda CX-90 Plug-In Hybrid", model: "CX-90 PHEV", file: "mazda/mazda-cx-90-plug-in-hybrid.png" },
+      { title: "2026 Mazda CX-90", model: "CX-90", file: "mazda/mazda-cx-90.png" },
+      { title: "2026 Mazda CX-30", model: "CX-30", file: "mazda/mazda-cx-30.png" },
+    ],
+  },
+};
+
 function emptySalesForm() {
   return {
     name: "",
@@ -2223,6 +2262,10 @@ export default function App() {
     : [];
   const selectedSpecial = specials.find((item) => item.id === selectedSpecialId) || specials[0] || null;
   const specialFeedSourceMap = Object.fromEntries(SPECIAL_FEED_SOURCES.map((item) => [item.key, item]));
+  const activeStaticSpecialGroup = SPECIAL_STATIC_GRAPHICS[staticSpecialBrand] || SPECIAL_STATIC_GRAPHICS.kia;
+  const staticSpecialCounts = Object.fromEntries(
+    Object.entries(SPECIAL_STATIC_GRAPHICS).map(([key, group]) => [key, group.items.length])
+  );
   const populatedSpecialVehicleSections = specialVehicleSections.filter((section) => (section.entries || []).length);
   const specialSectionsByKey = Object.fromEntries(specialVehicleSections.map((section) => [section.key, section]));
   const readyGeneratedSpecialTiles = generatedSpecialTiles.filter((tile) => tile.status === "ready" && tile.image_url);
@@ -10681,11 +10724,10 @@ export default function App() {
         {tab === "specials" ? (
           <section className="stack">
             <div className="panel specials-panel-header">
-              <span className="eyebrow">Live specials</span>
-              <h2>{specialMonthStamp(latestSpecialImportTs)} Kia, Mazda, and Auto Outlet picks</h2>
+              <span className="eyebrow">Website feed preview</span>
+              <h2>{specialMonthStamp(latestSpecialImportTs)} imported specials feed</h2>
               <p className="admin-note">
-                This page now stays focused on the live monthly Kia and Mazda offer tiles plus the top used picks from Mission Auto
-                Outlet. The old manual graphic library stays on the admin side only.
+                This section reflects the website feed cache and can lag or miss approved creative. Use the static MoM graphics below for customer-ready downloads.
               </p>
               <div className="specials-panel-header__chips">
                 <span>{specialMonthStamp(latestSpecialImportTs)} stamp</span>
@@ -10799,100 +10841,156 @@ export default function App() {
 
         {tab === "specials" ? (
           <section className="stack">
-            <div className="panel generated-specials-section">
-              <div className="generated-specials-section__header">
+            <div className="panel static-specials-section">
+              <div className="static-specials-section__header">
                 <div>
-                  <span className="eyebrow">Customer media</span>
-                  <h3>Ready-to-send square specials and Kia video ad</h3>
+                  <span className="eyebrow">Static MoM graphics</span>
+                  <h3>Download-ready customer tiles</h3>
                   <p className="admin-note">
-                    Generated from the current live specials context for customer follow-up. Video generation starts with Kia first.
+                    These are Kate's finished static graphics from the uploaded package, separated by store. Use these when the live feed copy is stale or does not match the approved creative.
                   </p>
                 </div>
-                <div className="generated-specials-section__meta">
-                  {latestGeneratedSpecialTs ? <span>Generated {dateTimeLabel(latestGeneratedSpecialTs)}</span> : <span>Not generated yet</span>}
-                  <span>{readyGeneratedSpecialTiles.length} ready</span>
-                  {generatedSpecialTileFailures.length ? <span>{generatedSpecialTileFailures.length} failed</span> : null}
-                  {adminToken ? (
-                    <button
-                      type="button"
-                      onClick={refreshCustomerSpecialTiles}
-                      disabled={busy === "specials-generated-refresh" || Boolean(busy)}
-                    >
-                      {busy === "specials-generated-refresh" ? "Generating Images..." : "Refresh Image Tiles"}
-                    </button>
-                  ) : null}
+                <div className="static-specials-section__actions">
+                  <a href={activeStaticSpecialGroup.zipUrl} download>
+                    Download {activeStaticSpecialGroup.label} ZIP
+                  </a>
+                  <span>{activeStaticSpecialGroup.items.length} graphics</span>
                 </div>
               </div>
-              {!generatedSpecialTilesConfigured ? (
-                <div className="empty">OpenAI image generation is not configured yet. Add `OPENAI_API_KEY` on the backend to generate customer tiles.</div>
-              ) : readyGeneratedSpecialTiles.length ? (
-                <div className="generated-specials-grid">
-                  {readyGeneratedSpecialTiles.map((tile) => (
+
+              <div className="static-specials-tabs" role="tablist" aria-label="Static specials graphics">
+                {Object.entries(SPECIAL_STATIC_GRAPHICS).map(([key, group]) => (
+                  <button
+                    key={`static-special-tab-${key}`}
+                    type="button"
+                    className={staticSpecialBrand === key ? "is-active" : ""}
+                    onClick={() => setStaticSpecialBrand(key)}
+                  >
+                    {group.label}
+                    <span>{staticSpecialCounts[key]}</span>
+                  </button>
+                ))}
+              </div>
+
+              <div className="static-specials-grid">
+                {activeStaticSpecialGroup.items.map((item) => {
+                  const graphicUrl = `/special-graphics/${item.file}`;
+                  return (
                     <a
-                      key={`generated-special-${tile.tile_key}`}
-                      className="generated-special-card"
-                      href={assetUrl(tile.image_url)}
+                      key={`static-special-${staticSpecialBrand}-${item.file}`}
+                      className="static-special-card"
+                      href={graphicUrl}
                       target="_blank"
                       rel="noreferrer"
+                      download
                     >
-                      <img src={assetUrl(tile.image_url)} alt={tile.title || tile.model_name} />
-                      <div className="generated-special-card__copy">
-                        <span>{tile.store}</span>
-                        <strong>{tile.model_name}</strong>
-                        <small>{tile.subtitle || "1080 x 1080 customer tile"}</small>
+                      <img src={graphicUrl} alt={item.title} />
+                      <div className="static-special-card__copy">
+                        <span>{activeStaticSpecialGroup.label}</span>
+                        <strong>{item.title}</strong>
+                        <small>Click to download PNG</small>
                       </div>
+                      <div className="static-special-card__download">Download</div>
                     </a>
-                  ))}
-                </div>
-              ) : (
-                <div className="empty">
-                  {adminToken ? "No generated customer tiles yet. Use Refresh Image Tiles." : "Generated customer tiles are not ready yet."}
-                </div>
-              )}
-
-              <div className="generated-video-panel">
-                <div className="generated-video-panel__thumb">
-                  {kiaGeneratedVideo?.thumbnail_url ? (
-                    <img src={assetUrl(kiaGeneratedVideo.thumbnail_url)} alt={kiaGeneratedVideo.title || "Kia video ad thumbnail"} />
-                  ) : (
-                    <div className="generated-video-panel__placeholder">Kia Video</div>
-                  )}
-                </div>
-                <div className="generated-video-panel__copy">
-                  <span className="eyebrow">30 second ad workflow</span>
-                  <h4>{kiaGeneratedVideo?.title || "Bert Ogden Mission Kia 30 Second Ad"}</h4>
-                  <p>
-                    {kiaGeneratedVideo?.description ||
-                      "Autonomous Kia video job: refresh Kia source data, generate three Sora video segments, download thumbnails and clips, then assemble a customer-shareable ad when ffmpeg is available."}
-                  </p>
-                  <div className="generated-video-panel__chips">
-                    <span>{generatedSpecialVideosConfigured ? "Sora configured" : "Sora not configured"}</span>
-                    <span>{kiaGeneratedVideo?.status || "not started"}</span>
-                    {kiaGeneratedVideo?.progress ? <span>{kiaGeneratedVideo.progress}%</span> : null}
-                    {kiaGeneratedVideo?.clip_urls?.length ? <span>{kiaGeneratedVideo.clip_urls.length} clips</span> : null}
-                  </div>
-                  {kiaGeneratedVideo?.error_text ? <small className="generated-video-panel__error">{kiaGeneratedVideo.error_text}</small> : null}
-                  <div className="generated-video-panel__actions">
-                    {kiaGeneratedVideoReady ? (
-                      <a href={assetUrl(kiaGeneratedVideo.view_url || kiaGeneratedVideo.video_url)} target="_blank" rel="noreferrer">
-                        View Video
-                      </a>
-                    ) : null}
-                    {adminToken ? (
-                      <button
-                        type="button"
-                        onClick={refreshKiaVideoAd}
-                        disabled={busy === "specials-kia-video-refresh" || Boolean(busy)}
-                      >
-                        {busy === "specials-kia-video-refresh" ? "Starting Video..." : "Refresh Kia Video Ad"}
-                      </button>
-                    ) : null}
-                  </div>
-                </div>
+                  );
+                })}
               </div>
             </div>
+
+            {adminToken ? (
+              <details className="ai-specials-admin-details">
+                <summary>AI drafts and Kia video workflow</summary>
+                <div className="panel generated-specials-section">
+                  <div className="generated-specials-section__header">
+                    <div>
+                      <span className="eyebrow">Admin-only drafts</span>
+                      <h3>AI-generated customer media</h3>
+                      <p className="admin-note">
+                        This is separate from the approved static graphics above. It depends on backend OpenAI API configuration.
+                      </p>
+                    </div>
+                    <div className="generated-specials-section__meta">
+                      {latestGeneratedSpecialTs ? <span>Generated {dateTimeLabel(latestGeneratedSpecialTs)}</span> : <span>Not generated yet</span>}
+                      <span>{readyGeneratedSpecialTiles.length} ready</span>
+                      {generatedSpecialTileFailures.length ? <span>{generatedSpecialTileFailures.length} failed</span> : null}
+                      <button
+                        type="button"
+                        onClick={refreshCustomerSpecialTiles}
+                        disabled={busy === "specials-generated-refresh" || Boolean(busy)}
+                      >
+                        {busy === "specials-generated-refresh" ? "Generating Images..." : "Refresh Image Tiles"}
+                      </button>
+                    </div>
+                  </div>
+                  {!generatedSpecialTilesConfigured ? (
+                    <div className="empty">OpenAI image generation is not configured yet. Add OPENAI_API_KEY on the backend to generate customer tiles.</div>
+                  ) : readyGeneratedSpecialTiles.length ? (
+                    <div className="generated-specials-grid">
+                      {readyGeneratedSpecialTiles.map((tile) => (
+                        <a
+                          key={`generated-special-${tile.tile_key}`}
+                          className="generated-special-card"
+                          href={assetUrl(tile.image_url)}
+                          target="_blank"
+                          rel="noreferrer"
+                        >
+                          <img src={assetUrl(tile.image_url)} alt={tile.title || tile.model_name} />
+                          <div className="generated-special-card__copy">
+                            <span>{tile.store}</span>
+                            <strong>{tile.model_name}</strong>
+                            <small>{tile.subtitle || "1080 x 1080 customer tile"}</small>
+                          </div>
+                        </a>
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="empty">No generated customer tiles yet.</div>
+                  )}
+
+                  <div className="generated-video-panel">
+                    <div className="generated-video-panel__thumb">
+                      {kiaGeneratedVideo?.thumbnail_url ? (
+                        <img src={assetUrl(kiaGeneratedVideo.thumbnail_url)} alt={kiaGeneratedVideo.title || "Kia video ad thumbnail"} />
+                      ) : (
+                        <div className="generated-video-panel__placeholder">Kia Video</div>
+                      )}
+                    </div>
+                    <div className="generated-video-panel__copy">
+                      <span className="eyebrow">30 second ad workflow</span>
+                      <h4>{kiaGeneratedVideo?.title || "Bert Ogden Mission Kia 30 Second Ad"}</h4>
+                      <p>
+                        {kiaGeneratedVideo?.description ||
+                          "Autonomous Kia video job: refresh Kia source data, generate three Sora video segments, download thumbnails and clips, then assemble a customer-shareable ad when ffmpeg is available."}
+                      </p>
+                      <div className="generated-video-panel__chips">
+                        <span>{generatedSpecialVideosConfigured ? "Sora configured" : "Sora not configured"}</span>
+                        <span>{kiaGeneratedVideo?.status || "not started"}</span>
+                        {kiaGeneratedVideo?.progress ? <span>{kiaGeneratedVideo.progress}%</span> : null}
+                        {kiaGeneratedVideo?.clip_urls?.length ? <span>{kiaGeneratedVideo.clip_urls.length} clips</span> : null}
+                      </div>
+                      {kiaGeneratedVideo?.error_text ? <small className="generated-video-panel__error">{kiaGeneratedVideo.error_text}</small> : null}
+                      <div className="generated-video-panel__actions">
+                        {kiaGeneratedVideoReady ? (
+                          <a href={assetUrl(kiaGeneratedVideo.view_url || kiaGeneratedVideo.video_url)} target="_blank" rel="noreferrer">
+                            View Video
+                          </a>
+                        ) : null}
+                        <button
+                          type="button"
+                          onClick={refreshKiaVideoAd}
+                          disabled={busy === "specials-kia-video-refresh" || Boolean(busy)}
+                        >
+                          {busy === "specials-kia-video-refresh" ? "Starting Video..." : "Refresh Kia Video Ad"}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </details>
+            ) : null}
           </section>
         ) : null}
+
 
         {tab === "crmCleanup" ? <CrmCleanupSection /> : null}
 

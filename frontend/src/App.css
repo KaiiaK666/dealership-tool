@@ -4659,6 +4659,7 @@ button.days-off-day:hover:not(:disabled) {
 
 .special-feed-section,
 .special-feed-admin-panel,
+.static-specials-section,
 .generated-specials-section {
   display: grid;
   gap: 16px;
@@ -4666,6 +4667,7 @@ button.days-off-day:hover:not(:disabled) {
 
 .special-feed-section__header,
 .special-feed-admin-panel__header,
+.static-specials-section__header,
 .generated-specials-section__header {
   display: flex;
   gap: 16px;
@@ -4674,6 +4676,7 @@ button.days-off-day:hover:not(:disabled) {
 }
 
 .special-feed-section__meta,
+.static-specials-section__actions,
 .generated-specials-section__meta {
   display: grid;
   gap: 8px;
@@ -4786,6 +4789,146 @@ button.days-off-day:hover:not(:disabled) {
   min-height: 30px;
   background: rgba(245, 249, 255, 0.92);
 }
+
+.static-specials-section {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.96), rgba(245, 248, 252, 0.96)),
+    var(--panel);
+}
+
+.static-specials-section__actions a,
+.static-special-card__download {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 40px;
+  padding: 0 14px;
+  border-radius: 999px;
+  background: #17202d;
+  color: #fff;
+  font-weight: 800;
+  text-decoration: none;
+}
+
+.static-specials-section__actions span {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 32px;
+  padding: 0 12px;
+  border-radius: 999px;
+  border: 1px solid rgba(31, 37, 43, 0.08);
+  background: rgba(255, 255, 255, 0.86);
+  color: #42506a;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.72rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.static-specials-tabs {
+  display: inline-flex;
+  width: fit-content;
+  max-width: 100%;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid rgba(31, 37, 43, 0.08);
+  border-radius: 999px;
+  background: rgba(230, 235, 243, 0.88);
+}
+
+.static-specials-tabs button {
+  min-height: 38px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 999px;
+  background: transparent;
+  color: #42506a;
+  font-weight: 900;
+  box-shadow: none;
+}
+
+.static-specials-tabs button.is-active {
+  background: #17202d;
+  color: #fff;
+}
+
+.static-specials-tabs button span {
+  margin-left: 8px;
+  opacity: 0.72;
+}
+
+.static-specials-grid {
+  display: grid;
+  gap: 16px;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.static-special-card {
+  position: relative;
+  display: grid;
+  overflow: hidden;
+  color: var(--ink);
+  text-decoration: none;
+  border-radius: 8px;
+  border: 1px solid rgba(31, 37, 43, 0.08);
+  background: #fff;
+  box-shadow: var(--card-shadow);
+}
+
+.static-special-card img {
+  width: 100%;
+  aspect-ratio: 1;
+  object-fit: cover;
+  display: block;
+  background: #e7ecf4;
+}
+
+.static-special-card__copy {
+  display: grid;
+  gap: 5px;
+  padding: 12px;
+}
+
+.static-special-card__copy span {
+  color: #697589;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.static-special-card__copy strong {
+  line-height: 1.2;
+}
+
+.static-special-card__copy small {
+  color: var(--muted);
+}
+
+.static-special-card__download {
+  position: absolute;
+  right: 10px;
+  top: 10px;
+  min-height: 34px;
+  padding: 0 11px;
+  background: rgba(23, 32, 45, 0.9);
+  font-size: 0.78rem;
+}
+
+.ai-specials-admin-details {
+  display: grid;
+  gap: 12px;
+}
+
+.ai-specials-admin-details summary {
+  width: fit-content;
+  cursor: pointer;
+  color: #42506a;
+  font-weight: 900;
+}
+
 
 .generated-specials-section__meta span {
   display: inline-flex;
@@ -6181,13 +6324,23 @@ button.special-card:hover:not(:disabled) {
 
   .special-feed-section__header,
   .special-feed-admin-panel__header,
+  .static-specials-section__header,
   .generated-specials-section__header {
     flex-direction: column;
   }
 
   .special-feed-section__meta,
+  .static-specials-section__actions,
   .generated-specials-section__meta {
     justify-items: start;
+  }
+
+  .static-specials-tabs {
+    width: 100%;
+  }
+
+  .static-specials-tabs button {
+    flex: 1;
   }
 
   .generated-video-panel {
