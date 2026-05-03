@@ -2401,17 +2401,9 @@ export default function App() {
     ? String(freshUpAssignedSalesperson.name || "").trim().split(/\s+/)[0] || "your salesperson"
     : "your salesperson";
   const freshUpSalespersonContactLabel = freshUpAssignedSalesperson
-    ? `Add ${freshUpAssignedSalesperson.name} to Contacts`
-    : "Add salesperson as contact";
+    ? `Save ${freshUpSalespersonFirstName}'s Contact`
+    : "Save Contact";
   const freshUpGiftEnabled = freshUpLinksConfig.gift_enabled !== false;
-  const freshUpCardIntroHeading = freshUpGiftEnabled ? "Get your gift" : "Connect with your salesperson";
-  const freshUpCardIntroCopy = freshUpAssignedSalesperson
-    ? freshUpGiftEnabled
-      ? `Enter your name and mobile number. We will text this month's gift code and let ${freshUpSalespersonFirstName} know you are here.`
-      : `Enter your name and mobile number. ${freshUpSalespersonFirstName} will know you are here and follow up with you.`
-    : freshUpGiftEnabled
-      ? "Enter your name and mobile number. We will text this month's gift code and connect you with the right salesperson."
-      : "Enter your name and mobile number. We will connect you with the right salesperson.";
   const freshUpCardSubmitLabel = freshUpGiftEnabled ? "Get Your Gift" : "Send My Info";
   const freshUpStatusTone = /skipped|failed/i.test(freshUpStatus) ? "warning" : "success";
   const freshUpConversionRate = freshUpAnalytics.page_views
@@ -9851,7 +9843,7 @@ export default function App() {
               >
                 {freshUpCardMode ? (
                   <div className="freshup-card-intro">
-                    <div className="freshup-card-intro__top">
+                    <div className="freshup-card-intro__top freshup-card-intro__top--simple">
                       <div className="freshup-brand-stack">
                         <div className="freshup-brand-avatar">
                           <img src="/logo-facebook.png" alt="Bert Ogden heart logo" />
@@ -9870,14 +9862,12 @@ export default function App() {
                         </div>
                       </div>
                       <div className="freshup-card-intro__copy">
-                        <span className="eyebrow">{freshUpGiftEnabled ? "Monthly Gift" : "Salesperson Check-In"}</span>
-                        <h2>{freshUpCardIntroHeading}</h2>
-                        <p>{freshUpCardIntroCopy}</p>
-                        <div className="freshup-card-intro__badges" aria-label={freshUpGiftEnabled ? "Gift text details" : "Contact details"}>
-                          <span>{freshUpGiftEnabled ? "Gift code by text" : "Fast contact card"}</span>
-                          <span>No app needed</span>
-                          <span>{freshUpSalespersonFirstName} gets your info</span>
-                        </div>
+                        <span className="eyebrow">Digital Business Card</span>
+                        <h2>{freshUpAssignedSalesperson?.name || "Bert Ogden Mission Sales"}</h2>
+                        <p>
+                          {freshUpPrimaryStore?.display_name || "Bert Ogden Mission"}
+                          {freshUpSalespersonPhoneText ? ` - ${freshUpSalespersonPhoneText}` : ""}
+                        </p>
                       </div>
                     </div>
                     <div
@@ -9886,34 +9876,15 @@ export default function App() {
                       }`}
                     >
                       <div className="freshup-customer-contact-card__identity">
-                        <span>Your sales contact</span>
-                        <strong>{freshUpAssignedSalesperson?.name || "Bert Ogden Mission Sales"}</strong>
-                        <small>
-                          {freshUpPrimaryStore?.display_name || "Bert Ogden Mission"}
-                          {freshUpSalespersonPhoneText ? ` - ${freshUpSalespersonPhoneText}` : ""}
-                        </small>
+                        <span>Save before you leave</span>
+                        <strong>{freshUpSalespersonFirstName}'s contact card</strong>
+                        <small>Tap save so you have the direct salesperson info on your phone.</small>
                       </div>
                       {freshUpSalespersonPhoneHref || freshUpSalespersonContactHref ? (
                         <div className="freshup-agent-actions freshup-agent-actions--compact">
-                          {freshUpSalespersonPhoneHref ? (
-                            <a
-                              className="freshup-link-btn freshup-link-btn--blue"
-                              href={freshUpSalespersonPhoneHref}
-                              onClick={() =>
-                                trackFreshUpEvent({
-                                  eventType: "link_click",
-                                  linkType: "call",
-                                  targetUrl: freshUpSalespersonPhoneHref,
-                                  storeDealership: freshUpAssignedSalesperson?.dealership || freshUpPrimaryStore?.dealership || "",
-                                })
-                              }
-                            >
-                              Call {freshUpSalespersonFirstName}
-                            </a>
-                          ) : null}
                           {freshUpSalespersonContactHref ? (
                             <a
-                              className="freshup-link-btn freshup-link-btn--outline"
+                              className="freshup-link-btn freshup-link-btn--contact-save"
                               href={freshUpSalespersonContactHref}
                               download={freshUpSalespersonContactFileName}
                               onClick={() =>
@@ -9926,6 +9897,22 @@ export default function App() {
                               }
                             >
                               {freshUpSalespersonContactLabel}
+                            </a>
+                          ) : null}
+                          {freshUpSalespersonPhoneHref ? (
+                            <a
+                              className="freshup-link-btn freshup-link-btn--outline"
+                              href={freshUpSalespersonPhoneHref}
+                              onClick={() =>
+                                trackFreshUpEvent({
+                                  eventType: "link_click",
+                                  linkType: "call",
+                                  targetUrl: freshUpSalespersonPhoneHref,
+                                  storeDealership: freshUpAssignedSalesperson?.dealership || freshUpPrimaryStore?.dealership || "",
+                                })
+                              }
+                            >
+                              Call {freshUpSalespersonFirstName}
                             </a>
                           ) : null}
                         </div>
@@ -9947,13 +9934,9 @@ export default function App() {
                 ) : (
                   <div className="freshup-capture__header freshup-capture__header--compact">
                     <div className="freshup-capture__header-copy">
-                      <span className="eyebrow">{freshUpGiftEnabled ? "Fast Gift Text" : "Fast Sales Contact"}</span>
-                      <h3>{freshUpGiftEnabled ? "Where should we text your code?" : "Where should your salesperson reach you?"}</h3>
-                      <small>
-                        {freshUpGiftEnabled
-                          ? "Use a mobile number so the gift code reaches you while you are on the lot."
-                          : "Use a mobile number so your salesperson can follow up while you are on the lot."}
-                      </small>
+                      <span className="eyebrow">{freshUpGiftEnabled ? "Get Your Gift" : "Quick Contact"}</span>
+                      <h3>{freshUpGiftEnabled ? "Text me the gift code" : "Send my info"}</h3>
+                      <small>Name and mobile number. That is it.</small>
                     </div>
                   </div>
                 )}
@@ -9962,26 +9945,21 @@ export default function App() {
                   {freshUpCardMode ? (
                     <>
                       <div className="freshup-gift-promise">
-                        <span>{freshUpGiftEnabled ? "This month's offer" : "Quick handoff"}</span>
-                        <strong>
-                          {freshUpGiftEnabled
-                            ? "Tap once and we will text the gift code to your phone."
-                            : "Tap once and your salesperson gets your contact info."}
-                        </strong>
-                        <small>No app download. No long form. Just your name and mobile number.</small>
+                        <span>{freshUpGiftEnabled ? "Gift text" : "Salesperson handoff"}</span>
+                        <strong>{freshUpGiftEnabled ? "We will text the code to your phone." : "Your salesperson will get your info."}</strong>
                       </div>
                       <label>
-                        <span>Your Name</span>
+                        <span>Name</span>
                         <input
                           value={freshUpForm.customerName}
                           onChange={(event) => updateFreshUpFormField("customerName", event.target.value)}
-                          placeholder="Enter your name"
+                          placeholder="Your name"
                           autoComplete="name"
                           required
                         />
                       </label>
                       <label>
-                        <span>Best Phone Number</span>
+                        <span>Mobile number</span>
                         <input
                           type="tel"
                           inputMode="tel"
@@ -9992,16 +9970,9 @@ export default function App() {
                           required
                         />
                         <small className="freshup-field-hint">
-                          {freshUpGiftEnabled
-                            ? "We will text the gift code to this 10-digit mobile number."
-                            : "Use a 10-digit mobile number for the fastest follow-up."}
+                          {freshUpGiftEnabled ? "Gift code goes here." : "Your salesperson will use this number."}
                         </small>
                       </label>
-                      <div className="freshup-lockbox freshup-lockbox--customer">
-                        <span>Connected with</span>
-                        <strong>{freshUpAssignedSalesperson?.name || "Your Mission sales team"}</strong>
-                        <small>{freshUpAssignedSalesperson?.dealership || freshUpPrimaryStore?.display_name || "Bert Ogden Mission"}</small>
-                      </div>
                     </>
                   ) : (
                     <>
@@ -10080,8 +10051,8 @@ export default function App() {
                   {freshUpCardMode ? (
                     <small className="freshup-consent">
                       {freshUpGiftEnabled
-                        ? "By tapping Get Your Gift, you agree to receive a one-time gift code text and dealership follow-up."
-                        : "By tapping Send My Info, you agree to dealership follow-up about your visit."}
+                        ? "You agree to a one-time gift text and dealership follow-up."
+                        : "You agree to dealership follow-up about your visit."}
                     </small>
                   ) : null}
                   <div className="freshup-actions">
@@ -10089,7 +10060,7 @@ export default function App() {
                       type="submit"
                       disabled={busy === "freshup-submit" || !freshUpAssignedSalesperson || !freshUpCustomerNameReady || !freshUpCustomerPhoneReady}
                     >
-                      {busy === "freshup-submit" ? (freshUpCardMode ? "Sending Text..." : "Saving...") : freshUpCardMode ? freshUpCardSubmitLabel : "Log Freshup"}
+                      {busy === "freshup-submit" ? (freshUpCardMode ? "Sending..." : "Saving...") : freshUpCardMode ? freshUpCardSubmitLabel : "Log Freshup"}
                     </button>
                     {!freshUpCardMode ? (
                       <button type="button" className="secondary" onClick={copyFreshUpSummary}>
@@ -10106,11 +10077,11 @@ export default function App() {
               <div id={freshUpCardMode ? "freshup-links" : undefined} className={`panel freshup-nfc ${freshUpCardMode ? "freshup-nfc--card" : ""}`}>
                 <div className="freshup-nfc__header">
                   <div className="freshup-nfc__header-copy">
-                    <span className="eyebrow">{freshUpCardMode ? "Helpful Links" : "NFC Card Side"}</span>
-                    <h3>{freshUpCardMode ? "Shop, qualify, or submit credit" : "Program one link per salesperson"}</h3>
+                    <span className="eyebrow">{freshUpCardMode ? "Links" : "NFC Card Side"}</span>
+                    <h3>{freshUpCardMode ? "Helpful links" : "Program one link per salesperson"}</h3>
                     <p>
                       {freshUpCardMode
-                        ? "Use the links below while you shop. Your salesperson stays attached to this visit."
+                        ? "Applications, inventory, maps, and social links."
                         : "Put this link on the NFC business card. When a customer taps, it opens a customer-facing landing page with contact capture at the top and the right links underneath."}
                     </p>
                   </div>
@@ -10172,7 +10143,7 @@ export default function App() {
                             <div>
                               <span className="eyebrow">{isPrimary ? "Primary Store" : brand.badge}</span>
                               <h4>{store.display_name}</h4>
-                              <p>Quick qualify, credit submission, inventory, and store links.</p>
+                              <p>Quick links for this store.</p>
                             </div>
                           </div>
                         </div>
