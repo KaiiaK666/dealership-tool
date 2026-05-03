@@ -6998,6 +6998,35 @@ button.special-card:hover:not(:disabled) {
   padding: 0 20px 20px;
 }
 
+.freshup-toggle-card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 12px;
+  padding: 14px 16px;
+  border: 1px solid rgba(210, 198, 182, 0.78);
+  border-radius: 18px;
+  background: rgba(247, 241, 232, 0.78);
+}
+
+.freshup-toggle-card input {
+  width: 22px;
+  height: 22px;
+  accent-color: var(--accent);
+}
+
+.freshup-toggle-card span,
+.freshup-toggle-card strong,
+.freshup-toggle-card small {
+  display: block;
+}
+
+.freshup-toggle-card small {
+  margin-top: 4px;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
 .freshup-admin-summary,
 .freshup-admin-summary__brand {
   display: flex;

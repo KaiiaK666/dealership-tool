@@ -592,6 +592,7 @@ class FreshUpLinksConfigOut(BaseModel):
     form_title: str
     form_subtitle: str
     submit_label: str
+    gift_enabled: bool = True
     stores: List[FreshUpLinkStoreOut]
 
 
@@ -2341,6 +2342,7 @@ def default_freshup_links_config() -> FreshUpLinksConfigOut:
         form_title="Send your contact info",
         form_subtitle="Your salesperson stays attached to this form.",
         submit_label="Send Info to Sales Agent",
+        gift_enabled=True,
         stores=[
             FreshUpLinkStoreOut(
                 dealership="Kia",
@@ -2415,6 +2417,7 @@ def update_freshup_links_config(payload: FreshUpLinksConfigIn) -> FreshUpLinksCo
         form_title=normalize_short_text(payload.form_title, "form_title", max_len=160),
         form_subtitle=normalize_short_text(payload.form_subtitle, "form_subtitle", max_len=320),
         submit_label=normalize_short_text(payload.submit_label, "submit_label", max_len=80),
+        gift_enabled=bool(payload.gift_enabled),
         stores=[
             FreshUpLinkStoreOut(
                 dealership=normalize_dealership(store.dealership),
@@ -6780,10 +6783,11 @@ def fetch_bdc_log(
 def create_freshup_log(payload: FreshUpLogCreateIn) -> FreshUpLogOut:
     customer_name = normalize_name(payload.customer_name, "customer_name")
     customer_phone = normalize_short_text(payload.customer_phone, "customer_phone", max_len=40)
+    gift_requested = bool(payload.send_gift_text and fetch_freshup_links_config().gift_enabled)
     if not customer_phone:
         raise HTTPException(status_code=400, detail="customer_phone is required")
     customer_phone_sms = normalize_sms_phone(customer_phone) or ""
-    if payload.send_gift_text and not customer_phone_sms:
+    if gift_requested and not customer_phone_sms:
         raise HTTPException(status_code=400, detail="phone number must be a valid 10 digit mobile number")
     source = normalize_short_text(payload.source or "Desk", "source", max_len=40) or "Desk"
 
@@ -6797,10 +6801,10 @@ def create_freshup_log(payload: FreshUpLogCreateIn) -> FreshUpLogOut:
         salesperson_id = int(row.get("id") or 0)
         salesperson_name = str(row.get("name") or "")
         salesperson_dealership = str(row.get("dealership") or "")
-    gift_code = current_freshup_gift_code() if payload.send_gift_text else ""
+    gift_code = current_freshup_gift_code() if gift_requested else ""
     created_ts = time.time()
 
-    if payload.send_gift_text and customer_phone_sms:
+    if gift_requested and customer_phone_sms:
         duplicate_cutoff_ts = created_ts - FRESHUP_GIFT_DUPLICATE_WINDOW_SECONDS
         duplicate_clauses = [
             "customer_phone_sms = ?",
@@ -6852,7 +6856,7 @@ def create_freshup_log(payload: FreshUpLogCreateIn) -> FreshUpLogOut:
     row = db_query_one("SELECT * FROM freshup_log WHERE id = ?", (created_id,))
     if not row:
         raise HTTPException(status_code=500, detail="failed to create freshup log")
-    if payload.send_gift_text:
+    if gift_requested:
         gift_sms_sent, gift_sms_status = deliver_freshup_gift_text(customer_phone, gift_code)
         db_execute(
             "UPDATE freshup_log SET gift_sms_sent = ?, gift_sms_status = ? WHERE id = ?",
